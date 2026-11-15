@@ -2,6 +2,7 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.example.util.MessageFormatter
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -16,6 +17,12 @@ class ExampleRobolectricTest {
   fun `read string from context`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
-    assertEquals("My Application", appName)
+    assertEquals("NidoFamiliar", appName)
+  }
+
+  @Test
+  fun `message formatter strips markdown delimiters`() {
+    val formatted = MessageFormatter.formatRichText("*Hola* _familia_ ~ayer~")
+    assertEquals("Hola familia ayer", formatted.text)
   }
 }

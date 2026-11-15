@@ -1,0 +1,54 @@
+name: Compilar APK Android
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Configurar Android SDK y licencias
+        uses: android-actions/setup-android@v3
+
+      - name: Aceptar licencias Android SDK
+        run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+      - name: Restaurar debug.keystore para firma debug
+        run: |
+          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+
+      - name: Configurar Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Ejecutar pruebas unitarias
+        run: gradle :app:testDebugUnitTest
+
+      - name: Compilar APK Debug
+        run: gradle :app:assembleDebug
+
+      - name: Subir APK compilado como Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NidoFamiliar-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
