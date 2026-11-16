@@ -20,16 +20,22 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -95,6 +101,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -162,9 +169,11 @@ fun ChatRoomScreen(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val isImeVisible = WindowInsets.isImeVisible
 
     val membersMap = remember(allMembers) { allMembers.associateBy { it.id } }
     val visibleMessages = remember(messages, activeMember.id) {
@@ -236,6 +245,15 @@ fun ChatRoomScreen(
         }
     }
 
+    LaunchedEffect(isImeVisible) {
+        if (isImeVisible) {
+            showEmojiDrawer = false
+            if (visibleMessages.isNotEmpty() && !isSearchOpen) {
+                listState.animateScrollToItem(visibleMessages.lastIndex)
+            }
+        }
+    }
+
     BackHandler(enabled = isMultiSelectMode || isSearchOpen || showEmojiDrawer) {
         when {
             isMultiSelectMode -> selectedIds.clear()
@@ -251,9 +269,18 @@ fun ChatRoomScreen(
     val wallpaperColor = if (LocalDarkTheme.current) ChatWallpaperDark else ChatWallpaperLight
 
     Scaffold(
-        contentWindowInsets = WindowInsets.safeDrawing,
+        contentWindowInsets = WindowInsets.safeDrawing.only(
+            WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+        ),
         containerColor = wallpaperColor,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.windowInsetsPadding(
+                    WindowInsets.navigationBars.union(WindowInsets.ime).only(WindowInsetsSides.Bottom)
+                )
+            )
+        },
         topBar = {
             Column {
                 when {
@@ -503,7 +530,7 @@ fun ChatRoomScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .imePadding(),
+                .consumeWindowInsets(innerPadding),
             contentAlignment = Alignment.TopCenter
         ) {
             Column(modifier = Modifier.fillMaxSize().widthIn(max = 720.dp)) {
@@ -596,9 +623,13 @@ fun ChatRoomScreen(
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     tonalElevation = 3.dp,
-                    modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column {
+                    Column(
+                        modifier = Modifier.windowInsetsPadding(
+                            WindowInsets.navigationBars.union(WindowInsets.ime).only(WindowInsetsSides.Bottom)
+                        )
+                    ) {
                         // Reply / Edit Banner
                         val bannerTarget = editingMessage ?: replyingTo
                         if (bannerTarget != null) {
@@ -737,7 +768,11 @@ fun ChatRoomScreen(
                                 verticalAlignment = Alignment.Bottom
                             ) {
                                 IconButton(
-                                    onClick = { showEmojiDrawer = !showEmojiDrawer },
+                                    onClick = {
+                                        val nextOpen = !showEmojiDrawer
+                                        if (nextOpen) keyboardController?.hide()
+                                        showEmojiDrawer = nextOpen
+                                    },
                                     modifier = Modifier.testTag("toggle_emoji_button")
                                 ) {
                                     Icon(
