@@ -52,6 +52,20 @@ jobs:
           fi
           keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:"
 
+      - name: Preparar google-services.json para Firebase
+        env:
+          FALLBACK_GOOGLE_SERVICES_JSON: '{"project_info":{"project_number":"281741684428","project_id":"studio-5138141273-4196b","storage_bucket":"studio-5138141273-4196b.firebasestorage.app"},"client":[{"client_info":{"mobilesdk_app_id":"1:281741684428:android:652c037d4f543fc0c79c69","android_client_info":{"package_name":"com.aistudio.nidofamiliar.mrxqkp"}},"oauth_client":[{"client_id":"281741684428-be67hemkr92ivthsc353cc7nap09klcd.apps.googleusercontent.com","client_type":1,"android_info":{"package_name":"com.aistudio.nidofamiliar.mrxqkp","certificate_hash":"d4335cc1447f9e42db7256c323abd2d08a2cbdb5"}},{"client_id":"281741684428-qch1q9mbck1l1uf7fnc91gekcna31rdv.apps.googleusercontent.com","client_type":3}],"api_key":[{"current_key":"AIzaSyDSIMqBGkq-eA7lx5APzjjXoksDSlXbIJw"}],"services":{"appinvite_service":{"other_platform_oauth_client":[{"client_id":"281741684428-qch1q9mbck1l1uf7fnc91gekcna31rdv.apps.googleusercontent.com","client_type":3}]}}}],"configuration_version":"1"}'
+        run: |
+          if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
+            printf '%s' "${{ secrets.GOOGLE_SERVICES_JSON }}" > app/google-services.json
+          elif [ ! -s app/google-services.json ]; then
+            printf '%s' "$FALLBACK_GOOGLE_SERVICES_JSON" > app/google-services.json
+          fi
+          if [ ! -s app/google-services.json ]; then
+            echo "::error::No se pudo preparar app/google-services.json."
+            exit 1
+          fi
+
       - name: Configurar Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
         with:
