@@ -66,6 +66,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LightMode
@@ -79,6 +80,7 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.SentimentSatisfied
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -89,6 +91,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -100,6 +103,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -138,16 +142,18 @@ import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.JsonHelpers
 import com.example.data.model.MessageType
 import com.example.data.model.PresenceStatus
+import com.example.ui.components.ChatInfoAndGalleryDialog
 import com.example.ui.components.ChatMessageBubble
+import com.example.ui.components.ChatWallpaperPalette
+import com.example.ui.components.ForwardMessageDialog
 import com.example.ui.components.FullScreenImageDialog
 import com.example.ui.components.ImagePreviewSendDialog
 import com.example.ui.components.LocationPickerDialog
 import com.example.ui.components.MemberAvatar
 import com.example.ui.components.MessageActionsBottomSheet
+import com.example.ui.components.MessageInfoDialog
 import com.example.ui.components.PickerEmojis
 import com.example.ui.components.PollCreatorDialog
-import com.example.ui.theme.ChatWallpaperDark
-import com.example.ui.theme.ChatWallpaperLight
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.LocalDarkTheme
 import com.example.ui.theme.OnlineGreen
@@ -163,6 +169,8 @@ fun ChatRoomScreen(
     chatUi: ChatThreadUi,
     activeMember: FamilyMemberEntity,
     allMembers: List<FamilyMemberEntity>,
+    allChatPreviews: List<ChatThreadUi> = emptyList(),
+    selectedWallpaperKey: String = "default",
     messages: List<ChatMessageEntity>,
     voiceRecording: VoiceRecordingState,
     playingVoiceMessageId: String?,
@@ -176,6 +184,8 @@ fun ChatRoomScreen(
     onSendPoll: (question: String, options: List<String>) -> Unit,
     onVotePoll: (messageId: String, optionId: String) -> Unit,
     onEditMessage: (messageId: String, newText: String) -> Unit,
+    onForwardMessage: (message: ChatMessageEntity, targetChatId: String) -> Unit = { _, _ -> },
+    onSelectWallpaper: (String) -> Unit = {},
     onToggleReaction: (messageId: String, emoji: String) -> Unit,
     onTogglePin: (messageId: String) -> Unit,
     onDeleteForMe: (List<String>) -> Unit,
@@ -208,6 +218,9 @@ fun ChatRoomScreen(
     var replyingTo by remember { mutableStateOf<ChatMessageEntity?>(null) }
     var editingMessage by remember { mutableStateOf<ChatMessageEntity?>(null) }
     var actionTargetMessage by remember { mutableStateOf<ChatMessageEntity?>(null) }
+    var forwardTargetMessage by remember { mutableStateOf<ChatMessageEntity?>(null) }
+    var infoTargetMessage by remember { mutableStateOf<ChatMessageEntity?>(null) }
+    var showChatInfoDialog by remember { mutableStateOf(false) }
 
     var isSearchOpen by remember { mutableStateOf(false) }
     var inChatQuery by remember { mutableStateOf("") }
@@ -255,6 +268,15 @@ fun ChatRoomScreen(
         }
     }
 
+    val isNearBottom by remember(visibleMessages.size) {
+        derivedStateOf {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            visibleMessages.isEmpty() || lastVisible >= visibleMessages.lastIndex - 1
+        }
+    }
+    var unseenWhileScrolledUp by remember { mutableIntStateOf(0) }
+    var lastObservedMsgCount by remember { mutableIntStateOf(0) }
+
     LaunchedEffect(snackbarMessage) {
         if (snackbarMessage != null) {
             snackbarHostState.showSnackbar(snackbarMessage)
@@ -264,7 +286,19 @@ fun ChatRoomScreen(
 
     LaunchedEffect(visibleMessages.size) {
         if (visibleMessages.isNotEmpty() && !isSearchOpen) {
-            listState.animateScrollToItem(visibleMessages.lastIndex)
+            if (lastObservedMsgCount == 0 || isNearBottom) {
+                listState.animateScrollToItem(visibleMessages.lastIndex)
+                unseenWhileScrolledUp = 0
+            } else if (visibleMessages.size > lastObservedMsgCount) {
+                unseenWhileScrolledUp += (visibleMessages.size - lastObservedMsgCount)
+            }
+        }
+        lastObservedMsgCount = visibleMessages.size
+    }
+
+    LaunchedEffect(isNearBottom) {
+        if (isNearBottom) {
+            unseenWhileScrolledUp = 0
         }
     }
 
@@ -289,7 +323,10 @@ fun ChatRoomScreen(
     }
 
     val pinnedMsg = chatUi.chat.pinnedMessageId?.let { messageMap[it] }
-    val wallpaperColor = if (LocalDarkTheme.current) ChatWallpaperDark else ChatWallpaperLight
+    val isDark = LocalDarkTheme.current
+    val wallpaperColor = remember(selectedWallpaperKey, isDark) {
+        ChatWallpaperPalette.resolveColor(selectedWallpaperKey, isDark)
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing.only(
@@ -408,10 +445,18 @@ fun ChatRoomScreen(
                     else -> {
                         TopAppBar(
                             title = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { showChatInfoDialog = true }
+                                        .padding(end = 6.dp)
+                                        .testTag("chat_header_info_button")
+                                ) {
                                     MemberAvatar(
                                         emoji = chatUi.displayEmoji,
                                         colorHex = chatUi.displayColorHex,
+                                        photoData = chatUi.displayPhotoData,
                                         size = 40.dp,
                                         isOnline = chatUi.isOnline,
                                         showOnlineDot = true
@@ -498,6 +543,17 @@ fun ChatRoomScreen(
                                             modifier = Modifier.testTag("chat_menu_switch_profile")
                                         )
                                         HorizontalDivider()
+                                        DropdownMenuItem(
+                                            text = { Text("Info, fotos y fondo") },
+                                            leadingIcon = {
+                                                Icon(Icons.Filled.Info, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                showHeaderMenu = false
+                                                showChatInfoDialog = true
+                                            },
+                                            modifier = Modifier.testTag("chat_menu_info_gallery")
+                                        )
                                         DropdownMenuItem(
                                             text = { Text("Buscar mensajes") },
                                             leadingIcon = {
@@ -602,43 +658,83 @@ fun ChatRoomScreen(
                     }
                 }
 
-                // Messages List
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    contentPadding = PaddingValues(vertical = 10.dp)
-                ) {
-                    items(visibleMessages, key = { it.id }) { msg ->
-                        val sender = membersMap[msg.senderId]
-                        val repliedMsg = msg.replyToMessageId?.let { messageMap[it] }
-                        val repliedSenderName = repliedMsg?.senderId?.let { membersMap[it]?.name }
-                        ChatMessageBubble(
-                            message = msg,
-                            isMine = msg.senderId == activeMember.id,
-                            isGroupChat = chatUi.chat.type == ChatType.GROUP,
-                            sender = sender,
-                            repliedMessage = repliedMsg,
-                            repliedSenderName = repliedSenderName,
-                            activeMemberId = activeMember.id,
-                            isSelected = selectedIds.contains(msg.id),
-                            isMultiSelectMode = isMultiSelectMode,
-                            isPlayingVoice = playingVoiceMessageId == msg.id,
-                            voicePlaybackProgress = if (playingVoiceMessageId == msg.id) playingVoiceProgress else 0f,
-                            searchQuery = inChatQuery,
-                            onToggleSelect = {
-                                if (selectedIds.contains(msg.id)) selectedIds.remove(msg.id)
-                                else selectedIds.add(msg.id)
-                            },
-                            onLongPress = { actionTargetMessage = msg },
-                            onReplyClick = { replyId ->
-                                val idx = visibleMessages.indexOfFirst { it.id == replyId }
-                                if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) }
-                            },
-                            onImageClick = { uri -> viewerImageUri = uri },
-                            onToggleVoicePlay = { onToggleVoicePlay(msg.id) },
-                            onVotePoll = { optId -> onVotePoll(msg.id, optId) },
-                            onToggleReaction = { emoji -> onToggleReaction(msg.id, emoji) }
-                        )
+                // Messages List + Floating Scroll-to-Bottom Button
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 10.dp)
+                    ) {
+                        items(visibleMessages, key = { it.id }) { msg ->
+                            val sender = membersMap[msg.senderId]
+                            val repliedMsg = msg.replyToMessageId?.let { messageMap[it] }
+                            val repliedSenderName = repliedMsg?.senderId?.let { membersMap[it]?.name }
+                            ChatMessageBubble(
+                                message = msg,
+                                isMine = msg.senderId == activeMember.id,
+                                isGroupChat = chatUi.chat.type == ChatType.GROUP,
+                                sender = sender,
+                                repliedMessage = repliedMsg,
+                                repliedSenderName = repliedSenderName,
+                                activeMemberId = activeMember.id,
+                                isSelected = selectedIds.contains(msg.id),
+                                isMultiSelectMode = isMultiSelectMode,
+                                isPlayingVoice = playingVoiceMessageId == msg.id,
+                                voicePlaybackProgress = if (playingVoiceMessageId == msg.id) playingVoiceProgress else 0f,
+                                searchQuery = inChatQuery,
+                                onToggleSelect = {
+                                    if (selectedIds.contains(msg.id)) selectedIds.remove(msg.id)
+                                    else selectedIds.add(msg.id)
+                                },
+                                onLongPress = { actionTargetMessage = msg },
+                                onReplyClick = { replyId ->
+                                    val idx = visibleMessages.indexOfFirst { it.id == replyId }
+                                    if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) }
+                                },
+                                onImageClick = { uri -> viewerImageUri = uri },
+                                onToggleVoicePlay = { onToggleVoicePlay(msg.id) },
+                                onVotePoll = { optId -> onVotePoll(msg.id, optId) },
+                                onToggleReaction = { emoji -> onToggleReaction(msg.id, emoji) },
+                                onSwipeReply = {
+                                    editingMessage = null
+                                    replyingTo = msg
+                                }
+                            )
+                        }
+                    }
+
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = !isNearBottom && visibleMessages.isNotEmpty(),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 14.dp, bottom = 10.dp)
+                    ) {
+                        Box {
+                            SmallFloatingActionButton(
+                                onClick = {
+                                    scope.launch {
+                                        listState.animateScrollToItem(visibleMessages.lastIndex)
+                                    }
+                                    unseenWhileScrolledUp = 0
+                                },
+                                shape = CircleShape,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                contentColor = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.testTag("scroll_to_bottom_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.KeyboardArrowDown,
+                                    contentDescription = "Bajar al final del chat"
+                                )
+                            }
+                            if (unseenWhileScrolledUp > 0) {
+                                Badge(
+                                    modifier = Modifier.align(Alignment.TopEnd)
+                                ) {
+                                    Text(unseenWhileScrolledUp.toString())
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1034,6 +1130,8 @@ fun ChatRoomScreen(
                 editingMessage = null
                 replyingTo = target
             },
+            onForward = { forwardTargetMessage = target },
+            onMessageInfo = { infoTargetMessage = target },
             onCopy = {
                 clipboard.setText(AnnotatedString(target.text))
                 scope.launch { snackbarHostState.showSnackbar("Texto copiado") }
@@ -1049,6 +1147,40 @@ fun ChatRoomScreen(
             },
             onDeleteForMe = { onDeleteForMe(listOf(target.id)) },
             onDeleteForEveryone = { onDeleteForEveryone(listOf(target.id)) }
+        )
+    }
+
+    forwardTargetMessage?.let { msgToForward ->
+        ForwardMessageDialog(
+            chatPreviews = allChatPreviews,
+            currentChatId = chatUi.chat.id,
+            onSelectTargetChat = { targetChatId ->
+                onForwardMessage(msgToForward, targetChatId)
+                forwardTargetMessage = null
+            },
+            onDismiss = { forwardTargetMessage = null }
+        )
+    }
+
+    infoTargetMessage?.let { infoMsg ->
+        MessageInfoDialog(
+            message = infoMsg,
+            allMembers = allMembers,
+            onDismiss = { infoTargetMessage = null }
+        )
+    }
+
+    if (showChatInfoDialog) {
+        val sharedImages = remember(visibleMessages) {
+            visibleMessages.filter { it.type == MessageType.IMAGE && !it.mediaUri.isNullOrBlank() }
+        }
+        ChatInfoAndGalleryDialog(
+            chatUi = chatUi,
+            imageMessages = sharedImages,
+            selectedWallpaperKey = selectedWallpaperKey,
+            onSelectWallpaper = onSelectWallpaper,
+            onOpenImage = { uri -> viewerImageUri = uri },
+            onDismiss = { showChatInfoDialog = false }
         )
     }
 

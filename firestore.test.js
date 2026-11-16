@@ -322,4 +322,127 @@ test("Family settings update allowed only for ownerUid; join works even without 
   );
 });
 
+test("Family statuses enforce member access, non-empty content, and viewer tracking", async () => {
+  const aliceDb = await seedFamilyAsAlice();
+  const now = Date.now();
+  const statusRef = aliceDb.collection("families").doc("fam_1").collection("statuses").doc("st_1");
 
+  // Empty status without text or photo must fail
+  await assertFails(
+    statusRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      memberId: "member_papa",
+      text: "",
+      backgroundHex: "#128C7E",
+      timestamp: now,
+      expiresAt: now + 86400000,
+      viewedByMemberIds: [],
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Valid text status succeeds
+  await assertSucceeds(
+    statusRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      memberId: "member_papa",
+      text: "En camino a casa",
+      backgroundHex: "#128C7E",
+      timestamp: now,
+      expiresAt: now + 86400000,
+      viewedByMemberIds: ["member_papa"],
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Marking status viewed is allowed
+  await assertSucceeds(
+    statusRef.update({
+      viewedByMemberIds: arrayUnion("member_mama"),
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Stranger cannot read or tamper with status
+  const eveDb = testEnv.authenticatedContext(EVE_UID).firestore();
+  await assertFails(eveDb.collection("families").doc("fam_1").collection("statuses").doc("st_1").get());
+  await assertFails(
+    eveDb.collection("families").doc("fam_1").collection("statuses").doc("st_1").update({
+      viewedByMemberIds: arrayUnion("eve"),
+      updatedAt: serverTs(),
+    })
+  );
+});
+
+test("Messages support readByMemberIds & forwardedFromName, and reject ghost fields", async () => {
+  const aliceDb = await seedFamilyAsAlice();
+  const msgRef = aliceDb.collection("families").doc("fam_1").collection("messages").doc("msg_fwd");
+
+  await assertSucceeds(
+    msgRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      chatId: "chat_familia",
+      senderId: "member_papa",
+      text: "Foto reenviada",
+      type: "TEXT",
+      status: "SENT",
+      timestamp: Date.now(),
+      isEdited: false,
+      readByMemberIds: [],
+      forwardedFromName: "Mamá",
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  await assertSucceeds(
+    msgRef.update({
+      status: "READ",
+      readByMemberIds: arrayUnion("member_mama"),
+      updatedAt: serverTs(),
+    })
+  );
+});
+
+test("Members support bounded fcmTokens array updates while blocking strangers", async () => {
+  const aliceDb = await seedFamilyAsAlice();
+  const memberRef = aliceDb.collection("families").doc("fam_1").collection("members").doc("member_papa");
+
+  await assertSucceeds(
+    memberRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      name: "Papá",
+      roleLabel: "Admin",
+      isAdmin: true,
+      avatarColorHex: "#1A73E8",
+      avatarEmoji: "👨🏽",
+      isOnline: true,
+      lastSeenText: "En línea",
+      liveStatus: "ONLINE",
+      fcmTokens: [],
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  await assertSucceeds(
+    memberRef.update({
+      fcmTokens: arrayUnion("fcm_token_device_abc123"),
+      updatedAt: serverTs(),
+    })
+  );
+
+  const eveDb = testEnv.authenticatedContext(EVE_UID).firestore();
+  await assertFails(
+    eveDb.collection("families").doc("fam_1").collection("members").doc("member_papa").update({
+      fcmTokens: arrayUnion("evil_token"),
+      updatedAt: serverTs(),
+    })
+  );
+});

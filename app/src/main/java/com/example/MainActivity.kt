@@ -1,6 +1,7 @@
 package com.example
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -58,6 +59,7 @@ import com.example.ui.screens.MainHomeScreen
 import com.example.ui.screens.ProfileSelectorScreen
 import com.example.ui.theme.FamiChatTheme
 import com.example.ui.viewmodel.FamilyViewModel
+import com.example.util.FamiChatNotificationHelper
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.flow.first
@@ -73,9 +75,21 @@ object Routes {
 }
 
 class MainActivity : ComponentActivity() {
+    private var pendingNotifChatId by mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val chatId = intent.getStringExtra(FamiChatNotificationHelper.EXTRA_OPEN_CHAT_ID)
+        if (!chatId.isNullOrBlank()) {
+            pendingNotifChatId = chatId
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        pendingNotifChatId = intent?.getStringExtra(FamiChatNotificationHelper.EXTRA_OPEN_CHAT_ID)
         setContent {
             val context = LocalContext.current
             val appContext = context.applicationContext
@@ -164,6 +178,8 @@ class MainActivity : ComponentActivity() {
                         userEmail = signedInUser.email.orEmpty(),
                         userName = signedInUser.displayName.orEmpty(),
                         isDarkTheme = isDarkTheme,
+                        externalOpenChatId = pendingNotifChatId,
+                        onConsumeExternalOpenChatId = { pendingNotifChatId = null },
                         onSignOutGoogle = {
                             scope.launch {
                                 prefs.setActiveMemberId(null)
@@ -184,8 +200,16 @@ fun FamiChatApp(
     userEmail: String,
     userName: String,
     isDarkTheme: Boolean,
+    externalOpenChatId: String?,
+    onConsumeExternalOpenChatId: () -> Unit,
     onSignOutGoogle: () -> Unit
 ) {
+    LaunchedEffect(externalOpenChatId) {
+        if (!externalOpenChatId.isNullOrBlank()) {
+            vm.requestOpenChatFromNotification(externalOpenChatId)
+            onConsumeExternalOpenChatId()
+        }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, vm) {
         val observer = LifecycleEventObserver { _, event ->
@@ -245,12 +269,16 @@ fun FamiChatApp(
     val chatPreviews by vm.chatPreviews.collectAsStateWithLifecycle()
     val rawChats by vm.rawChats.collectAsStateWithLifecycle()
     val allMessages by vm.allMessages.collectAsStateWithLifecycle()
+    val statuses by vm.statuses.collectAsStateWithLifecycle()
     val calls by vm.calls.collectAsStateWithLifecycle()
     val shoppingItems by vm.shoppingItems.collectAsStateWithLifecycle()
     val events by vm.events.collectAsStateWithLifecycle()
     val notes by vm.notes.collectAsStateWithLifecycle()
     val masterPin by vm.masterPin.collectAsStateWithLifecycle()
     val switchPin by vm.switchPin.collectAsStateWithLifecycle()
+    val notificationsEnabled by vm.notificationsEnabled.collectAsStateWithLifecycle()
+    val chatWallpapers by vm.chatWallpapers.collectAsStateWithLifecycle()
+    val pendingNotificationChatId by vm.pendingNotificationChatId.collectAsStateWithLifecycle()
     val updateRepoSlug by vm.updateRepoSlug.collectAsStateWithLifecycle()
     val updateState by vm.updateState.collectAsStateWithLifecycle()
     val activeCall by vm.activeCall.collectAsStateWithLifecycle()
@@ -262,6 +290,17 @@ fun FamiChatApp(
 
     var pendingProtectedMember by remember { mutableStateOf<FamilyMemberEntity?>(null) }
     var showSwitchKeyDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pendingNotificationChatId, activeMember?.id, chatPreviews.size) {
+        val targetChatId = pendingNotificationChatId ?: return@LaunchedEffect
+        if (activeMember != null && chatPreviews.any { it.chat.id == targetChatId }) {
+            vm.openChat(targetChatId)
+            navController.navigate(Routes.chat(targetChatId)) {
+                launchSingleTop = true
+            }
+            vm.consumePendingNotificationChatId()
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
@@ -305,11 +344,13 @@ fun FamiChatApp(
                         allMembers = members,
                         userGroupsCount = userGroupsCount,
                         isDarkTheme = isDarkTheme,
+                        notificationsEnabled = notificationsEnabled,
                         updateRepoSlug = updateRepoSlug,
                         updateState = updateState,
                         selectedTab = selectedTab,
                         searchQuery = searchQuery,
                         chatPreviews = chatPreviews,
+                        statuses = statuses,
                         calls = calls,
                         shoppingItems = shoppingItems,
                         events = events,
@@ -317,7 +358,17 @@ fun FamiChatApp(
                         snackbarMessage = snackbarMessage,
                         onClearSnackbar = vm::clearSnackbar,
                         onToggleTheme = vm::toggleTheme,
-                        onUpdateOwnStatus = vm::updateOwnProfileStatus,
+                        onToggleNotifications = vm::setNotificationsEnabled,
+                        onUpdateOwnProfile = vm::updateOwnProfileDetails,
+                        onPublishTextStatus = vm::publishTextStatus,
+                        onPublishPhotoStatus = vm::publishPhotoStatus,
+                        onMarkStatusViewed = vm::markStatusViewed,
+                        onDeleteStatus = vm::deleteStatus,
+                        onReplyToStatus = { st, replyText ->
+                            vm.replyToStatus(st, replyText) { chatId ->
+                                navController.navigate(Routes.chat(chatId))
+                            }
+                        },
                         onCheckForUpdate = vm::checkForAppUpdate,
                         onSaveUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = true) },
                         onDownloadUpdate = vm::downloadAndInstallUpdate,
@@ -381,6 +432,8 @@ fun FamiChatApp(
                         chatUi = chatUi,
                         activeMember = member,
                         allMembers = members,
+                        allChatPreviews = chatPreviews,
+                        selectedWallpaperKey = chatWallpapers[chatId] ?: "default",
                         messages = chatMessages,
                         voiceRecording = voiceRecording,
                         playingVoiceMessageId = playingVoiceId,
@@ -399,6 +452,8 @@ fun FamiChatApp(
                         onSendPoll = { q, opts -> vm.sendPollMessage(chatId, q, opts) },
                         onVotePoll = vm::voteOnPoll,
                         onEditMessage = vm::editMessage,
+                        onForwardMessage = vm::forwardMessage,
+                        onSelectWallpaper = { key -> vm.setChatWallpaper(chatId, key) },
                         onToggleReaction = vm::toggleReaction,
                         onTogglePin = { msgId -> vm.togglePinMessage(chatId, msgId) },
                         onDeleteForMe = vm::deleteMessagesForMe,

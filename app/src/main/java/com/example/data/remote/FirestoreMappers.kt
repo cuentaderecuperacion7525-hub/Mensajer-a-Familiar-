@@ -11,6 +11,7 @@ import com.example.data.model.FamilyEventEntity
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.FamilySpace
+import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.JsonHelpers
 import com.example.data.model.MessageStatus
 import com.example.data.model.MessageType
@@ -41,6 +42,7 @@ internal object FirestoreMappers {
         if (!doc.exists()) return null
         val liveStr = doc.getString("liveStatus") ?: "LAST_SEEN"
         val liveStatus = runCatching { PresenceStatus.valueOf(liveStr) }.getOrDefault(PresenceStatus.LAST_SEEN)
+        val fcmTokens = (doc.get("fcmTokens") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
         return FamilyMemberEntity(
             id = doc.id,
             name = doc.getString("name") ?: return null,
@@ -48,6 +50,8 @@ internal object FirestoreMappers {
             isAdmin = doc.getBoolean("isAdmin") ?: false,
             avatarColorHex = doc.getString("avatarColorHex") ?: "#1A73E8",
             avatarEmoji = doc.getString("avatarEmoji") ?: "👤",
+            avatarPhotoData = doc.getString("avatarPhotoData") ?: "",
+            bioText = doc.getString("bioText") ?: "",
             isOnline = doc.getBoolean("isOnline") ?: false,
             lastSeenText = doc.getString("lastSeenText") ?: "",
             createdAt = doc.getLong("createdAtMs") ?: 0L,
@@ -56,6 +60,7 @@ internal object FirestoreMappers {
             liveChatId = doc.getString("liveChatId"),
             liveStatusAt = doc.getLong("liveStatusAt") ?: 0L,
             linkedAuthUid = doc.getString("linkedAuthUid") ?: "",
+            fcmTokens = fcmTokens,
             authorUid = doc.getString("authorUid") ?: ""
         )
     }
@@ -74,6 +79,8 @@ internal object FirestoreMappers {
             "isAdmin" to member.isAdmin,
             "avatarColorHex" to member.avatarColorHex.take(16),
             "avatarEmoji" to member.avatarEmoji.take(16),
+            "avatarPhotoData" to member.avatarPhotoData.take(750_000),
+            "bioText" to member.bioText.take(120),
             "phoneNumber" to member.phoneNumber.take(30),
             "isOnline" to member.isOnline,
             "lastSeenText" to member.lastSeenText.take(80),
@@ -84,7 +91,10 @@ internal object FirestoreMappers {
             "createdAtMs" to member.createdAt,
             "updatedAt" to FieldValue.serverTimestamp()
         )
-        if (isCreate) map["createdAt"] = FieldValue.serverTimestamp()
+        if (isCreate) {
+            map["fcmTokens"] = member.fcmTokens.take(10)
+            map["createdAt"] = FieldValue.serverTimestamp()
+        }
         @Suppress("UNCHECKED_CAST")
         return map.filterValues { it != null } as Map<String, Any>
     }
@@ -139,6 +149,7 @@ internal object FirestoreMappers {
             ?.mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }
             ?.toMap() ?: emptyMap()
         val hiddenIds = (doc.get("hiddenForMemberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+        val readByIds = (doc.get("readByMemberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
         val waveform = (doc.get("voiceWaveform") as? List<*>)?.mapNotNull { (it as? Number)?.toFloat() } ?: emptyList()
         val rawPollOpts = (doc.get("pollOptions") as? List<*>)?.mapNotNull { raw ->
             val m = raw as? Map<*, *> ?: return@mapNotNull null
@@ -160,6 +171,8 @@ internal object FirestoreMappers {
             isEdited = doc.getBoolean("isEdited") ?: false,
             reactionsJson = JsonHelpers.encodeReactions(rawReactions),
             hiddenForMemberIdsJson = JsonHelpers.encodeStringList(hiddenIds),
+            readByMemberIdsJson = JsonHelpers.encodeStringList(readByIds),
+            forwardedFromName = doc.getString("forwardedFromName"),
             mediaUri = doc.getString("mediaData"),
             voiceDurationSec = (doc.getLong("voiceDurationSec") ?: 0L).toInt(),
             voiceWaveformJson = JsonHelpers.encodeFloatList(waveform),
@@ -181,6 +194,7 @@ internal object FirestoreMappers {
     ): Map<String, Any> {
         val reactions = JsonHelpers.decodeReactions(msg.reactionsJson)
         val hidden = JsonHelpers.decodeStringList(msg.hiddenForMemberIdsJson).take(25)
+        val readBy = JsonHelpers.decodeStringList(msg.readByMemberIdsJson).take(25)
         val waveform = JsonHelpers.decodeFloatList(msg.voiceWaveformJson).take(60)
         val pollOpts = JsonHelpers.decodePollOptions(msg.pollOptionsJson).take(10).map { opt ->
             mapOf("id" to opt.id, "text" to opt.text, "voterIds" to opt.voterIds)
@@ -198,6 +212,8 @@ internal object FirestoreMappers {
             "isEdited" to msg.isEdited,
             "reactions" to reactions,
             "hiddenForMemberIds" to hidden,
+            "readByMemberIds" to readBy,
+            "forwardedFromName" to msg.forwardedFromName?.take(60),
             "mediaData" to msg.mediaUri?.take(750_000),
             "voiceDurationSec" to msg.voiceDurationSec,
             "voiceWaveform" to waveform,
@@ -308,5 +324,45 @@ internal object FirestoreMappers {
             createdAt = doc.getLong("timestamp") ?: 0L,
             authorUid = doc.getString("authorUid") ?: ""
         )
+    }
+
+    fun toFamilyStatus(doc: DocumentSnapshot): FamilyStatusEntity? {
+        if (!doc.exists()) return null
+        val viewed = (doc.get("viewedByMemberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+        return FamilyStatusEntity(
+            id = doc.id,
+            memberId = doc.getString("memberId") ?: return null,
+            text = doc.getString("text") ?: "",
+            mediaUri = doc.getString("mediaData"),
+            backgroundHex = doc.getString("backgroundHex") ?: "#128C7E",
+            createdAt = doc.getLong("timestamp") ?: 0L,
+            expiresAt = doc.getLong("expiresAt") ?: 0L,
+            viewedByMemberIdsJson = JsonHelpers.encodeStringList(viewed),
+            authorUid = doc.getString("authorUid") ?: ""
+        )
+    }
+
+    fun statusToMap(
+        status: FamilyStatusEntity,
+        memberUids: List<String>,
+        authorUid: String,
+        isCreate: Boolean
+    ): Map<String, Any> {
+        val viewed = JsonHelpers.decodeStringList(status.viewedByMemberIdsJson).take(25)
+        val map = mutableMapOf<String, Any?>(
+            "memberUids" to memberUids,
+            "authorUid" to authorUid,
+            "memberId" to status.memberId,
+            "text" to status.text.take(400),
+            "mediaData" to status.mediaUri?.take(750_000),
+            "backgroundHex" to status.backgroundHex.take(16),
+            "timestamp" to status.createdAt,
+            "expiresAt" to status.expiresAt,
+            "viewedByMemberIds" to viewed,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        if (isCreate) map["createdAt"] = FieldValue.serverTimestamp()
+        @Suppress("UNCHECKED_CAST")
+        return map.filterValues { it != null } as Map<String, Any>
     }
 }

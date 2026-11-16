@@ -11,7 +11,9 @@ import com.example.data.model.FamilyEventEntity
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.FamilySpace
+import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.JsonHelpers
+import com.example.data.model.MessageStatus
 import com.example.data.model.PollOption
 import com.example.data.model.PresenceStatus
 import com.example.data.model.ShoppingItemEntity
@@ -104,6 +106,15 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             .map { snap ->
                 snap.documents.mapNotNull(FirestoreMappers::toFamilyNote)
                     .sortedWith(compareByDescending<FamilyNoteEntity> { it.isPinned }.thenByDescending { it.createdAt })
+            }
+
+    fun observeStatuses(familyId: String, uid: String): Flow<List<FamilyStatusEntity>> =
+        familyRef(familyId).collection("statuses")
+            .whereArrayContains("memberUids", uid)
+            .snapshots()
+            .map { snap ->
+                snap.documents.mapNotNull(FirestoreMappers::toFamilyStatus)
+                    .sortedBy { it.createdAt }
             }
 
     // --- Family Lifecycle (Create / Join / Backfill) ---
@@ -318,7 +329,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
     suspend fun syncMemberUidsAcrossExistingDocs(familyId: String, allFamilyUids: List<String>, myUid: String) {
         if (allFamilyUids.isEmpty()) return
         val fRef = familyRef(familyId)
-        val collections = listOf("members", "chats", "messages", "calls", "shoppingItems", "events", "notes")
+        val collections = listOf("members", "chats", "messages", "calls", "statuses", "shoppingItems", "events", "notes")
         collections.forEach { colName ->
             try {
                 val docs = fRef.collection(colName).whereArrayContains("memberUids", myUid).get().await()
@@ -424,6 +435,142 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             throw e
         } catch (_: Exception) {
             Result.success(Unit)
+        }
+    }
+
+    suspend fun updateMemberProfileDetails(
+        familyId: String,
+        memberId: String,
+        fields: Map<String, Any>
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("members").document(memberId)
+        return try {
+            val payload = fields.toMutableMap().apply {
+                this["updatedAt"] = FieldValue.serverTimestamp()
+            }
+            docRef.update(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun registerMemberFcmToken(
+        familyId: String,
+        memberId: String,
+        token: String
+    ): Result<Unit> {
+        val cleanToken = token.trim()
+        if (cleanToken.isBlank()) return Result.success(Unit)
+        val docRef = familyRef(familyId).collection("members").document(memberId)
+        return try {
+            val snap = docRef.get().await()
+            if (!snap.exists()) return Result.success(Unit)
+            val existingTokens = (snap.get("fcmTokens") as? List<*>)
+                ?.mapNotNull { it as? String }
+                .orEmpty()
+            val updatedTokens = (existingTokens.filter { it != cleanToken }.takeLast(9) + cleanToken)
+            docRef.update(
+                mapOf(
+                    "fcmTokens" to updatedTokens,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun unregisterMemberFcmToken(
+        familyId: String,
+        memberId: String,
+        token: String
+    ): Result<Unit> {
+        val cleanToken = token.trim()
+        if (cleanToken.isBlank()) return Result.success(Unit)
+        val docRef = familyRef(familyId).collection("members").document(memberId)
+        return try {
+            docRef.update(
+                mapOf(
+                    "fcmTokens" to FieldValue.arrayRemove(cleanToken),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchMembersOnce(familyId: String, uid: String): List<FamilyMemberEntity> {
+        return try {
+            familyRef(familyId).collection("members")
+                .whereArrayContains("memberUids", uid)
+                .get()
+                .await()
+                .documents
+                .mapNotNull(FirestoreMappers::toMember)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun fetchChatsOnce(familyId: String, uid: String): List<ChatThreadEntity> {
+        return try {
+            familyRef(familyId).collection("chats")
+                .whereArrayContains("memberUids", uid)
+                .get()
+                .await()
+                .documents
+                .mapNotNull(FirestoreMappers::toChatThread)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun fetchMessagesOnce(familyId: String, uid: String): List<ChatMessageEntity> {
+        return try {
+            familyRef(familyId).collection("messages")
+                .whereArrayContains("memberUids", uid)
+                .get()
+                .await()
+                .documents
+                .mapNotNull(FirestoreMappers::toChatMessage)
+                .sortedBy { it.timestamp }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun fetchCallsOnce(familyId: String, uid: String): List<CallRecordEntity> {
+        return try {
+            familyRef(familyId).collection("calls")
+                .whereArrayContains("memberUids", uid)
+                .get()
+                .await()
+                .documents
+                .mapNotNull(FirestoreMappers::toCallRecord)
+                .sortedByDescending { it.timestamp }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
@@ -544,6 +691,29 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                 this["updatedAt"] = FieldValue.serverTimestamp()
             }
             docRef.update(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun markMessageReadByMember(
+        familyId: String,
+        messageId: String,
+        memberId: String
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("messages").document(messageId)
+        return try {
+            docRef.update(
+                mapOf(
+                    "status" to MessageStatus.READ.name,
+                    "readByMemberIds" to FieldValue.arrayUnion(memberId),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -762,6 +932,60 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             handleFirestoreError(e, OperationType.DELETE, docRef.path)
+        }
+    }
+
+    // --- 24h Family Statuses / Stories ---
+
+    suspend fun createStatus(
+        familyId: String,
+        status: FamilyStatusEntity,
+        memberUids: List<String>,
+        callerUid: String
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("statuses").document(status.id)
+        return try {
+            docRef.set(FirestoreMappers.statusToMap(status, memberUids, callerUid, isCreate = true)).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun markStatusViewed(
+        familyId: String,
+        statusId: String,
+        viewerMemberId: String
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("statuses").document(statusId)
+        return try {
+            docRef.update(
+                mapOf(
+                    "viewedByMemberIds" to FieldValue.arrayUnion(viewerMemberId),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    suspend fun deleteStatus(familyId: String, statusId: String): Result<Unit> {
+        val docRef = familyRef(familyId).collection("statuses").document(statusId)
+        return try {
+            docRef.delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docRef.path)
+            Result.failure(e)
         }
     }
 

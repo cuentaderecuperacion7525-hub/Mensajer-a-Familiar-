@@ -176,4 +176,47 @@ class ExampleRobolectricTest {
     assertTrue(away.statusText.startsWith("Ocupado · Últ. vez"))
     assertEquals("Últ. vez hace 2 min", TimeFormatters.formatLastSeen(now - 120_000L, now))
   }
+
+  @Test
+  fun `notification helper creates message and call channels`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    com.example.util.FamiChatNotificationHelper.ensureChannels(context)
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+      val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+      val msgCh = mgr.getNotificationChannel(com.example.util.FamiChatNotificationHelper.CHANNEL_MESSAGES)
+      val callCh = mgr.getNotificationChannel(com.example.util.FamiChatNotificationHelper.CHANNEL_CALLS)
+      org.junit.Assert.assertNotNull(msgCh)
+      org.junit.Assert.assertNotNull(callCh)
+    }
+  }
+
+  @Test
+  fun `family status 24h TTL and chat wallpaper palette work correctly`() {
+    assertEquals(24 * 60 * 60 * 1000L, com.example.data.model.FamilyStatusEntity.STATUS_TTL_MS)
+    val defaultLight = com.example.ui.components.ChatWallpaperPalette.resolveColor("default", isDark = false)
+    val mintLight = com.example.ui.components.ChatWallpaperPalette.resolveColor("mint", isDark = false)
+    val unknownLight = com.example.ui.components.ChatWallpaperPalette.resolveColor("non_existent", isDark = false)
+    assertEquals(defaultLight, unknownLight)
+    org.junit.Assert.assertNotEquals(defaultLight, mintLight)
+
+    val ids = listOf("m_papa", "m_mama")
+    val encoded = com.example.data.model.JsonHelpers.encodeStringList(ids)
+    assertEquals(ids, com.example.data.model.JsonHelpers.decodeStringList(encoded))
+  }
+
+  @Test
+  fun `push registration manager builds valid FCM topic and member stores fcmTokens`() {
+    val topic = com.example.push.PushRegistrationManager.topicForFamily("fam-123/abc")
+    assertEquals("famichat_fam-123_abc", topic)
+    val member = FamilyMemberEntity(
+      id = "m1",
+      name = "Mamá",
+      roleLabel = "Mamá",
+      isAdmin = false,
+      avatarColorHex = "#1A73E8",
+      avatarEmoji = "👩🏽",
+      fcmTokens = listOf("token_1", "token_2")
+    )
+    assertEquals(2, member.fcmTokens.size)
+  }
 }

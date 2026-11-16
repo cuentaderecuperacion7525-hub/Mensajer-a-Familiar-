@@ -17,6 +17,7 @@ import com.example.data.model.FamilyEventEntity
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.FamilySpace
+import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.JsonHelpers
 import com.example.data.model.MessageStatus
 import com.example.data.model.MessageType
@@ -25,9 +26,11 @@ import com.example.data.model.PresenceStatus
 import com.example.data.model.ShoppingItemEntity
 import com.example.data.remote.FamilyCloudRepository
 import com.example.data.remote.unwrapFirestoreException
+import com.example.push.PushRegistrationManager
 import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateChecker
 import com.example.util.AppUpdateUiState
+import com.example.util.FamiChatNotificationHelper
 import com.example.util.ImageCompressionHelper
 import com.example.util.MessageFormatter
 import com.example.util.PresenceResolver
@@ -61,6 +64,8 @@ data class ChatThreadUi(
     val displayTitle: String,
     val displayEmoji: String,
     val displayColorHex: String,
+    val displayPhotoData: String = "",
+    val partnerBioText: String = "",
     val isOnline: Boolean,
     val subtitleStatus: String,
     val lastMessagePreview: String,
@@ -171,21 +176,35 @@ class FamilyViewModel(
             if (fid.isNullOrBlank()) flowOf(emptyList())
             else cloudRepo.observeChats(fid, currentUserId).safeFirestoreFlow(emptyList())
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val allMessages: StateFlow<List<ChatMessageEntity>> = _activeFamilyId
         .flatMapLatest { fid ->
             if (fid.isNullOrBlank()) flowOf(emptyList())
             else cloudRepo.observeMessages(fid, currentUserId).safeFirestoreFlow(emptyList())
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val calls: StateFlow<List<CallRecordEntity>> = _activeFamilyId
         .flatMapLatest { fid ->
             if (fid.isNullOrBlank()) flowOf(emptyList())
             else cloudRepo.observeCalls(fid, currentUserId).safeFirestoreFlow(emptyList())
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val rawStatuses: StateFlow<List<FamilyStatusEntity>> = _activeFamilyId
+        .flatMapLatest { fid ->
+            if (fid.isNullOrBlank()) flowOf(emptyList())
+            else cloudRepo.observeStatuses(fid, currentUserId).safeFirestoreFlow(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val statuses: StateFlow<List<FamilyStatusEntity>> = combine(
+        rawStatuses,
+        presenceClock
+    ) { list, now ->
+        list.filter { it.expiresAt > now }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val shoppingItems: StateFlow<List<ShoppingItemEntity>> = _activeFamilyId
         .flatMapLatest { fid ->
@@ -218,6 +237,15 @@ class FamilyViewModel(
 
     val isDarkTheme: StateFlow<Boolean> = prefs.isDarkThemeFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val notificationsEnabled: StateFlow<Boolean> = prefs.notificationsEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    val chatWallpapers: StateFlow<Map<String, String>> = prefs.chatWallpapersFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    private val _pendingNotificationChatId = MutableStateFlow<String?>(null)
+    val pendingNotificationChatId: StateFlow<String?> = _pendingNotificationChatId.asStateFlow()
 
     val updateRepoSlug: StateFlow<String> = combine(activeFamily, prefs.updateRepoSlugFlow) { fam, localSlug ->
         localSlug.ifBlank { null }
@@ -262,7 +290,7 @@ class FamilyViewModel(
                 targets.contains(meId) &&
                 (now - call.timestamp) < 60_000L
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val _voiceRecording = MutableStateFlow(VoiceRecordingState())
     val voiceRecording: StateFlow<VoiceRecordingState> = _voiceRecording.asStateFlow()
@@ -307,8 +335,9 @@ class FamilyViewModel(
             val lastMsg = visibleMsgs.lastOrNull()
             val unreadCount = visibleMsgs.count { msg ->
                 msg.senderId != currentId &&
+                    msg.type != MessageType.DELETED &&
                     msg.status != MessageStatus.READ &&
-                    msg.type != MessageType.DELETED
+                    !JsonHelpers.decodeStringList(msg.readByMemberIdsJson).contains(currentId)
             }
 
             val otherMembers = participants.filter { it.id != currentId }
@@ -325,6 +354,14 @@ class FamilyViewModel(
             val displayColor = if (chat.type == ChatType.DIRECT) {
                 otherMember?.avatarColorHex ?: chat.avatarColorHex
             } else chat.avatarColorHex
+
+            val displayPhotoData = if (chat.type == ChatType.DIRECT) {
+                otherMember?.avatarPhotoData.orEmpty()
+            } else ""
+
+            val partnerBioText = if (chat.type == ChatType.DIRECT) {
+                otherMember?.bioText.orEmpty()
+            } else ""
 
             val isOnline = if (chat.type == ChatType.DIRECT) {
                 otherMember?.isOnline == true
@@ -359,6 +396,8 @@ class FamilyViewModel(
                 displayTitle = displayTitle,
                 displayEmoji = displayEmoji,
                 displayColorHex = displayColor,
+                displayPhotoData = displayPhotoData,
+                partnerBioText = partnerBioText,
                 isOnline = isOnline,
                 subtitleStatus = subtitleStatus,
                 lastMessagePreview = preview,
@@ -372,6 +411,7 @@ class FamilyViewModel(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
+        FamiChatNotificationHelper.ensureChannels(appContext)
         viewModelScope.launch {
             val savedFamilyId = prefs.activeFamilyIdFlow.first()
             val fams = runCatching {
@@ -398,6 +438,7 @@ class FamilyViewModel(
                     }.getOrDefault(emptyList())
                     if (loadedMembers.any { it.id == savedMemberId }) {
                         _activeMemberId.value = savedMemberId
+                        syncPushAndBackgroundWork(resolvedFamilyId, savedMemberId)
                         if (_isAppForeground.value && !_manualOffline.value) {
                             startPresenceHeartbeat()
                         }
@@ -422,13 +463,96 @@ class FamilyViewModel(
             }
         }
 
-        // Ringtone on incoming call
+        // Real-time Android notifications for incoming messages
         viewModelScope.launch {
+            val sessionStartedAt = System.currentTimeMillis()
+            val seenMessageIds = mutableSetOf<String>()
+            var seededForMemberId: String? = null
+            combine(
+                allMessages,
+                rawChats,
+                members,
+                _activeMemberId,
+                notificationsEnabled
+            ) { msgs, chats, membersList, meId, notifEnabled ->
+                Tuple5(msgs, chats, membersList, meId, notifEnabled)
+            }.collect { (msgs, chats, membersList, meId, notifEnabled) ->
+                if (meId == null) {
+                    seededForMemberId = null
+                    seenMessageIds.clear()
+                    return@collect
+                }
+                if (seededForMemberId != meId) {
+                    seededForMemberId = meId
+                    seenMessageIds.clear()
+                    msgs.forEach { seenMessageIds.add(it.id) }
+                    return@collect
+                }
+                val chatMap = chats.associateBy { it.id }
+                val memberMap = membersList.associateBy { it.id }
+                msgs.forEach { msg ->
+                    if (seenMessageIds.add(msg.id)) {
+                        val chat = chatMap[msg.chatId] ?: return@forEach
+                        val participants = JsonHelpers.decodeStringList(chat.participantIdsJson)
+                        if (notifEnabled &&
+                            participants.contains(meId) &&
+                            msg.senderId != meId &&
+                            msg.type != MessageType.DELETED &&
+                            msg.timestamp >= sessionStartedAt - 15_000L &&
+                            (!_isAppForeground.value || _activeChatId.value != msg.chatId)
+                        ) {
+                            val senderName = memberMap[msg.senderId]?.name ?: "Familiar"
+                            val chatTitle = if (chat.type == ChatType.GROUP) chat.title else senderName
+                            val body = when (msg.type) {
+                                MessageType.IMAGE -> if (msg.text.isNotBlank()) "📷 ${msg.text}" else "📷 Foto"
+                                MessageType.VOICE -> "🎤 Nota de voz (${TimeFormatters.formatDuration(msg.voiceDurationSec)})"
+                                MessageType.LOCATION -> "📍 ${msg.locationName ?: "Ubicación"}"
+                                MessageType.POLL -> "📊 ${msg.pollQuestion ?: "Encuesta"}"
+                                MessageType.TEXT -> MessageFormatter.stripMarkdownForPreview(msg.text)
+                                MessageType.DELETED -> ""
+                            }
+                            if (body.isNotBlank()) {
+                                viewModelScope.launch {
+                                    prefs.updateLastNotifiedTimestampIfNewer(msg.timestamp)
+                                }
+                                FamiChatNotificationHelper.notifyNewMessage(
+                                    context = appContext,
+                                    chatId = msg.chatId,
+                                    chatTitle = chatTitle,
+                                    senderName = senderName,
+                                    body = body,
+                                    isGroup = chat.type == ChatType.GROUP
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Ringtone + system notification on incoming call
+        viewModelScope.launch {
+            var activeIncomingNotifCallId: String? = null
             incomingCall.collect { incoming ->
                 if (incoming != null) {
                     voiceAudio.startRingtone(isIncoming = true)
-                } else if (_activeCall.value == null) {
-                    voiceAudio.stopRingtone()
+                    if (notificationsEnabled.value && !_isAppForeground.value) {
+                        val callerName = members.value.find { it.id == incoming.callerId }?.name ?: incoming.title
+                        activeIncomingNotifCallId = incoming.id
+                        FamiChatNotificationHelper.notifyIncomingCall(
+                            context = appContext,
+                            callId = incoming.id,
+                            chatId = incoming.chatId,
+                            callerName = callerName,
+                            isVideo = incoming.callType == CallType.VIDEO
+                        )
+                    }
+                } else {
+                    activeIncomingNotifCallId?.let { FamiChatNotificationHelper.cancelCallNotification(appContext, it) }
+                    activeIncomingNotifCallId = null
+                    if (_activeCall.value == null) {
+                        voiceAudio.stopRingtone()
+                    }
                 }
             }
         }
@@ -482,14 +606,25 @@ class FamilyViewModel(
     }
 
     fun clearActiveFamilySpace() {
+        val prevFamId = _activeFamilyId.value
+        val prevMemberId = _activeMemberId.value
         _activeFamilyId.value = null
         _activeMemberId.value = null
         _activeChatId.value = null
         stopPlayback()
         cancelVoiceRecording()
+        PushRegistrationManager.cancelBackgroundSync(appContext)
         viewModelScope.launch {
-            prefs.setActiveFamilyId(null)
-            prefs.setActiveMemberId(null)
+            withContext(NonCancellable) {
+                if (prevFamId != null && prevMemberId != null) {
+                    PushRegistrationManager.unregisterMemberToken(cloudRepo, prefs, prevFamId, prevMemberId)
+                }
+                if (prevFamId != null) {
+                    PushRegistrationManager.unsubscribeFromFamilyTopic(prevFamId)
+                }
+                prefs.setActiveFamilyId(null)
+                prefs.setActiveMemberId(null)
+            }
         }
     }
 
@@ -510,6 +645,7 @@ class FamilyViewModel(
                 prefs.setActiveFamilyId(famId)
                 _activeMemberId.value = memberId
                 prefs.setActiveMemberId(memberId)
+                syncPushAndBackgroundWork(famId, memberId)
                 showMessage("Familia creada y sincronizada en la nube")
             }.onFailure { err ->
                 showMessage(err.localizedMessage ?: "No se pudo crear la familia")
@@ -554,6 +690,10 @@ class FamilyViewModel(
             heartbeatJob = null
             val famId = _activeFamilyId.value ?: return
             val memberId = _activeMemberId.value ?: return
+            if (notificationsEnabled.value) {
+                PushRegistrationManager.schedulePeriodicBackgroundSync(appContext)
+                PushRegistrationManager.scheduleBackgroundCheckOnStop(appContext)
+            }
             val raw = rawMembers.value.find { it.id == memberId }
             val awayLabel = offlineStatusLabelFor(raw?.lastSeenText.orEmpty())
             viewModelScope.launch {
@@ -568,6 +708,15 @@ class FamilyViewModel(
                         liveStatusAt = System.currentTimeMillis()
                     )
                 }
+            }
+        }
+    }
+
+    private fun syncPushAndBackgroundWork(familyId: String, memberId: String) {
+        viewModelScope.launch {
+            if (notificationsEnabled.value) {
+                PushRegistrationManager.syncFcmTokenAndTopic(appContext, cloudRepo, prefs, familyId, memberId)
+                PushRegistrationManager.schedulePeriodicBackgroundSync(appContext)
             }
         }
     }
@@ -655,6 +804,7 @@ class FamilyViewModel(
             if (_isAppForeground.value) {
                 startPresenceHeartbeat()
             }
+            syncPushAndBackgroundWork(famId, memberId)
         }
     }
 
@@ -669,10 +819,12 @@ class FamilyViewModel(
         _activeChatId.value = null
         stopPlayback()
         cancelVoiceRecording()
+        PushRegistrationManager.cancelBackgroundSync(appContext)
         viewModelScope.launch {
             prefs.setActiveMemberId(null)
             if (famId != null && prevMemberId != null) {
                 withContext(NonCancellable) {
+                    PushRegistrationManager.unregisterMemberToken(cloudRepo, prefs, famId, prevMemberId)
                     cloudRepo.updateMemberPresence(
                         familyId = famId,
                         memberId = prevMemberId,
@@ -695,8 +847,44 @@ class FamilyViewModel(
         _searchQuery.value = query
     }
 
+    fun setNotificationsEnabled(enabled: Boolean) {
+        val famId = _activeFamilyId.value
+        val memberId = _activeMemberId.value
+        viewModelScope.launch {
+            prefs.setNotificationsEnabled(enabled)
+            if (enabled) {
+                if (famId != null && memberId != null) {
+                    PushRegistrationManager.syncFcmTokenAndTopic(appContext, cloudRepo, prefs, famId, memberId)
+                    PushRegistrationManager.schedulePeriodicBackgroundSync(appContext)
+                }
+            } else {
+                PushRegistrationManager.cancelBackgroundSync(appContext)
+                if (famId != null && memberId != null) {
+                    PushRegistrationManager.unregisterMemberToken(cloudRepo, prefs, famId, memberId)
+                }
+            }
+        }
+    }
+
+    fun setChatWallpaper(chatId: String, wallpaperKey: String) {
+        viewModelScope.launch {
+            prefs.setChatWallpaper(chatId, wallpaperKey)
+        }
+    }
+
+    fun requestOpenChatFromNotification(chatId: String?) {
+        if (!chatId.isNullOrBlank()) {
+            _pendingNotificationChatId.value = chatId
+        }
+    }
+
+    fun consumePendingNotificationChatId() {
+        _pendingNotificationChatId.value = null
+    }
+
     fun openChat(chatId: String) {
         _activeChatId.value = chatId
+        FamiChatNotificationHelper.cancelChatNotifications(appContext, chatId)
         markChatMessagesAsRead(chatId)
     }
 
@@ -756,13 +944,14 @@ class FamilyViewModel(
         val toMark = allMessages.value.filter {
             it.chatId == chatId &&
                 it.senderId != currentId &&
-                it.status != MessageStatus.READ &&
-                it.type != MessageType.DELETED
+                it.type != MessageType.DELETED &&
+                (it.status != MessageStatus.READ ||
+                    !JsonHelpers.decodeStringList(it.readByMemberIdsJson).contains(currentId))
         }
         if (toMark.isEmpty()) return
         viewModelScope.launch {
             toMark.forEach { msg ->
-                cloudRepo.updateMessageFields(famId, msg.id, mapOf("status" to MessageStatus.READ.name))
+                cloudRepo.markMessageReadByMember(famId, msg.id, currentId)
             }
         }
     }
@@ -820,7 +1009,13 @@ class FamilyViewModel(
         }
     }
 
-    fun updateOwnProfileStatus(isOnline: Boolean, statusText: String) {
+    fun updateOwnProfileDetails(
+        isOnline: Boolean,
+        statusText: String,
+        bioText: String,
+        newPhotoUri: Uri?,
+        removePhoto: Boolean
+    ) {
         val famId = _activeFamilyId.value ?: return
         val memberId = _activeMemberId.value ?: return
         _manualOffline.value = !isOnline
@@ -834,6 +1029,12 @@ class FamilyViewModel(
             cleanStatus
         }
         viewModelScope.launch {
+            val existingPhoto = rawMembers.value.find { it.id == memberId }?.avatarPhotoData.orEmpty()
+            val resolvedPhoto = when {
+                removePhoto -> ""
+                newPhotoUri != null -> ImageCompressionHelper.compressToDataUri(appContext, newPhotoUri) ?: existingPhoto
+                else -> existingPhoto
+            }
             cloudRepo.updateMemberPresence(
                 familyId = famId,
                 memberId = memberId,
@@ -844,13 +1045,21 @@ class FamilyViewModel(
                 liveStatusAt = now,
                 linkedAuthUid = currentUserId
             )
+            cloudRepo.updateMemberProfileDetails(
+                familyId = famId,
+                memberId = memberId,
+                fields = mapOf(
+                    "bioText" to bioText.trim().take(120),
+                    "avatarPhotoData" to resolvedPhoto.take(750_000)
+                )
+            )
             if (isOnline && _isAppForeground.value) {
                 startPresenceHeartbeat()
             } else {
                 heartbeatJob?.cancel()
                 heartbeatJob = null
             }
-            showMessage("Estado del perfil actualizado")
+            showMessage("Perfil actualizado")
         }
     }
 
@@ -945,7 +1154,10 @@ class FamilyViewModel(
         isAdmin: Boolean,
         colorHex: String,
         emoji: String,
-        phoneNumber: String = ""
+        phoneNumber: String = "",
+        bioText: String? = null,
+        newPhotoUri: Uri? = null,
+        removePhoto: Boolean = false
     ) {
         val famId = _activeFamilyId.value ?: return
         val trimmedName = name.trim()
@@ -955,6 +1167,12 @@ class FamilyViewModel(
             val isCreate = existingId == null
             val id = existingId ?: "member_${UUID.randomUUID().toString().replace("-", "").take(8)}"
             val existing = rawMembers.value.find { it.id == id }
+            val resolvedPhoto = when {
+                removePhoto -> ""
+                newPhotoUri != null -> ImageCompressionHelper.compressToDataUri(appContext, newPhotoUri)
+                    ?: existing?.avatarPhotoData.orEmpty()
+                else -> existing?.avatarPhotoData.orEmpty()
+            }
             val member = FamilyMemberEntity(
                 id = id,
                 name = trimmedName,
@@ -962,6 +1180,8 @@ class FamilyViewModel(
                 isAdmin = isAdmin,
                 avatarColorHex = colorHex,
                 avatarEmoji = emoji,
+                avatarPhotoData = resolvedPhoto,
+                bioText = bioText?.trim()?.take(120) ?: existing?.bioText.orEmpty(),
                 isOnline = existing?.isOnline ?: false,
                 lastSeenText = existing?.lastSeenText ?: "No se ha conectado",
                 createdAt = existing?.createdAt ?: System.currentTimeMillis(),
@@ -1800,6 +2020,131 @@ class FamilyViewModel(
         val famId = _activeFamilyId.value ?: return
         viewModelScope.launch { cloudRepo.deleteNote(famId, id) }
     }
+
+    // --- 24h Family Statuses / Stories & Forwarding ---
+
+    fun publishTextStatus(text: String, backgroundHex: String) {
+        val famId = _activeFamilyId.value ?: return
+        val currentId = _activeMemberId.value ?: return
+        val clean = text.trim()
+        if (clean.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val status = FamilyStatusEntity(
+            id = "st_${UUID.randomUUID().toString().replace("-", "").take(10)}",
+            memberId = currentId,
+            text = clean.take(400),
+            mediaUri = null,
+            backgroundHex = backgroundHex,
+            createdAt = now,
+            expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
+            viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
+            authorUid = currentUserId
+        )
+        viewModelScope.launch {
+            val res = cloudRepo.createStatus(famId, status, currentMemberUids(), currentUserId)
+            showMessage(if (res.isSuccess) "Estado publicado por 24 horas" else "No se pudo publicar el estado")
+        }
+    }
+
+    fun publishPhotoStatus(pickedUri: Uri, caption: String) {
+        val famId = _activeFamilyId.value ?: return
+        val currentId = _activeMemberId.value ?: return
+        viewModelScope.launch {
+            val dataUri = ImageCompressionHelper.compressToDataUri(appContext, pickedUri)
+            if (dataUri == null) {
+                showMessage("No se pudo procesar la foto del estado")
+                return@launch
+            }
+            val now = System.currentTimeMillis()
+            val status = FamilyStatusEntity(
+                id = "st_${UUID.randomUUID().toString().replace("-", "").take(10)}",
+                memberId = currentId,
+                text = caption.trim().take(200),
+                mediaUri = dataUri,
+                backgroundHex = "#111827",
+                createdAt = now,
+                expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
+                viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
+                authorUid = currentUserId
+            )
+            val res = cloudRepo.createStatus(famId, status, currentMemberUids(), currentUserId)
+            showMessage(if (res.isSuccess) "Foto de estado publicada por 24h" else "No se pudo subir el estado")
+        }
+    }
+
+    fun markStatusViewed(statusId: String) {
+        val famId = _activeFamilyId.value ?: return
+        val currentId = _activeMemberId.value ?: return
+        val st = statuses.value.find { it.id == statusId } ?: return
+        if (JsonHelpers.decodeStringList(st.viewedByMemberIdsJson).contains(currentId)) return
+        viewModelScope.launch {
+            cloudRepo.markStatusViewed(famId, statusId, currentId)
+        }
+    }
+
+    fun deleteStatus(statusId: String) {
+        val famId = _activeFamilyId.value ?: return
+        viewModelScope.launch {
+            cloudRepo.deleteStatus(famId, statusId)
+            showMessage("Estado eliminado")
+        }
+    }
+
+    fun replyToStatus(status: FamilyStatusEntity, replyText: String, onOpenChat: (String) -> Unit) {
+        val clean = replyText.trim()
+        if (clean.isEmpty()) return
+        val quoteLabel = status.text.trim().ifBlank { "Foto de estado" }.take(60)
+        createOrOpenDirectChat(status.memberId, openAfter = true) { chatId ->
+            sendTextMessage(chatId, "_Sobre tu estado \"$quoteLabel\":_\n$clean")
+            onOpenChat(chatId)
+        }
+    }
+
+    fun forwardMessage(source: ChatMessageEntity, targetChatId: String) {
+        val famId = _activeFamilyId.value ?: return
+        val currentId = _activeMemberId.value ?: return
+        if (source.type == MessageType.DELETED) return
+        val originalSender = members.value.find { it.id == source.senderId }?.name ?: "Familiar"
+        val cleanPollJson = if (source.type == MessageType.POLL) {
+            val resetOpts = JsonHelpers.decodePollOptions(source.pollOptionsJson)
+                .map { it.copy(voterIds = emptyList()) }
+            JsonHelpers.encodePollOptions(resetOpts)
+        } else {
+            source.pollOptionsJson
+        }
+        val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(10)}"
+        val forwarded = ChatMessageEntity(
+            id = msgId,
+            chatId = targetChatId,
+            senderId = currentId,
+            text = source.text,
+            type = source.type,
+            status = MessageStatus.SENT,
+            timestamp = System.currentTimeMillis(),
+            forwardedFromName = source.forwardedFromName?.ifBlank { originalSender } ?: originalSender,
+            mediaUri = source.mediaUri,
+            voiceDurationSec = source.voiceDurationSec,
+            voiceWaveformJson = source.voiceWaveformJson,
+            locationName = source.locationName,
+            locationAddress = source.locationAddress,
+            locationLat = source.locationLat,
+            locationLng = source.locationLng,
+            pollQuestion = source.pollQuestion,
+            pollOptionsJson = cleanPollJson,
+            authorUid = currentUserId
+        )
+        viewModelScope.launch {
+            val res = cloudRepo.createMessage(famId, forwarded, currentMemberUids(), currentUserId)
+            if (res.isSuccess) {
+                cloudRepo.updateMessageFields(famId, msgId, mapOf("status" to MessageStatus.DELIVERED.name))
+                showMessage("Mensaje reenviado")
+            } else {
+                showMessage("No se pudo reenviar el mensaje")
+            }
+        }
+    }
+
+    private data class Tuple5<A, B, C, D, E>(val a: A, val b: B, val c: C, val d: D, val e: E)
 
     override fun onCleared() {
         super.onCleared()

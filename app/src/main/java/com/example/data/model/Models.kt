@@ -41,6 +41,8 @@ data class FamilyMemberEntity(
     val isAdmin: Boolean,
     val avatarColorHex: String,
     val avatarEmoji: String,
+    val avatarPhotoData: String = "",
+    val bioText: String = "",
     val isOnline: Boolean = false,
     val lastSeenText: String = "No se ha conectado",
     val createdAt: Long = System.currentTimeMillis(),
@@ -49,6 +51,7 @@ data class FamilyMemberEntity(
     val liveChatId: String? = null,
     val liveStatusAt: Long = 0L,
     val linkedAuthUid: String = "",
+    val fcmTokens: List<String> = emptyList(),
     val authorUid: String = ""
 )
 
@@ -76,6 +79,8 @@ data class ChatMessageEntity(
     val isEdited: Boolean = false,
     val reactionsJson: String = "{}",
     val hiddenForMemberIdsJson: String = "[]",
+    val readByMemberIdsJson: String = "[]",
+    val forwardedFromName: String? = null,
     val mediaUri: String? = null,
     val voiceDurationSec: Int = 0,
     val voiceWaveformJson: String = "[]",
@@ -104,6 +109,22 @@ data class CallRecordEntity(
     val connectedAt: Long = 0L,
     val authorUid: String = ""
 )
+
+data class FamilyStatusEntity(
+    val id: String,
+    val memberId: String,
+    val text: String = "",
+    val mediaUri: String? = null,
+    val backgroundHex: String = "#128C7E",
+    val createdAt: Long = System.currentTimeMillis(),
+    val expiresAt: Long = System.currentTimeMillis() + STATUS_TTL_MS,
+    val viewedByMemberIdsJson: String = "[]",
+    val authorUid: String = ""
+) {
+    companion object {
+        const val STATUS_TTL_MS = 24L * 60L * 60L * 1000L
+    }
+}
 
 data class ShoppingItemEntity(
     val id: String,

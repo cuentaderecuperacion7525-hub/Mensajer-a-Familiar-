@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -41,6 +46,7 @@ import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -51,6 +57,7 @@ import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -83,6 +90,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -94,16 +102,22 @@ import com.example.data.model.ChatType
 import com.example.data.model.FamilyEventEntity
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.FamilyNoteEntity
+import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.ShoppingItemEntity
 import com.example.ui.components.AppUpdateDialog
+import com.example.ui.components.CreateStatusDialog
+import com.example.ui.components.FamilyStatusStrip
 import com.example.ui.components.MemberAvatar
+import com.example.ui.components.MemberStatusGroup
 import com.example.ui.components.MessageStatusIcon
+import com.example.ui.components.StatusViewerDialog
 import com.example.ui.components.UserProfileOptionsDialog
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.viewmodel.ChatThreadUi
 import com.example.ui.viewmodel.MainTab
 import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateUiState
+import com.example.util.FamiChatNotificationHelper
 import com.example.util.TimeFormatters
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -113,11 +127,13 @@ fun MainHomeScreen(
     allMembers: List<FamilyMemberEntity>,
     userGroupsCount: Int,
     isDarkTheme: Boolean,
+    notificationsEnabled: Boolean,
     updateRepoSlug: String,
     updateState: AppUpdateUiState,
     selectedTab: MainTab,
     searchQuery: String,
     chatPreviews: List<ChatThreadUi>,
+    statuses: List<FamilyStatusEntity>,
     calls: List<CallRecordEntity>,
     shoppingItems: List<ShoppingItemEntity>,
     events: List<FamilyEventEntity>,
@@ -125,7 +141,13 @@ fun MainHomeScreen(
     snackbarMessage: String?,
     onClearSnackbar: () -> Unit,
     onToggleTheme: () -> Unit,
-    onUpdateOwnStatus: (Boolean, String) -> Unit,
+    onToggleNotifications: (Boolean) -> Unit,
+    onUpdateOwnProfile: (isOnline: Boolean, statusText: String, bioText: String, newPhotoUri: Uri?, removePhoto: Boolean) -> Unit,
+    onPublishTextStatus: (text: String, backgroundHex: String) -> Unit,
+    onPublishPhotoStatus: (uri: Uri, caption: String) -> Unit,
+    onMarkStatusViewed: (String) -> Unit,
+    onDeleteStatus: (String) -> Unit,
+    onReplyToStatus: (FamilyStatusEntity, String) -> Unit,
     onCheckForUpdate: () -> Unit,
     onSaveUpdateRepoSlug: (String) -> Unit,
     onDownloadUpdate: (AppReleaseInfo) -> Unit,
@@ -146,11 +168,33 @@ fun MainHomeScreen(
     onSaveNote: (String?, String, String, String, Boolean) -> Unit,
     onDeleteNote: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showNewChatDialog by remember { mutableStateOf(false) }
     var showProfileOptionsDialog by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
+    var showCreateStatusDialog by remember { mutableStateOf(false) }
+    var viewingStatusMemberId by remember { mutableStateOf<String?>(null) }
+
+    var hasNotifPermission by remember {
+        mutableStateOf(FamiChatNotificationHelper.canPostNotifications(context))
+    }
+    var notifBannerDismissed by rememberSaveable { mutableStateOf(false) }
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted ->
+            hasNotifPermission = granted
+            if (granted) onToggleNotifications(true)
+        }
+    )
+
+    val viewingStatusGroup = remember(viewingStatusMemberId, statuses, allMembers) {
+        val targetId = viewingStatusMemberId ?: return@remember null
+        val member = allMembers.find { it.id == targetId } ?: return@remember null
+        val list = statuses.filter { it.memberId == targetId }.sortedBy { it.createdAt }
+        if (list.isEmpty()) null else MemberStatusGroup(member, list, hasUnviewed = false)
+    }
 
     LaunchedEffect(snackbarMessage) {
         if (snackbarMessage != null) {
@@ -182,6 +226,7 @@ fun MainHomeScreen(
                                 MemberAvatar(
                                     emoji = activeMember.avatarEmoji,
                                     colorHex = activeMember.avatarColorHex,
+                                    photoData = activeMember.avatarPhotoData,
                                     size = 38.dp,
                                     isOnline = activeMember.isOnline,
                                     showOnlineDot = true
@@ -347,13 +392,67 @@ fun MainHomeScreen(
                 ) {
                     Column(modifier = Modifier.fillMaxSize().widthIn(max = 720.dp)) {
                         when (selectedTab) {
-                            MainTab.CHATS -> ChatsListSection(
-                                chats = chatPreviews,
-                                searchQuery = searchQuery,
-                                onSearchChange = onSearchChange,
-                                onOpenChat = onOpenChat,
-                                emptyTip = "No hay chats que coincidan con tu búsqueda."
-                            )
+                            MainTab.CHATS -> Column(modifier = Modifier.fillMaxSize()) {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                    notificationsEnabled &&
+                                    !hasNotifPermission &&
+                                    !notifBannerDismissed
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(16.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Filled.Notifications,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = "Activa notificaciones para recibir alertas de mensajes y llamadas",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            TextButton(onClick = { notifBannerDismissed = true }) {
+                                                Text("Luego")
+                                            }
+                                            Button(
+                                                onClick = {
+                                                    notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                                modifier = Modifier.testTag("enable_notifications_banner_btn")
+                                            ) {
+                                                Text("Permitir")
+                                            }
+                                        }
+                                    }
+                                }
+                                FamilyStatusStrip(
+                                    activeMember = activeMember,
+                                    allMembers = allMembers,
+                                    statuses = statuses,
+                                    onAddStatus = { showCreateStatusDialog = true },
+                                    onOpenMemberStatuses = { group ->
+                                        viewingStatusMemberId = group.member.id
+                                    }
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                ChatsListSection(
+                                    chats = chatPreviews,
+                                    searchQuery = searchQuery,
+                                    onSearchChange = onSearchChange,
+                                    onOpenChat = onOpenChat,
+                                    emptyTip = "No hay chats que coincidan con tu búsqueda."
+                                )
+                            }
                             MainTab.GROUPS -> ChatsListSection(
                                 chats = chatPreviews.filter { it.chat.type == ChatType.GROUP },
                                 searchQuery = searchQuery,
@@ -423,6 +522,7 @@ fun MainHomeScreen(
                                     MemberAvatar(
                                         emoji = member.avatarEmoji,
                                         colorHex = member.avatarColorHex,
+                                        photoData = member.avatarPhotoData,
                                         size = 42.dp,
                                         isOnline = member.isOnline,
                                         showOnlineDot = true
@@ -455,14 +555,42 @@ fun MainHomeScreen(
             member = activeMember,
             userGroupsCount = userGroupsCount,
             isDarkTheme = isDarkTheme,
+            notificationsEnabled = notificationsEnabled,
+            onToggleNotifications = onToggleNotifications,
             onToggleTheme = onToggleTheme,
-            onUpdateStatus = { online, statusText ->
-                onUpdateOwnStatus(online, statusText)
+            onUpdateProfile = { online, statusText, bioText, newPhotoUri, removePhoto ->
+                onUpdateOwnProfile(online, statusText, bioText, newPhotoUri, removePhoto)
                 showProfileOptionsDialog = false
             },
             onOpenAdminPanel = onOpenAdminPanel,
             onRequestSwitchProfile = onSwitchProfile,
             onDismiss = { showProfileOptionsDialog = false }
+        )
+    }
+
+    if (showCreateStatusDialog) {
+        CreateStatusDialog(
+            onDismiss = { showCreateStatusDialog = false },
+            onPublishText = { text, bgHex ->
+                onPublishTextStatus(text, bgHex)
+                showCreateStatusDialog = false
+            },
+            onPublishPhoto = { uri, caption ->
+                onPublishPhotoStatus(uri, caption)
+                showCreateStatusDialog = false
+            }
+        )
+    }
+
+    viewingStatusGroup?.let { group ->
+        StatusViewerDialog(
+            group = group,
+            activeMemberId = activeMember.id,
+            allMembers = allMembers,
+            onMarkViewed = onMarkStatusViewed,
+            onDeleteStatus = onDeleteStatus,
+            onReplyStatus = onReplyToStatus,
+            onDismiss = { viewingStatusMemberId = null }
         )
     }
 
@@ -696,6 +824,7 @@ private fun ChatRowItem(
         MemberAvatar(
             emoji = item.displayEmoji,
             colorHex = item.displayColorHex,
+            photoData = item.displayPhotoData,
             size = 54.dp,
             isOnline = item.isOnline,
             showOnlineDot = true

@@ -1,12 +1,14 @@
 package com.example.ui.components
 
 import android.net.Uri
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,19 +28,21 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Forward
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -66,16 +71,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlin.math.roundToInt
 import coil.compose.AsyncImage
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.FamilyMemberEntity
@@ -122,10 +132,15 @@ fun ChatMessageBubble(
     onImageClick: (String) -> Unit,
     onToggleVoicePlay: () -> Unit,
     onVotePoll: (String) -> Unit,
-    onToggleReaction: (String) -> Unit
+    onToggleReaction: (String) -> Unit,
+    onSwipeReply: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val dark = LocalDarkTheme.current
+    val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val swipeOffsetX = remember(message.id) { Animatable(0f) }
+
     val bubbleBg = when {
         isSelected -> MaterialTheme.colorScheme.primaryContainer
         isMine && dark -> OutgoingBubbleDark
@@ -147,47 +162,120 @@ fun ChatMessageBubble(
         reactionsMap.values.groupingBy { it }.eachCount()
     }
 
-    Column(
+    val swipeThresholdPx = 115f
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                else Color.Transparent
+            .then(
+                if (onSwipeReply != null && !isMultiSelectMode && message.type != MessageType.DELETED) {
+                    Modifier.pointerInput(message.id, isMultiSelectMode, message.type) {
+                        var didHaptic = false
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (swipeOffsetX.value >= swipeThresholdPx) {
+                                    onSwipeReply()
+                                }
+                                didHaptic = false
+                                scope.launch { swipeOffsetX.animateTo(0f) }
+                            },
+                            onDragCancel = {
+                                didHaptic = false
+                                scope.launch { swipeOffsetX.animateTo(0f) }
+                            },
+                            onHorizontalDrag = { _, dragAmount ->
+                                val next = (swipeOffsetX.value + dragAmount).coerceIn(0f, 165f)
+                                if (next >= swipeThresholdPx && !didHaptic) {
+                                    didHaptic = true
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                                scope.launch { swipeOffsetX.snapTo(next) }
+                            }
+                        )
+                    }
+                } else Modifier
             )
-            .padding(horizontal = 12.dp, vertical = 3.dp),
-        horizontalAlignment = if (isMine) Alignment.End else Alignment.Start
     ) {
-        Surface(
-            shape = bubbleShape,
-            color = bubbleBg,
-            tonalElevation = 0.dp,
-            shadowElevation = if (dark) 0.dp else 1.dp,
+        if (swipeOffsetX.value > 10f) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 16.dp)
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = (swipeOffsetX.value / swipeThresholdPx).coerceIn(0f, 0.25f))),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Reply,
+                    contentDescription = "Responder deslizando",
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = (swipeOffsetX.value / swipeThresholdPx).coerceIn(0.25f, 1f)),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        Column(
             modifier = Modifier
-                .widthIn(min = 96.dp, max = 310.dp)
-                .border(
-                    width = if (bubbleBorderColor != Color.Transparent) 0.75.dp else 0.dp,
-                    color = bubbleBorderColor,
-                    shape = bubbleShape
+                .fillMaxWidth()
+                .offset { IntOffset(swipeOffsetX.value.roundToInt(), 0) }
+                .background(
+                    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                    else Color.Transparent
                 )
-                .clip(bubbleShape)
-                .combinedClickable(
-                    onClick = {
-                        if (isMultiSelectMode) onToggleSelect()
-                        else onLongPress()
-                    },
-                    onLongClick = onLongPress
-                )
-                .testTag("message_bubble_${message.id}")
+                .padding(horizontal = 12.dp, vertical = 3.dp),
+            horizontalAlignment = if (isMine) Alignment.End else Alignment.Start
         ) {
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                if (isGroupChat && !isMine && sender != null) {
-                    Text(
-                        text = "${sender.avatarEmoji} ${sender.name}",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = parseHexColor(sender.avatarColorHex)
+            Surface(
+                shape = bubbleShape,
+                color = bubbleBg,
+                tonalElevation = 0.dp,
+                shadowElevation = if (dark) 0.dp else 1.dp,
+                modifier = Modifier
+                    .widthIn(min = 96.dp, max = 310.dp)
+                    .border(
+                        width = if (bubbleBorderColor != Color.Transparent) 0.75.dp else 0.dp,
+                        color = bubbleBorderColor,
+                        shape = bubbleShape
                     )
-                    Spacer(modifier = Modifier.height(3.dp))
-                }
+                    .clip(bubbleShape)
+                    .combinedClickable(
+                        onClick = {
+                            if (isMultiSelectMode) onToggleSelect()
+                            else onLongPress()
+                        },
+                        onLongClick = onLongPress
+                    )
+                    .testTag("message_bubble_${message.id}")
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    if (!message.forwardedFromName.isNullOrBlank() && message.type != MessageType.DELETED) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(bottom = 3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Forward,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "Reenviado de ${message.forwardedFromName}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontStyle = FontStyle.Italic),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (isGroupChat && !isMine && sender != null) {
+                        Text(
+                            text = "${sender.avatarEmoji} ${sender.name}",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = parseHexColor(sender.avatarColorHex)
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                    }
 
                 if (repliedMessage != null && message.type != MessageType.DELETED) {
                     Surface(
@@ -544,6 +632,7 @@ fun ChatMessageBubble(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
+                    }
                 }
             }
         }
@@ -560,6 +649,8 @@ fun MessageActionsBottomSheet(
     onDismiss: () -> Unit,
     onReact: (String) -> Unit,
     onReply: () -> Unit,
+    onForward: () -> Unit = {},
+    onMessageInfo: () -> Unit = {},
     onCopy: () -> Unit,
     onEdit: () -> Unit,
     onTogglePin: () -> Unit,
@@ -601,6 +692,18 @@ fun MessageActionsBottomSheet(
                     leadingContent = { Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null) },
                     modifier = Modifier.clickable { onReply(); onDismiss() }.testTag("action_reply")
                 )
+                ListItem(
+                    headlineContent = { Text("Reenviar") },
+                    leadingContent = { Icon(Icons.Filled.Forward, contentDescription = null) },
+                    modifier = Modifier.clickable { onForward(); onDismiss() }.testTag("action_forward")
+                )
+                if (isMine) {
+                    ListItem(
+                        headlineContent = { Text("Info. del mensaje") },
+                        leadingContent = { Icon(Icons.Filled.Info, contentDescription = null) },
+                        modifier = Modifier.clickable { onMessageInfo(); onDismiss() }.testTag("action_info")
+                    )
+                }
                 if (message.text.isNotBlank()) {
                     ListItem(
                         headlineContent = { Text("Copiar texto") },

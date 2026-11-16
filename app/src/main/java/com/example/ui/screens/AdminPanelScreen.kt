@@ -1,6 +1,10 @@
 package com.example.ui.screens
 
 import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,6 +41,7 @@ import androidx.compose.material.icons.filled.FamilyRestroom
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -106,7 +111,7 @@ fun AdminPanelScreen(
     currentSwitchPin: String,
     currentUpdateRepo: String,
     onBack: () -> Unit,
-    onSaveMember: (id: String?, name: String, role: String, isAdmin: Boolean, color: String, emoji: String, phoneNumber: String) -> Unit,
+    onSaveMember: (id: String?, name: String, role: String, isAdmin: Boolean, color: String, emoji: String, phoneNumber: String, bioText: String, newPhotoUri: Uri?, removePhoto: Boolean) -> Unit,
     onDeleteMember: (String) -> Unit,
     onSaveGroup: (id: String?, title: String, color: String, emoji: String, participantIds: List<String>) -> Unit,
     onDeleteGroup: (String) -> Unit,
@@ -245,8 +250,8 @@ fun AdminPanelScreen(
         MemberEditorDialog(
             initial = editingMember,
             onDismiss = { showMemberDialog = false },
-            onSave = { name, role, isAdmin, color, emoji, phoneNumber ->
-                onSaveMember(editingMember?.id, name, role, isAdmin, color, emoji, phoneNumber)
+            onSave = { name, role, isAdmin, color, emoji, phoneNumber, bio, newPhotoUri, removePhoto ->
+                onSaveMember(editingMember?.id, name, role, isAdmin, color, emoji, phoneNumber, bio, newPhotoUri, removePhoto)
                 showMemberDialog = false
             }
         )
@@ -290,6 +295,7 @@ private fun AdminMembersList(
                     MemberAvatar(
                         emoji = member.avatarEmoji,
                         colorHex = member.avatarColorHex,
+                        photoData = member.avatarPhotoData,
                         size = 48.dp
                     )
                     Spacer(modifier = Modifier.width(12.dp))
@@ -755,14 +761,33 @@ private fun AdminPinSettings(
 private fun MemberEditorDialog(
     initial: FamilyMemberEntity?,
     onDismiss: () -> Unit,
-    onSave: (name: String, role: String, isAdmin: Boolean, color: String, emoji: String, phoneNumber: String) -> Unit
+    onSave: (name: String, role: String, isAdmin: Boolean, color: String, emoji: String, phoneNumber: String, bioText: String, newPhotoUri: Uri?, removePhoto: Boolean) -> Unit
 ) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var role by remember { mutableStateOf(initial?.roleLabel ?: "") }
     var phone by remember { mutableStateOf(initial?.phoneNumber ?: "") }
+    var bioText by remember { mutableStateOf(initial?.bioText ?: "") }
     var isAdmin by remember { mutableStateOf(initial?.isAdmin ?: false) }
     var selectedColor by remember { mutableStateOf(initial?.avatarColorHex ?: AvatarColors.first()) }
     var selectedEmoji by remember { mutableStateOf(initial?.avatarEmoji ?: MemberEmojis.first()) }
+    var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var removePhoto by remember { mutableStateOf(false) }
+
+    val picker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri ->
+            if (uri != null) {
+                pendingPhotoUri = uri
+                removePhoto = false
+            }
+        }
+    )
+
+    val previewPhoto = when {
+        pendingPhotoUri != null -> pendingPhotoUri.toString()
+        removePhoto -> ""
+        else -> initial?.avatarPhotoData.orEmpty()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -772,6 +797,39 @@ private fun MemberEditorDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    MemberAvatar(
+                        emoji = selectedEmoji,
+                        colorHex = selectedColor,
+                        photoData = previewPhoto,
+                        size = 54.dp
+                    )
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (previewPhoto.isBlank()) "Foto de galería" else "Cambiar foto")
+                        }
+                        if (previewPhoto.isNotBlank()) {
+                            TextButton(
+                                onClick = {
+                                    pendingPhotoUri = null
+                                    removePhoto = true
+                                }
+                            ) {
+                                Text("Usar solo emoji", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -785,6 +843,13 @@ private fun MemberEditorDialog(
                     label = { Text("Rol familiar") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("member_role_input")
+                )
+                OutlinedTextField(
+                    value = bioText,
+                    onValueChange = { if (it.length <= 120) bioText = it },
+                    label = { Text("Bio o frase personal (opcional)") },
+                    maxLines = 2,
+                    modifier = Modifier.fillMaxWidth().testTag("member_bio_input")
                 )
                 OutlinedTextField(
                     value = phone,
@@ -842,7 +907,9 @@ private fun MemberEditorDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(name, role, isAdmin, selectedColor, selectedEmoji, phone) },
+                onClick = {
+                    onSave(name, role, isAdmin, selectedColor, selectedEmoji, phone, bioText, pendingPhotoUri, removePhoto)
+                },
                 enabled = name.isNotBlank(),
                 modifier = Modifier.testTag("save_member_button")
             ) {

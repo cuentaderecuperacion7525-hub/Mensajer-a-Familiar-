@@ -49,15 +49,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.data.model.FamilyMemberEntity
 import com.example.ui.theme.LocalDarkTheme
 import com.example.ui.theme.OnlineGreen
+import com.example.util.ImageCompressionHelper
 import com.example.util.parseHexColor
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -238,10 +241,19 @@ private fun NetflixProfileTile(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = member.avatarEmoji.ifBlank { "👤" },
-                fontSize = 52.sp
-            )
+            if (member.avatarPhotoData.isNotBlank()) {
+                AsyncImage(
+                    model = ImageCompressionHelper.resolveCoilModel(member.avatarPhotoData),
+                    contentDescription = "Foto de ${member.name}",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Text(
+                    text = member.avatarEmoji.ifBlank { "👤" },
+                    fontSize = 52.sp
+                )
+            }
 
             if (member.isAdmin) {
                 Surface(

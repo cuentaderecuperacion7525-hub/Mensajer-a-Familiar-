@@ -1,5 +1,9 @@
 package com.example.ui.components
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,6 +14,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -32,6 +37,8 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
@@ -66,6 +73,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -77,6 +85,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import coil.compose.AsyncImage
 import com.example.BuildConfig
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.MessageStatus
@@ -88,6 +97,7 @@ import com.example.util.ApkInspectionResult
 import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateChecker
 import com.example.util.AppUpdateUiState
+import com.example.util.ImageCompressionHelper
 import com.example.util.parseHexColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -100,6 +110,7 @@ fun MemberAvatar(
     size: Dp = 48.dp,
     isOnline: Boolean = false,
     showOnlineDot: Boolean = false,
+    photoData: String? = null,
     modifier: Modifier = Modifier
 ) {
     val bgColor = parseHexColor(colorHex)
@@ -112,10 +123,19 @@ fun MemberAvatar(
                 .border(1.5.dp, bgColor.copy(alpha = 0.55f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = emoji.ifBlank { "👤" },
-                fontSize = (size.value * 0.48f).sp
-            )
+            if (!photoData.isNullOrBlank()) {
+                AsyncImage(
+                    model = ImageCompressionHelper.resolveCoilModel(photoData),
+                    contentDescription = "Foto de perfil",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Text(
+                    text = emoji.ifBlank { "👤" },
+                    fontSize = (size.value * 0.48f).sp
+                )
+            }
         }
         if (showOnlineDot && isOnline) {
             Box(
@@ -158,8 +178,10 @@ fun UserProfileOptionsDialog(
     member: FamilyMemberEntity,
     userGroupsCount: Int,
     isDarkTheme: Boolean,
+    notificationsEnabled: Boolean,
+    onToggleNotifications: (Boolean) -> Unit,
     onToggleTheme: () -> Unit,
-    onUpdateStatus: (isOnline: Boolean, statusText: String) -> Unit,
+    onUpdateProfile: (isOnline: Boolean, statusText: String, bioText: String, newPhotoUri: Uri?, removePhoto: Boolean) -> Unit,
     onOpenAdminPanel: () -> Unit,
     onRequestSwitchProfile: () -> Unit,
     onDismiss: () -> Unit
@@ -167,6 +189,26 @@ fun UserProfileOptionsDialog(
     val effectiveDarkTheme = LocalDarkTheme.current
     var isOnlineInput by remember(member.id, member.isOnline) { mutableStateOf(member.isOnline) }
     var statusInput by remember(member.id, member.lastSeenText) { mutableStateOf(member.lastSeenText) }
+    var bioInput by remember(member.id, member.bioText) { mutableStateOf(member.bioText) }
+    var pendingPhotoUri by remember(member.id) { mutableStateOf<Uri?>(null) }
+    var removeExistingPhoto by remember(member.id) { mutableStateOf(false) }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri ->
+            if (uri != null) {
+                pendingPhotoUri = uri
+                removeExistingPhoto = false
+            }
+        }
+    )
+
+    val previewPhotoData = when {
+        pendingPhotoUri != null -> pendingPhotoUri.toString()
+        removeExistingPhoto -> ""
+        else -> member.avatarPhotoData
+    }
+
     val quickStatuses = listOf("En línea", "En casa", "Ocupado", "En el trabajo", "En la escuela")
 
     Dialog(onDismissRequest = onDismiss) {
@@ -193,7 +235,8 @@ fun UserProfileOptionsDialog(
                     MemberAvatar(
                         emoji = member.avatarEmoji,
                         colorHex = member.avatarColorHex,
-                        size = 56.dp,
+                        photoData = previewPhotoData,
+                        size = 58.dp,
                         isOnline = isOnlineInput,
                         showOnlineDot = true
                     )
@@ -227,6 +270,38 @@ fun UserProfileOptionsDialog(
                         modifier = Modifier.testTag("profile_close_button")
                     ) {
                         Icon(Icons.Filled.Close, contentDescription = "Cerrar")
+                    }
+                }
+
+                // Gallery profile photo buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("profile_change_photo_button")
+                    ) {
+                        Icon(Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (previewPhotoData.isBlank()) "Foto de galería" else "Cambiar foto")
+                    }
+                    if (previewPhotoData.isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                pendingPhotoUri = null
+                                removeExistingPhoto = true
+                            },
+                            modifier = Modifier.testTag("profile_remove_photo_button")
+                        ) {
+                            Text("Quitar foto", color = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
 
@@ -331,13 +406,32 @@ fun UserProfileOptionsDialog(
                             .testTag("profile_status_input")
                     )
 
+                    OutlinedTextField(
+                        value = bioInput,
+                        onValueChange = { if (it.length <= 120) bioInput = it },
+                        label = { Text("Bio / frase personal (opcional)") },
+                        placeholder = { Text("Ej. Disponible después de las 5pm") },
+                        maxLines = 2,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("profile_bio_input")
+                    )
+
                     Button(
-                        onClick = { onUpdateStatus(isOnlineInput, statusInput) },
+                        onClick = {
+                            onUpdateProfile(
+                                isOnlineInput,
+                                statusInput,
+                                bioInput,
+                                pendingPhotoUri,
+                                removeExistingPhoto
+                            )
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("profile_save_status_button")
                     ) {
-                        Text("Guardar estado")
+                        Text("Guardar perfil")
                     }
                 }
 
@@ -372,6 +466,42 @@ fun UserProfileOptionsDialog(
                         checked = effectiveDarkTheme,
                         onCheckedChange = { onToggleTheme() },
                         modifier = Modifier.testTag("profile_theme_switch")
+                    )
+                }
+
+                // Notificaciones
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onToggleNotifications(!notificationsEnabled) }
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(
+                            imageVector = Icons.Filled.Notifications,
+                            contentDescription = "Notificaciones del sistema",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
+                            Text("Notificaciones push", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                text = when {
+                                    !notificationsEnabled -> "Silenciadas en este teléfono"
+                                    member.fcmTokens.isNotEmpty() -> "FCM + sincronización en 2.º plano activos"
+                                    else -> "Activas (registrando push en la nube...)"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = notificationsEnabled,
+                        onCheckedChange = onToggleNotifications,
+                        modifier = Modifier.testTag("profile_notifications_switch")
                     )
                 }
 

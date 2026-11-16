@@ -183,6 +183,119 @@ class FamilyCloudRepositoryRuleTest : FirestoreEmulatorTestBase() {
     assertEquals(FirebaseFirestoreException.Code.PERMISSION_DENIED, caught!!.code)
   }
 
+  @Test
+  fun statusesAndReadReceipts_authenticatedMember_persistAndSyncInRealTime() = runBlocking {
+    val aliceUid = signInTestUser(ALICE_EMAIL)
+    val repo = FamilyCloudRepository(firestore)
+
+    val (familyId, adminMemberId) = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.createFamily(uid = aliceUid, familyName = "Casa Feliz", adminName = "Papá").getOrThrow()
+    }
+    val chats = withTimeout(FLOW_TIMEOUT_MS) {
+      repo.observeChats(familyId, aliceUid).first { it.isNotEmpty() }
+    }
+    val chatId = chats.first().id
+
+    // Update member bio & photo data
+    val profileRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.updateMemberProfileDetails(
+        familyId = familyId,
+        memberId = adminMemberId,
+        fields = mapOf(
+          "bioText" to "Disponible en casa",
+          "avatarPhotoData" to "data:image/jpeg;base64,AAAA"
+        )
+      )
+    }
+    assertTrue("updateMemberProfileDetails failed: ${profileRes.exceptionOrNull()}", profileRes.isSuccess)
+    val updatedMembers = withTimeout(FLOW_TIMEOUT_MS) {
+      repo.observeMembers(familyId, aliceUid).first { list ->
+        list.any { it.id == adminMemberId && it.bioText == "Disponible en casa" }
+      }
+    }
+    assertTrue(updatedMembers.any { it.avatarPhotoData == "data:image/jpeg;base64,AAAA" })
+
+    // Create 24h status and mark viewed
+    val now = System.currentTimeMillis()
+    val statusId = "st_${UUID.randomUUID().toString().replace("-", "").take(10)}"
+    val createStatusRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.createStatus(
+        familyId = familyId,
+        status = com.example.data.model.FamilyStatusEntity(
+          id = statusId,
+          memberId = adminMemberId,
+          text = "Buen día familia",
+          backgroundHex = "#128C7E",
+          createdAt = now,
+          expiresAt = now + 86_400_000L,
+          authorUid = aliceUid
+        ),
+        memberUids = listOf(aliceUid),
+        callerUid = aliceUid
+      )
+    }
+    assertTrue("createStatus failed: ${createStatusRes.exceptionOrNull()}", createStatusRes.isSuccess)
+
+    withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.markStatusViewed(familyId, statusId, "member_mama")
+    }
+    val statuses = withTimeout(FLOW_TIMEOUT_MS) {
+      repo.observeStatuses(familyId, aliceUid).first { list ->
+        list.any { it.id == statusId && it.viewedByMemberIdsJson.contains("member_mama") }
+      }
+    }
+    assertTrue(statuses.any { it.id == statusId && it.text == "Buen día familia" })
+
+    // Create forwarded message & mark read by member
+    val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(10)}"
+    val msgRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.createMessage(
+        familyId = familyId,
+        message = ChatMessageEntity(
+          id = msgId,
+          chatId = chatId,
+          senderId = adminMemberId,
+          text = "Aviso importante",
+          forwardedFromName = "Mamá",
+          timestamp = now
+        ),
+        memberUids = listOf(aliceUid),
+        callerUid = aliceUid
+      )
+    }
+    assertTrue("createMessage forwarded failed: ${msgRes.exceptionOrNull()}", msgRes.isSuccess)
+
+    val readRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.markMessageReadByMember(familyId, msgId, "member_mama")
+    }
+    assertTrue("markMessageReadByMember failed: ${readRes.exceptionOrNull()}", readRes.isSuccess)
+    val messages = withTimeout(FLOW_TIMEOUT_MS) {
+      repo.observeMessages(familyId, aliceUid).first { list ->
+        list.any { it.id == msgId && it.status == MessageStatus.READ }
+      }
+    }
+    val storedMsg = messages.first { it.id == msgId }
+    assertEquals("Mamá", storedMsg.forwardedFromName)
+    assertTrue(storedMsg.readByMemberIdsJson.contains("member_mama"))
+
+    // Register & unregister FCM push token on member profile
+    val regRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.registerMemberFcmToken(familyId, adminMemberId, "test_fcm_token_xyz")
+    }
+    assertTrue("registerMemberFcmToken failed: ${regRes.exceptionOrNull()}", regRes.isSuccess)
+    val membersAfterToken = withTimeout(FLOW_TIMEOUT_MS) {
+      repo.observeMembers(familyId, aliceUid).first { list ->
+        list.any { it.id == adminMemberId && it.fcmTokens.contains("test_fcm_token_xyz") }
+      }
+    }
+    assertTrue(membersAfterToken.any { it.fcmTokens.contains("test_fcm_token_xyz") })
+
+    val unregRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.unregisterMemberFcmToken(familyId, adminMemberId, "test_fcm_token_xyz")
+    }
+    assertTrue("unregisterMemberFcmToken failed: ${unregRes.exceptionOrNull()}", unregRes.isSuccess)
+  }
+
   private companion object {
     const val ALICE_EMAIL = "alice@test.com"
     const val BOB_EMAIL = "bob@test.com"

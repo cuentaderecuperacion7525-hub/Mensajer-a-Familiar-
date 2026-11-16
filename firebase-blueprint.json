@@ -57,6 +57,8 @@
         "isAdmin": { "type": "boolean", "description": "Whether this profile has admin access." },
         "avatarColorHex": { "type": "string", "description": "Hex color for avatar tile." },
         "avatarEmoji": { "type": "string", "description": "Emoji avatar." },
+        "avatarPhotoData": { "type": "string", "description": "Optional compressed Base64 data URI for member profile photo." },
+        "bioText": { "type": "string", "description": "Optional short personal bio shown on profiles." },
         "phoneNumber": { "type": "string", "description": "Optional phone number for direct carrier calls." },
         "isOnline": { "type": "boolean", "description": "Current online status." },
         "lastSeenText": { "type": "string", "description": "Status or last seen label." },
@@ -64,6 +66,7 @@
         "liveChatId": { "type": "string", "description": "Chat ID where user is currently typing or recording." },
         "liveStatusAt": { "type": "integer", "description": "Epoch millis of last live presence update." },
         "linkedAuthUid": { "type": "string", "description": "Optional Auth UID using this profile." },
+        "fcmTokens": { "type": "array", "description": "Bounded list of FCM push registration tokens for this member's devices." },
         "createdAtMs": { "type": "integer", "description": "Client creation epoch millis." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
@@ -106,6 +109,8 @@
         "isEdited": { "type": "boolean", "description": "Whether the message was edited." },
         "reactions": { "type": "object", "description": "Map of memberId to emoji." },
         "hiddenForMemberIds": { "type": "array", "description": "Member IDs who deleted this message for themselves." },
+        "readByMemberIds": { "type": "array", "description": "Member IDs who have read this message." },
+        "forwardedFromName": { "type": "string", "description": "Optional original sender name if message was forwarded." },
         "mediaData": { "type": "string", "description": "Base64 data URI for compressed photo or AAC voice note." },
         "voiceDurationSec": { "type": "integer", "description": "Duration in seconds for voice notes." },
         "voiceWaveform": { "type": "array", "description": "Normalized amplitude floats." },
@@ -198,6 +203,25 @@
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
       },
       "required": ["memberUids", "authorUid", "title", "content", "authorId", "colorHex", "isPinned", "timestamp", "createdAt", "updatedAt"]
+    },
+    "FamilyStatus": {
+      "title": "FamilyStatus",
+      "description": "Ephemeral 24-hour family story/status with photo or colored text and viewer tracking.",
+      "type": "object",
+      "properties": {
+        "memberUids": { "type": "array", "description": "Authorized family Firebase Auth UIDs." },
+        "authorUid": { "type": "string", "description": "Creator Firebase Auth UID." },
+        "memberId": { "type": "string", "description": "Author FamilyMember ID." },
+        "text": { "type": "string", "description": "Status text or photo caption." },
+        "mediaData": { "type": "string", "description": "Optional compressed Base64 photo URI." },
+        "backgroundHex": { "type": "string", "description": "Background color hex for text statuses." },
+        "timestamp": { "type": "integer", "description": "Creation epoch millis." },
+        "expiresAt": { "type": "integer", "description": "Expiration epoch millis (+24h)." },
+        "viewedByMemberIds": { "type": "array", "description": "Member IDs who have viewed this status." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["memberUids", "authorUid", "memberId", "text", "backgroundHex", "timestamp", "expiresAt", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -240,6 +264,10 @@
     "/families/{familyId}/notes/{noteId}": {
       "schema": { "$ref": "#/entities/FamilyNote" },
       "description": "Synced family board notes."
+    },
+    "/families/{familyId}/statuses/{statusId}": {
+      "schema": { "$ref": "#/entities/FamilyStatus" },
+      "description": "24-hour ephemeral family statuses and stories."
     }
   }
 }
