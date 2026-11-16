@@ -24,16 +24,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -62,8 +68,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.BuildConfig
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.MessageStatus
+import com.example.ui.theme.OnlineGreen
+import com.example.ui.theme.ReadBlue
+import com.example.util.AppUpdateUiState
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.theme.ReadBlue
 import com.example.util.parseHexColor
@@ -596,6 +606,275 @@ fun PinVerificationDialog(
                         modifier = Modifier.testTag("pin_cancel_button")
                     ) {
                         Text("Cancelar")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AppUpdateDialog(
+    isAdmin: Boolean,
+    currentRepoSlug: String,
+    updateState: AppUpdateUiState,
+    onCheckAgain: () -> Unit,
+    onSaveRepoSlug: (String) -> Unit,
+    onOpenUrl: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var repoInput by remember(currentRepoSlug) { mutableStateOf(currentRepoSlug) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(26.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 410.dp)
+                .testTag("app_update_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.SystemUpdate,
+                            contentDescription = "Actualizar aplicación",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Actualizar aplicación",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "Versión instalada: v${BuildConfig.VERSION_NAME} (comp. ${BuildConfig.VERSION_CODE})",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("update_close_button")
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = "Cerrar")
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+
+                when (updateState) {
+                    AppUpdateUiState.Idle,
+                    AppUpdateUiState.Checking -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator()
+                            Text(
+                                text = "Buscando actualizaciones disponibles...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+
+                    is AppUpdateUiState.NotConfigured -> {
+                        Text(
+                            text = if (isAdmin) {
+                                "Configura el repositorio de GitHub donde se compilan las actualizaciones para descargar nuevas versiones desde aquí."
+                            } else {
+                                "El administrador (Papá) aún no ha vinculado el repositorio de actualizaciones en Panel de Administración → Seguridad."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (isAdmin) {
+                            OutlinedTextField(
+                                value = repoInput,
+                                onValueChange = { repoInput = it },
+                                label = { Text("Repositorio (usuario/repositorio)") },
+                                placeholder = { Text("ej. usuario/Mensajer-a-Familiar-") },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("update_repo_input")
+                            )
+                            Button(
+                                onClick = { onSaveRepoSlug(repoInput) },
+                                enabled = repoInput.isNotBlank(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("update_save_repo_button")
+                            ) {
+                                Text("Guardar y buscar actualización")
+                            }
+                        }
+                    }
+
+                    is AppUpdateUiState.UpToDate -> {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.CheckCircle,
+                                    contentDescription = "Actualizada",
+                                    tint = OnlineGreen
+                                )
+                                Column {
+                                    Text(
+                                        text = "Tu aplicación está al día",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                                    )
+                                    Text(
+                                        text = "Ya tienes la versión más reciente (v${updateState.installedVersionName}).",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { onOpenUrl(updateState.releasePageUrl) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Ver GitHub")
+                            }
+                            Button(
+                                onClick = onCheckAgain,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("update_recheck_button")
+                            ) {
+                                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Buscar")
+                            }
+                        }
+                    }
+
+                    is AppUpdateUiState.UpdateAvailable -> {
+                        val rel = updateState.release
+                        val remoteLabel = if (rel.versionCode != null) {
+                            "v${rel.versionName} (comp. ${rel.versionCode})"
+                        } else {
+                            "v${rel.versionName}"
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "¡Nueva versión disponible: $remoteLabel!",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = rel.releaseNotes,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                        Button(
+                            onClick = { onOpenUrl(rel.downloadUrl) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("update_download_button")
+                        ) {
+                            Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Descargar actualización")
+                        }
+                        OutlinedButton(
+                            onClick = { onOpenUrl(rel.releasePageUrl) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Abrir página de versión en GitHub")
+                        }
+                    }
+
+                    is AppUpdateUiState.Error -> {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Warning,
+                                    contentDescription = "Aviso",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = updateState.message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (updateState.repoUrl != null) {
+                                OutlinedButton(
+                                    onClick = { onOpenUrl(updateState.repoUrl) },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Abrir GitHub")
+                                }
+                            }
+                            Button(
+                                onClick = onCheckAgain,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("update_retry_button")
+                            ) {
+                                Text("Reintentar")
+                            }
+                        }
                     }
                 }
             }

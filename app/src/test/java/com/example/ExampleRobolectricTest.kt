@@ -2,8 +2,11 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.example.util.AppUpdateChecker
 import com.example.util.MessageFormatter
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -24,5 +27,18 @@ class ExampleRobolectricTest {
   fun `message formatter strips markdown delimiters`() {
     val formatted = MessageFormatter.formatRichText("*Hola* _familia_ ~ayer~")
     assertEquals("Hola familia ayer", formatted.text)
+  }
+
+  @Test
+  fun `app update checker parses versions and normalizes repo url`() {
+    assertEquals(
+      "miusuario/Mensajer-a-Familiar-",
+      AppUpdateChecker.normalizeRepoSlug("https://github.com/miusuario/Mensajer-a-Familiar-/releases")
+    )
+    val (name, code) = AppUpdateChecker.parseReleaseVersion("v1.2-c3", "NidoFamiliar v1.2 (Build 3)")
+    assertEquals("1.2", name)
+    assertEquals(3, code)
+    assertTrue(AppUpdateChecker.isRemoteNewer(2, "1.1", 3, "1.2"))
+    assertFalse(AppUpdateChecker.isRemoteNewer(2, "1.1", 2, "1.1"))
   }
 }

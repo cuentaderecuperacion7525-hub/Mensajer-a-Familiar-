@@ -4,6 +4,7 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.data.local.FamilyDatabase
 import com.example.data.local.FamilyRepository
 import com.example.data.local.PreferencesManager
@@ -22,6 +23,8 @@ import com.example.data.model.MessageType
 import com.example.data.model.PollOption
 import com.example.data.model.PresenceStatus
 import com.example.data.model.ShoppingItemEntity
+import com.example.util.AppUpdateChecker
+import com.example.util.AppUpdateUiState
 import com.example.util.MessageFormatter
 import com.example.util.TimeFormatters
 import kotlinx.coroutines.Job
@@ -31,6 +34,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -78,7 +82,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     private val repo = FamilyRepository(application, db, prefs)
 
     val members: StateFlow<List<FamilyMemberEntity>> = repo.members
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val masterPin: StateFlow<String> = repo.masterPin
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PreferencesManager.DEFAULT_PIN)
@@ -88,6 +92,12 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     val isDarkTheme: StateFlow<Boolean> = prefs.isDarkThemeFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val updateRepoSlug: StateFlow<String> = prefs.updateRepoSlugFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    private val _updateState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
+    val updateState: StateFlow<AppUpdateUiState> = _updateState.asStateFlow()
 
     fun toggleTheme() {
         val next = !isDarkTheme.value
@@ -117,7 +127,10 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     private val _activeMemberId = MutableStateFlow<String?>(null)
     val activeMember: StateFlow<FamilyMemberEntity?> = combine(members, _activeMemberId) { list, id ->
         list.find { it.id == id }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private val _isSessionReady = MutableStateFlow(false)
+    val isSessionReady: StateFlow<Boolean> = _isSessionReady.asStateFlow()
 
     private val _selectedTab = MutableStateFlow(MainTab.CHATS)
     val selectedTab: StateFlow<MainTab> = _selectedTab.asStateFlow()
@@ -244,6 +257,15 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     init {
         viewModelScope.launch {
             repo.ensureSeeded()
+            val currentMembers = members.first { it.isNotEmpty() }
+            val savedMemberId = prefs.activeMemberIdFlow.first()
+            if (savedMemberId != null && currentMembers.any { it.id == savedMemberId }) {
+                _activeMemberId.value = savedMemberId
+                activeMember.first { it != null }
+            } else if (savedMemberId != null) {
+                prefs.setActiveMemberId(null)
+            }
+            _isSessionReady.value = true
         }
     }
 
@@ -298,6 +320,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         _activeChatId.value = null
         stopPlayback()
         cancelVoiceRecording()
+        viewModelScope.launch {
+            prefs.setActiveMemberId(null)
+        }
     }
 
     fun selectTab(tab: MainTab) {
@@ -383,6 +408,41 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             )
             showMessage("Estado del perfil actualizado")
         }
+    }
+
+    fun checkForAppUpdate() {
+        viewModelScope.launch {
+            _updateState.value = AppUpdateUiState.Checking
+            val slug = prefs.updateRepoSlugFlow.first()
+            _updateState.value = AppUpdateChecker.checkLatestRelease(
+                rawRepoSlug = slug,
+                installedVersionName = BuildConfig.VERSION_NAME,
+                installedVersionCode = BuildConfig.VERSION_CODE
+            )
+        }
+    }
+
+    fun saveUpdateRepoSlug(rawInput: String, triggerCheck: Boolean = false) {
+        val trimmed = rawInput.trim()
+        val normalized = if (trimmed.isEmpty()) "" else AppUpdateChecker.normalizeRepoSlug(trimmed)
+        if (trimmed.isNotEmpty() && normalized.isEmpty()) {
+            showMessage("Ingresa el formato usuario/repositorio o URL de GitHub")
+            return
+        }
+        viewModelScope.launch {
+            prefs.setUpdateRepoSlug(normalized)
+            showMessage(
+                if (normalized.isEmpty()) "Repositorio de actualizaciones borrado"
+                else "Repositorio de actualizaciones guardado"
+            )
+            if (triggerCheck) {
+                checkForAppUpdate()
+            }
+        }
+    }
+
+    fun resetUpdateState() {
+        _updateState.value = AppUpdateUiState.Idle
     }
 
     // --- Admin Member & Group Management ---

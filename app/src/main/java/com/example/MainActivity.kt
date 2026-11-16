@@ -5,8 +5,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -73,9 +75,21 @@ fun NidoFamiliarApp(
     vm: FamilyViewModel,
     isDarkTheme: Boolean
 ) {
-    val navController = rememberNavController()
+    val isSessionReady by vm.isSessionReady.collectAsStateWithLifecycle()
     val members by vm.members.collectAsStateWithLifecycle()
     val activeMember by vm.activeMember.collectAsStateWithLifecycle()
+
+    if (!isSessionReady) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        )
+        return
+    }
+
+    val navController = rememberNavController()
+    val initialRoute = remember { if (activeMember != null) Routes.HOME else Routes.SELECTOR }
     val selectedTab by vm.selectedTab.collectAsStateWithLifecycle()
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val chatPreviews by vm.chatPreviews.collectAsStateWithLifecycle()
@@ -87,6 +101,8 @@ fun NidoFamiliarApp(
     val notes by vm.notes.collectAsStateWithLifecycle()
     val masterPin by vm.masterPin.collectAsStateWithLifecycle()
     val switchPin by vm.switchPin.collectAsStateWithLifecycle()
+    val updateRepoSlug by vm.updateRepoSlug.collectAsStateWithLifecycle()
+    val updateState by vm.updateState.collectAsStateWithLifecycle()
     val activeCall by vm.activeCall.collectAsStateWithLifecycle()
     val voiceRecording by vm.voiceRecording.collectAsStateWithLifecycle()
     val playingVoiceId by vm.playingVoiceMessageId.collectAsStateWithLifecycle()
@@ -99,7 +115,7 @@ fun NidoFamiliarApp(
     Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController = navController,
-            startDestination = Routes.SELECTOR
+            startDestination = initialRoute
         ) {
             composable(Routes.SELECTOR) {
                 ProfileSelectorScreen(
@@ -136,6 +152,8 @@ fun NidoFamiliarApp(
                         allMembers = members,
                         userGroupsCount = userGroupsCount,
                         isDarkTheme = isDarkTheme,
+                        updateRepoSlug = updateRepoSlug,
+                        updateState = updateState,
                         selectedTab = selectedTab,
                         searchQuery = searchQuery,
                         chatPreviews = chatPreviews,
@@ -147,6 +165,9 @@ fun NidoFamiliarApp(
                         onClearSnackbar = vm::clearSnackbar,
                         onToggleTheme = vm::toggleTheme,
                         onUpdateOwnStatus = vm::updateOwnProfileStatus,
+                        onCheckForUpdate = vm::checkForAppUpdate,
+                        onSaveUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = true) },
+                        onResetUpdateState = vm::resetUpdateState,
                         onSelectTab = vm::selectTab,
                         onSearchChange = vm::updateSearchQuery,
                         onOpenChat = { chatId ->
@@ -251,13 +272,15 @@ fun NidoFamiliarApp(
                     currentMemberId = activeMember?.id,
                     currentMasterPin = masterPin,
                     currentSwitchPin = switchPin,
+                    currentUpdateRepo = updateRepoSlug,
                     onBack = { navController.popBackStack() },
                     onSaveMember = vm::saveFamilyMember,
                     onDeleteMember = vm::deleteFamilyMember,
                     onSaveGroup = vm::saveGroup,
                     onDeleteGroup = vm::deleteGroup,
                     onUpdateMasterPin = vm::updateMasterPin,
-                    onUpdateSwitchPin = vm::updateSwitchPin
+                    onUpdateSwitchPin = vm::updateSwitchPin,
+                    onUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = false) }
                 )
             }
         }
@@ -284,8 +307,8 @@ fun NidoFamiliarApp(
         if (showSwitchKeyDialog) {
             PinVerificationDialog(
                 title = "Cambiar de perfil (Switch)",
-                subtitle = "Ingresa la clave autorizada por el administrador (${switchPin.length} dígitos)",
-                pinLength = switchPin.length,
+                subtitle = "Ingresa la clave de 6 dígitos autorizada por el administrador",
+                pinLength = 6,
                 onVerify = vm::verifySwitchKey,
                 onSuccess = {
                     showSwitchKeyDialog = false

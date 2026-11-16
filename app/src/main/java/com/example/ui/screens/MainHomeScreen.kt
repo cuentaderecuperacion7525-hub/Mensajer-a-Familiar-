@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +44,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Dashboard
@@ -79,6 +82,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,12 +95,14 @@ import com.example.data.model.FamilyEventEntity
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.ShoppingItemEntity
+import com.example.ui.components.AppUpdateDialog
 import com.example.ui.components.MemberAvatar
 import com.example.ui.components.MessageStatusIcon
 import com.example.ui.components.UserProfileOptionsDialog
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.viewmodel.ChatThreadUi
 import com.example.ui.viewmodel.MainTab
+import com.example.util.AppUpdateUiState
 import com.example.util.TimeFormatters
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -106,6 +112,8 @@ fun MainHomeScreen(
     allMembers: List<FamilyMemberEntity>,
     userGroupsCount: Int,
     isDarkTheme: Boolean,
+    updateRepoSlug: String,
+    updateState: AppUpdateUiState,
     selectedTab: MainTab,
     searchQuery: String,
     chatPreviews: List<ChatThreadUi>,
@@ -117,6 +125,9 @@ fun MainHomeScreen(
     onClearSnackbar: () -> Unit,
     onToggleTheme: () -> Unit,
     onUpdateOwnStatus: (Boolean, String) -> Unit,
+    onCheckForUpdate: () -> Unit,
+    onSaveUpdateRepoSlug: (String) -> Unit,
+    onResetUpdateState: () -> Unit,
     onSelectTab: (MainTab) -> Unit,
     onSearchChange: (String) -> Unit,
     onOpenChat: (String) -> Unit,
@@ -133,10 +144,12 @@ fun MainHomeScreen(
     onSaveNote: (String?, String, String, String, Boolean) -> Unit,
     onDeleteNote: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showNewChatDialog by remember { mutableStateOf(false) }
     var showProfileOptionsDialog by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(snackbarMessage) {
         if (snackbarMessage != null) {
@@ -272,6 +285,18 @@ fun MainHomeScreen(
                                             onToggleTheme()
                                         },
                                         modifier = Modifier.testTag("menu_toggle_theme")
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Actualizar aplicación") },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.SystemUpdate, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            showUpdateDialog = true
+                                            onCheckForUpdate()
+                                        },
+                                        modifier = Modifier.testTag("menu_check_update")
                                     )
                                     if (activeMember.isAdmin) {
                                         DropdownMenuItem(
@@ -464,6 +489,27 @@ fun MainHomeScreen(
             onOpenAdminPanel = onOpenAdminPanel,
             onRequestSwitchProfile = onSwitchProfile,
             onDismiss = { showProfileOptionsDialog = false }
+        )
+    }
+
+    if (showUpdateDialog) {
+        AppUpdateDialog(
+            isAdmin = activeMember.isAdmin,
+            currentRepoSlug = updateRepoSlug,
+            updateState = updateState,
+            onCheckAgain = onCheckForUpdate,
+            onSaveRepoSlug = onSaveUpdateRepoSlug,
+            onOpenUrl = { url ->
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    context.startActivity(intent)
+                } catch (_: Exception) {
+                }
+            },
+            onDismiss = {
+                showUpdateDialog = false
+                onResetUpdateState()
+            }
         )
     }
 }

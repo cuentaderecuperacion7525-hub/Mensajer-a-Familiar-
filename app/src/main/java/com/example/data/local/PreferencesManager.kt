@@ -18,8 +18,9 @@ class PreferencesManager(private val context: Context) {
         private val KEY_SWITCH_PIN = stringPreferencesKey("switch_pin")
         private val KEY_ACTIVE_MEMBER_ID = stringPreferencesKey("active_member_id")
         private val KEY_IS_DARK_THEME = booleanPreferencesKey("is_dark_theme")
+        private val KEY_UPDATE_REPO_SLUG = stringPreferencesKey("update_repo_slug")
         const val DEFAULT_PIN = "752581"
-        const val DEFAULT_SWITCH_PIN = "2580"
+        const val DEFAULT_SWITCH_PIN = "258046"
     }
 
     val masterPinFlow: Flow<String> = context.dataStore.data.map { prefs ->
@@ -27,7 +28,8 @@ class PreferencesManager(private val context: Context) {
     }
 
     val switchPinFlow: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_SWITCH_PIN] ?: DEFAULT_SWITCH_PIN
+        val saved = prefs[KEY_SWITCH_PIN]
+        if (saved != null && saved.length == 6 && saved.all(Char::isDigit)) saved else DEFAULT_SWITCH_PIN
     }
 
     val activeMemberIdFlow: Flow<String?> = context.dataStore.data.map { prefs ->
@@ -36,6 +38,10 @@ class PreferencesManager(private val context: Context) {
 
     val isDarkThemeFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[KEY_IS_DARK_THEME] ?: false
+    }
+
+    val updateRepoSlugFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_UPDATE_REPO_SLUG] ?: ""
     }
 
     suspend fun updateMasterPin(newPin: String) {
@@ -63,6 +69,12 @@ class PreferencesManager(private val context: Context) {
     suspend fun setDarkTheme(isDark: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_IS_DARK_THEME] = isDark
+        }
+    }
+
+    suspend fun setUpdateRepoSlug(slug: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_UPDATE_REPO_SLUG] = slug
         }
     }
 }

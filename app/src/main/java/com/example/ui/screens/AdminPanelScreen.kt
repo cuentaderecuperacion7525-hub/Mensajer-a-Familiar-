@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -73,6 +74,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.BuildConfig
 import com.example.data.model.ChatThreadEntity
 import com.example.data.model.ChatType
 import com.example.data.model.FamilyMemberEntity
@@ -92,13 +94,15 @@ fun AdminPanelScreen(
     currentMemberId: String?,
     currentMasterPin: String,
     currentSwitchPin: String,
+    currentUpdateRepo: String,
     onBack: () -> Unit,
     onSaveMember: (id: String?, name: String, role: String, isAdmin: Boolean, color: String, emoji: String) -> Unit,
     onDeleteMember: (String) -> Unit,
     onSaveGroup: (id: String?, title: String, color: String, emoji: String, participantIds: List<String>) -> Unit,
     onDeleteGroup: (String) -> Unit,
     onUpdateMasterPin: (String) -> Unit,
-    onUpdateSwitchPin: (String) -> Unit
+    onUpdateSwitchPin: (String) -> Unit,
+    onUpdateRepoSlug: (String) -> Unit
 ) {
     var selectedSection by remember { mutableIntStateOf(0) }
     var editingMember by remember { mutableStateOf<FamilyMemberEntity?>(null) }
@@ -213,8 +217,10 @@ fun AdminPanelScreen(
                     2 -> AdminPinSettings(
                         currentMasterPin = currentMasterPin,
                         currentSwitchPin = currentSwitchPin,
+                        currentUpdateRepo = currentUpdateRepo,
                         onUpdateMasterPin = onUpdateMasterPin,
-                        onUpdateSwitchPin = onUpdateSwitchPin
+                        onUpdateSwitchPin = onUpdateSwitchPin,
+                        onUpdateRepoSlug = onUpdateRepoSlug
                     )
                 }
             }
@@ -381,8 +387,10 @@ private fun AdminGroupsList(
 private fun AdminPinSettings(
     currentMasterPin: String,
     currentSwitchPin: String,
+    currentUpdateRepo: String,
     onUpdateMasterPin: (String) -> Unit,
-    onUpdateSwitchPin: (String) -> Unit
+    onUpdateSwitchPin: (String) -> Unit,
+    onUpdateRepoSlug: (String) -> Unit
 ) {
     var currentInput by remember { mutableStateOf("") }
     var newPin by remember { mutableStateOf("") }
@@ -391,6 +399,8 @@ private fun AdminPinSettings(
 
     var newSwitchPin by remember { mutableStateOf("") }
     var switchFeedback by remember { mutableStateOf<String?>(null) }
+
+    var repoInput by remember(currentUpdateRepo) { mutableStateOf(currentUpdateRepo) }
 
     Column(
         modifier = Modifier
@@ -420,7 +430,7 @@ private fun AdminPinSettings(
                     )
                 }
                 Text(
-                    "Si alguien entra por error a otro perfil, necesitará esta clave autorizada por Papá para usar la opción Switch y volver al selector.",
+                    "Si alguien entra por error a otro perfil, necesitará esta clave de 6 dígitos autorizada por Papá para usar la opción Switch y volver al selector.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -455,7 +465,7 @@ private fun AdminPinSettings(
                 OutlinedTextField(
                     value = newSwitchPin,
                     onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) newSwitchPin = it },
-                    label = { Text("Nueva clave de Switch (4 a 6 dígitos)") },
+                    label = { Text("Nueva clave de Switch (6 dígitos)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
                     modifier = Modifier
@@ -473,8 +483,8 @@ private fun AdminPinSettings(
 
                 Button(
                     onClick = {
-                        if (newSwitchPin.length !in 4..6) {
-                            switchFeedback = "La clave de Switch debe tener entre 4 y 6 dígitos."
+                        if (newSwitchPin.length != 6) {
+                            switchFeedback = "La clave de Switch debe tener exactamente 6 dígitos."
                         } else {
                             switchFeedback = null
                             onUpdateSwitchPin(newSwitchPin)
@@ -570,6 +580,54 @@ private fun AdminPinSettings(
                     modifier = Modifier.fillMaxWidth().testTag("admin_save_pin_button")
                 ) {
                     Text("Guardar nueva contraseña")
+                }
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Filled.SystemUpdate,
+                        contentDescription = "Actualizaciones de la app",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        "Actualizaciones desde GitHub",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+                Text(
+                    "Versión actual: v${BuildConfig.VERSION_NAME} (compilación ${BuildConfig.VERSION_CODE}). Configura tu repositorio de GitHub para que toda la familia pueda buscar actualizaciones desde el menú.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = repoInput,
+                    onValueChange = { repoInput = it },
+                    label = { Text("Repositorio (usuario/repositorio)") },
+                    placeholder = { Text("ej. usuario/Mensajer-a-Familiar-") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("admin_update_repo_input")
+                )
+
+                Button(
+                    onClick = { onUpdateRepoSlug(repoInput) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("admin_save_update_repo_button")
+                ) {
+                    Text("Guardar repositorio")
                 }
             }
         }
