@@ -29,8 +29,8 @@ data class FamilySpace(
     val name: String = "",
     val inviteCode: String = "",
     val memberUids: List<String> = emptyList(),
-    val masterPin: String = "752581",
-    val switchPin: String = "258046",
+    val masterPin: String = "7525",
+    val switchPin: String = "2580",
     val updateRepoSlug: String = ""
 )
 

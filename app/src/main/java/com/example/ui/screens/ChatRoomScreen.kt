@@ -43,25 +43,30 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatItalic
 import androidx.compose.material.icons.filled.FormatStrikethrough
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -150,7 +155,10 @@ fun ChatRoomScreen(
     onSendVoiceRecording: (replyToId: String?) -> Unit,
     onToggleVoicePlay: (messageId: String) -> Unit,
     onStartCall: (CallType) -> Unit,
-    onTypingChange: (isTyping: Boolean) -> Unit
+    onTypingChange: (isTyping: Boolean) -> Unit,
+    onToggleTheme: () -> Unit,
+    onGoToHomePanel: () -> Unit,
+    onSwitchProfile: () -> Unit
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -179,6 +187,7 @@ fun ChatRoomScreen(
 
     var showEmojiDrawer by remember { mutableStateOf(false) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
+    var showHeaderMenu by remember { mutableStateOf(false) }
     var showLocationDialog by remember { mutableStateOf(false) }
     var showPollDialog by remember { mutableStateOf(false) }
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -384,23 +393,95 @@ fun ChatRoomScreen(
                                 }
                             },
                             actions = {
-                                IconButton(
-                                    onClick = { isSearchOpen = true },
-                                    modifier = Modifier.testTag("chat_search_button")
-                                ) {
-                                    Icon(Icons.Filled.Search, contentDescription = "Buscar mensajes")
-                                }
-                                IconButton(
-                                    onClick = { onStartCall(CallType.VOICE) },
-                                    modifier = Modifier.testTag("chat_voice_call_button")
-                                ) {
-                                    Icon(Icons.Filled.Call, contentDescription = "Llamada de voz")
-                                }
-                                IconButton(
-                                    onClick = { onStartCall(CallType.VIDEO) },
-                                    modifier = Modifier.testTag("chat_video_call_button")
-                                ) {
-                                    Icon(Icons.Filled.Videocam, contentDescription = "Videollamada")
+                                val isDark = LocalDarkTheme.current
+                                Box {
+                                    IconButton(
+                                        onClick = { showHeaderMenu = true },
+                                        modifier = Modifier.testTag("chat_more_menu_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.MoreVert,
+                                            contentDescription = "Opciones del chat"
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = showHeaderMenu,
+                                        onDismissRequest = { showHeaderMenu = false },
+                                        modifier = Modifier.testTag("chat_more_menu")
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(if (isDark) "Cambiar a tema claro" else "Cambiar a tema oscuro")
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = if (isDark) Icons.Filled.LightMode else Icons.Filled.DarkMode,
+                                                    contentDescription = null
+                                                )
+                                            },
+                                            onClick = {
+                                                showHeaderMenu = false
+                                                onToggleTheme()
+                                            },
+                                            modifier = Modifier.testTag("chat_menu_toggle_theme")
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Ir al panel principal") },
+                                            leadingIcon = {
+                                                Icon(Icons.Filled.Home, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                showHeaderMenu = false
+                                                onGoToHomePanel()
+                                            },
+                                            modifier = Modifier.testTag("chat_menu_go_home")
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Cambiar de perfil") },
+                                            leadingIcon = {
+                                                Icon(Icons.Filled.SwapHoriz, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                showHeaderMenu = false
+                                                onSwitchProfile()
+                                            },
+                                            modifier = Modifier.testTag("chat_menu_switch_profile")
+                                        )
+                                        HorizontalDivider()
+                                        DropdownMenuItem(
+                                            text = { Text("Buscar mensajes") },
+                                            leadingIcon = {
+                                                Icon(Icons.Filled.Search, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                showHeaderMenu = false
+                                                isSearchOpen = true
+                                            },
+                                            modifier = Modifier.testTag("chat_menu_search")
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Llamada de voz") },
+                                            leadingIcon = {
+                                                Icon(Icons.Filled.Call, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                showHeaderMenu = false
+                                                onStartCall(CallType.VOICE)
+                                            },
+                                            modifier = Modifier.testTag("chat_menu_voice_call")
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Videollamada") },
+                                            leadingIcon = {
+                                                Icon(Icons.Filled.Videocam, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                showHeaderMenu = false
+                                                onStartCall(CallType.VIDEO)
+                                            },
+                                            modifier = Modifier.testTag("chat_menu_video_call")
+                                        )
+                                    }
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(

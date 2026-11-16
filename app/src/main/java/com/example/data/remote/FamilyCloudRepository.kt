@@ -112,8 +112,8 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         adminName: String,
         adminEmoji: String = "👨🏽",
         adminColorHex: String = "#1A73E8",
-        defaultMasterPin: String = "752581",
-        defaultSwitchPin: String = "258046",
+        defaultMasterPin: String = "7525",
+        defaultSwitchPin: String = "2580",
         customInviteCode: String? = null
     ): Result<Pair<String, String>> {
         val cleanFamName = familyName.trim().take(50).ifEmpty { "Mi Familia" }

@@ -10,7 +10,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.dp
 
+data class ThemeController(
+    val isDarkTheme: Boolean = false,
+    val onToggleTheme: () -> Unit = {}
+)
+
 val LocalDarkTheme = staticCompositionLocalOf { false }
+val LocalThemeController = staticCompositionLocalOf { ThemeController() }
 
 private val LightColors = lightColorScheme(
     primary = EmeraldPrimary,
@@ -67,10 +73,15 @@ val AppShapes = Shapes(
 @Composable
 fun NidoFamiliarTheme(
     darkTheme: Boolean = false,
+    onToggleTheme: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColors else LightColors
-    CompositionLocalProvider(LocalDarkTheme provides darkTheme) {
+    val controller = ThemeController(isDarkTheme = darkTheme, onToggleTheme = onToggleTheme)
+    CompositionLocalProvider(
+        LocalDarkTheme provides darkTheme,
+        LocalThemeController provides controller
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = AppTypography,

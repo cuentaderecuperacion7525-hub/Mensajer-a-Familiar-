@@ -358,18 +358,19 @@ fun ChatMessageBubble(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(86.dp)
-                                        .background(Color(0xFFE7EEF6)),
+                                        .background(if (dark) Color(0xFF1E293B) else Color(0xFFE7EEF6)),
                                     contentAlignment = Alignment.Center
                                 ) {
+                                    val gridColor = if (dark) Color.White.copy(alpha = 0.14f) else Color.White
                                     Canvas(modifier = Modifier.fillMaxSize()) {
                                         drawLine(
-                                            color = Color.White,
+                                            color = gridColor,
                                             start = Offset(0f, size.height * 0.35f),
                                             end = Offset(size.width, size.height * 0.65f),
                                             strokeWidth = 10f
                                         )
                                         drawLine(
-                                            color = Color.White,
+                                            color = gridColor,
                                             start = Offset(size.width * 0.3f, 0f),
                                             end = Offset(size.width * 0.65f, size.height),
                                             strokeWidth = 8f

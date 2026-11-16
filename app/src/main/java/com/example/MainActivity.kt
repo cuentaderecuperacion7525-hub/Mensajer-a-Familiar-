@@ -56,6 +56,7 @@ import com.example.ui.theme.NidoFamiliarTheme
 import com.example.ui.viewmodel.FamilyViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -91,7 +92,15 @@ class MainActivity : ComponentActivity() {
             val currentUser by remember { Firebase.auth.authStateFlow() }
                 .collectAsStateWithLifecycle(initialValue = Firebase.auth.currentUser)
 
-            NidoFamiliarTheme(darkTheme = isDarkTheme) {
+            NidoFamiliarTheme(
+                darkTheme = isDarkTheme,
+                onToggleTheme = {
+                    scope.launch {
+                        val current = prefs.isDarkThemeFlow.first()
+                        prefs.setDarkTheme(!current)
+                    }
+                }
+            ) {
                 val signedInUser = currentUser
                 if (signedInUser == null) {
                     var authError by remember { mutableStateOf<String?>(null) }
@@ -307,7 +316,7 @@ fun NidoFamiliarApp(
                             if (member.isAdmin) {
                                 vm.logoutToSelector()
                                 navController.navigate(Routes.SELECTOR) {
-                                    popUpTo(Routes.HOME) { inclusive = true }
+                                    popUpTo(0) { inclusive = true }
                                 }
                             } else {
                                 showSwitchKeyDialog = true
@@ -392,6 +401,24 @@ fun NidoFamiliarApp(
                                 status = if (isTyping) PresenceStatus.TYPING else PresenceStatus.ONLINE,
                                 forceClear = !isTyping
                             )
+                        },
+                        onToggleTheme = vm::toggleTheme,
+                        onGoToHomePanel = {
+                            vm.closeChat()
+                            if (!navController.popBackStack(Routes.HOME, inclusive = false)) {
+                                navController.navigate(Routes.HOME) { launchSingleTop = true }
+                            }
+                        },
+                        onSwitchProfile = {
+                            if (member.isAdmin) {
+                                vm.closeChat()
+                                vm.logoutToSelector()
+                                navController.navigate(Routes.SELECTOR) {
+                                    popUpTo(0) { inclusive = true }
+                                }
+                            } else {
+                                showSwitchKeyDialog = true
+                            }
                         }
                     )
                 }
@@ -423,7 +450,7 @@ fun NidoFamiliarApp(
         pendingProtectedMember?.let { protectedMember ->
             PinVerificationDialog(
                 title = "Contraseña de ${protectedMember.name}",
-                subtitle = "Ingresa la contraseña de ${masterPin.length} dígitos para entrar",
+                subtitle = "Ingresa el PIN de ${masterPin.length} dígitos para entrar",
                 pinLength = masterPin.length,
                 onVerify = vm::verifyPin,
                 onSuccess = {
@@ -442,14 +469,15 @@ fun NidoFamiliarApp(
         if (showSwitchKeyDialog) {
             PinVerificationDialog(
                 title = "Cambiar de perfil (Switch)",
-                subtitle = "Ingresa la clave de 6 dígitos autorizada por el administrador",
-                pinLength = 6,
+                subtitle = "Ingresa la clave de ${switchPin.length} dígitos autorizada por el administrador",
+                pinLength = switchPin.length,
                 onVerify = vm::verifySwitchKey,
                 onSuccess = {
                     showSwitchKeyDialog = false
+                    vm.closeChat()
                     vm.logoutToSelector()
                     navController.navigate(Routes.SELECTOR) {
-                        popUpTo(Routes.HOME) { inclusive = true }
+                        popUpTo(0) { inclusive = true }
                     }
                 },
                 onDismiss = {

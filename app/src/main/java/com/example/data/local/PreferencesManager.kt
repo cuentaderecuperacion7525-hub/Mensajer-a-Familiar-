@@ -20,18 +20,18 @@ class PreferencesManager(private val context: Context) {
         private val KEY_ACTIVE_FAMILY_ID = stringPreferencesKey("active_family_id")
         private val KEY_IS_DARK_THEME = booleanPreferencesKey("is_dark_theme")
         private val KEY_UPDATE_REPO_SLUG = stringPreferencesKey("update_repo_slug")
-        const val DEFAULT_PIN = "752581"
-        const val DEFAULT_SWITCH_PIN = "258046"
+        const val DEFAULT_PIN = "7525"
+        const val DEFAULT_SWITCH_PIN = "2580"
     }
 
     val masterPinFlow: Flow<String> = context.dataStore.data.map { prefs ->
         val saved = prefs[KEY_MASTER_PIN]
-        if (saved != null && saved.length == 6 && saved.all(Char::isDigit)) saved else DEFAULT_PIN
+        if (saved != null && saved.length == 4 && saved.all(Char::isDigit)) saved else DEFAULT_PIN
     }
 
     val switchPinFlow: Flow<String> = context.dataStore.data.map { prefs ->
         val saved = prefs[KEY_SWITCH_PIN]
-        if (saved != null && saved.length == 6 && saved.all(Char::isDigit)) saved else DEFAULT_SWITCH_PIN
+        if (saved != null && saved.length == 4 && saved.all(Char::isDigit)) saved else DEFAULT_SWITCH_PIN
     }
 
     val activeMemberIdFlow: Flow<String?> = context.dataStore.data.map { prefs ->

@@ -17,15 +17,15 @@
     },
     "Family": {
       "title": "Family",
-      "description": "Root family workspace storing access UIDs, admin/switch 6-digit PINs, invite code, and update repository.",
+      "description": "Root family workspace storing access UIDs, admin/switch 4-digit PINs, invite code, and update repository.",
       "type": "object",
       "properties": {
         "ownerUid": { "type": "string", "description": "Firebase Auth UID of the admin/creator." },
         "name": { "type": "string", "description": "Family display name." },
         "inviteCode": { "type": "string", "description": "Invite code to join this family." },
         "memberUids": { "type": "array", "description": "Bounded list of Firebase Auth UIDs belonging to this family." },
-        "masterPin": { "type": "string", "description": "6-digit password protecting Admin profile." },
-        "switchPin": { "type": "string", "description": "6-digit key to unlock Switch profile action." },
+        "masterPin": { "type": "string", "description": "4-digit password protecting Admin profile." },
+        "switchPin": { "type": "string", "description": "4-digit key to unlock Switch profile action." },
         "updateRepoSlug": { "type": "string", "description": "Optional GitHub owner/repo slug for app updates." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }

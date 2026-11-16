@@ -31,8 +31,8 @@ internal object FirestoreMappers {
             name = doc.getString("name") ?: "Mi Familia",
             inviteCode = doc.getString("inviteCode") ?: "",
             memberUids = uids,
-            masterPin = doc.getString("masterPin") ?: "752581",
-            switchPin = doc.getString("switchPin") ?: "258046",
+            masterPin = doc.getString("masterPin") ?: "7525",
+            switchPin = doc.getString("switchPin") ?: "2580",
             updateRepoSlug = doc.getString("updateRepoSlug") ?: ""
         )
     }

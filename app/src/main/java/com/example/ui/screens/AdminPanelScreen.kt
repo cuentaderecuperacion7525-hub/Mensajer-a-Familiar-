@@ -547,7 +547,7 @@ private fun AdminPinSettings(
                     )
                 }
                 Text(
-                    "Si alguien entra por error a otro perfil, necesitará esta clave de 6 dígitos autorizada por Papá para usar la opción Switch y volver al selector.",
+                    "Si alguien entra por error a otro perfil, necesitará esta clave de 4 dígitos autorizada por Papá para usar la opción Switch y volver al selector.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -581,8 +581,8 @@ private fun AdminPinSettings(
 
                 OutlinedTextField(
                     value = newSwitchPin,
-                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) newSwitchPin = it },
-                    label = { Text("Nueva clave de Switch (6 dígitos)") },
+                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) newSwitchPin = it },
+                    label = { Text("Nueva clave de Switch (4 dígitos)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
                     modifier = Modifier
@@ -600,8 +600,8 @@ private fun AdminPinSettings(
 
                 Button(
                     onClick = {
-                        if (newSwitchPin.length != 6) {
-                            switchFeedback = "La clave de Switch debe tener exactamente 6 dígitos."
+                        if (newSwitchPin.length != 4) {
+                            switchFeedback = "La clave de Switch debe tener exactamente 4 dígitos."
                         } else {
                             switchFeedback = null
                             onUpdateSwitchPin(newSwitchPin)
@@ -638,15 +638,15 @@ private fun AdminPinSettings(
                     )
                 }
                 Text(
-                    "Protege el ingreso al perfil administrador de Papá y el control familiar.",
+                    "Protege el ingreso al perfil administrador de Papá y el control familiar (PIN de 4 dígitos).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 OutlinedTextField(
                     value = currentInput,
-                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) currentInput = it },
-                    label = { Text("Contraseña actual") },
+                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) currentInput = it },
+                    label = { Text("PIN actual (4 dígitos)") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
@@ -654,8 +654,8 @@ private fun AdminPinSettings(
                 )
                 OutlinedTextField(
                     value = newPin,
-                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) newPin = it },
-                    label = { Text("Nueva contraseña (6 dígitos)") },
+                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) newPin = it },
+                    label = { Text("Nuevo PIN (4 dígitos)") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
@@ -663,8 +663,8 @@ private fun AdminPinSettings(
                 )
                 OutlinedTextField(
                     value = confirmPin,
-                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) confirmPin = it },
-                    label = { Text("Confirmar nueva contraseña") },
+                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) confirmPin = it },
+                    label = { Text("Confirmar nuevo PIN") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
@@ -682,9 +682,9 @@ private fun AdminPinSettings(
                 Button(
                     onClick = {
                         when {
-                            currentInput != currentMasterPin -> feedback = "La contraseña actual no coincide."
-                            newPin.length != 6 -> feedback = "La nueva contraseña debe tener exactamente 6 dígitos."
-                            newPin != confirmPin -> feedback = "Las nuevas contraseñas no coinciden."
+                            currentInput != currentMasterPin -> feedback = "El PIN actual no coincide."
+                            newPin.length != 4 -> feedback = "El nuevo PIN debe tener exactamente 4 dígitos."
+                            newPin != confirmPin -> feedback = "Los nuevos PIN no coinciden."
                             else -> {
                                 feedback = null
                                 onUpdateMasterPin(newPin)
@@ -696,7 +696,7 @@ private fun AdminPinSettings(
                     },
                     modifier = Modifier.fillMaxWidth().testTag("admin_save_pin_button")
                 ) {
-                    Text("Guardar nueva contraseña")
+                    Text("Guardar nuevo PIN")
                 }
             }
         }

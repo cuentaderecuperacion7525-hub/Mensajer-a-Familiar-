@@ -25,7 +25,7 @@ service cloud.firestore {
     }
 
     function isValidPin(pin) {
-      return pin is string && pin.size() == 6 && pin.matches('^[0-9]{6}$');
+      return pin is string && pin.size() == 4 && pin.matches('^[0-9]{4}$');
     }
 
     function isValidInviteCode(code) {

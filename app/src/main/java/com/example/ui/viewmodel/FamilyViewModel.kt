@@ -171,15 +171,15 @@ class FamilyViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val masterPin: StateFlow<String> = combine(activeFamily, prefs.masterPinFlow) { fam, localPin ->
-        fam?.masterPin?.takeIf { it.length == 6 } ?: localPin
+        fam?.masterPin?.takeIf { it.length == 4 && it.all(Char::isDigit) } ?: localPin
     }.stateIn(viewModelScope, SharingStarted.Eagerly, PreferencesManager.DEFAULT_PIN)
 
     val switchPin: StateFlow<String> = combine(activeFamily, prefs.switchPinFlow) { fam, localPin ->
-        fam?.switchPin?.takeIf { it.length == 6 } ?: localPin
+        fam?.switchPin?.takeIf { it.length == 4 && it.all(Char::isDigit) } ?: localPin
     }.stateIn(viewModelScope, SharingStarted.Eagerly, PreferencesManager.DEFAULT_SWITCH_PIN)
 
     val isDarkTheme: StateFlow<Boolean> = prefs.isDarkThemeFlow
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val updateRepoSlug: StateFlow<String> = combine(activeFamily, prefs.updateRepoSlugFlow) { fam, localSlug ->
         fam?.updateRepoSlug?.ifBlank { null } ?: localSlug
@@ -492,8 +492,10 @@ class FamilyViewModel(
     }
 
     fun toggleTheme() {
-        val next = !isDarkTheme.value
-        viewModelScope.launch { prefs.setDarkTheme(next) }
+        viewModelScope.launch {
+            val current = prefs.isDarkThemeFlow.first()
+            prefs.setDarkTheme(!current)
+        }
     }
 
     fun selectProfile(memberId: String) {
@@ -628,20 +630,38 @@ class FamilyViewModel(
         entered == switchPin.value || entered == masterPin.value
 
     fun updateMasterPin(newPin: String) {
+        if (newPin.length != 4 || !newPin.all(Char::isDigit)) {
+            showMessage("El PIN debe tener exactamente 4 dígitos")
+            return
+        }
         val famId = _activeFamilyId.value ?: return
         viewModelScope.launch {
             prefs.updateMasterPin(newPin)
-            val res = cloudRepo.updateFamilySettings(famId, mapOf("masterPin" to newPin))
+            val updates = mutableMapOf<String, Any>("masterPin" to newPin)
+            val currentFamSwitch = activeFamily.value?.switchPin
+            if (currentFamSwitch != null && (currentFamSwitch.length != 4 || !currentFamSwitch.all(Char::isDigit))) {
+                updates["switchPin"] = switchPin.value
+            }
+            val res = cloudRepo.updateFamilySettings(famId, updates)
             if (res.isSuccess) showMessage("Contraseña de Administrador actualizada")
             else showMessage("Solo el dueño de la familia puede cambiar la clave principal")
         }
     }
 
     fun updateSwitchPin(newPin: String) {
+        if (newPin.length != 4 || !newPin.all(Char::isDigit)) {
+            showMessage("La clave de Switch debe tener exactamente 4 dígitos")
+            return
+        }
         val famId = _activeFamilyId.value ?: return
         viewModelScope.launch {
             prefs.updateSwitchPin(newPin)
-            val res = cloudRepo.updateFamilySettings(famId, mapOf("switchPin" to newPin))
+            val updates = mutableMapOf<String, Any>("switchPin" to newPin)
+            val currentFamMaster = activeFamily.value?.masterPin
+            if (currentFamMaster != null && (currentFamMaster.length != 4 || !currentFamMaster.all(Char::isDigit))) {
+                updates["masterPin"] = masterPin.value
+            }
+            val res = cloudRepo.updateFamilySettings(famId, updates)
             if (res.isSuccess) showMessage("Clave de cambio de perfil actualizada")
             else showMessage("Solo el dueño de la familia puede cambiar la clave de Switch")
         }

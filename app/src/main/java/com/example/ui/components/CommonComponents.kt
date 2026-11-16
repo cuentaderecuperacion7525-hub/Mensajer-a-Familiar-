@@ -72,6 +72,8 @@ import androidx.compose.ui.window.Dialog
 import com.example.BuildConfig
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.MessageStatus
+import com.example.ui.theme.LocalDarkTheme
+import com.example.ui.theme.LocalThemeController
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.theme.ReadBlue
 import com.example.util.AppUpdateChecker
@@ -149,6 +151,7 @@ fun UserProfileOptionsDialog(
     onRequestSwitchProfile: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val effectiveDarkTheme = LocalDarkTheme.current
     var isOnlineInput by remember(member.id, member.isOnline) { mutableStateOf(member.isOnline) }
     var statusInput by remember(member.id, member.lastSeenText) { mutableStateOf(member.lastSeenText) }
     val quickStatuses = listOf("En línea", "En casa", "Ocupado", "En el trabajo", "En la escuela")
@@ -339,21 +342,21 @@ fun UserProfileOptionsDialog(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(
-                            imageVector = if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                            imageVector = if (effectiveDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
                             contentDescription = "Tema de la aplicación",
                             tint = MaterialTheme.colorScheme.primary
                         )
                         Column {
                             Text("Tema oscuro", style = MaterialTheme.typography.titleSmall)
                             Text(
-                                text = if (isDarkTheme) "Activo (oscuro)" else "Desactivado (blanco)",
+                                text = if (effectiveDarkTheme) "Activo (oscuro)" else "Desactivado (blanco)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                     Switch(
-                        checked = isDarkTheme,
+                        checked = effectiveDarkTheme,
                         onCheckedChange = { onToggleTheme() },
                         modifier = Modifier.testTag("profile_theme_switch")
                     )
@@ -438,8 +441,8 @@ fun UserProfileOptionsDialog(
 @Composable
 fun PinVerificationDialog(
     title: String = "Contraseña de Papá",
-    subtitle: String = "Ingresa la contraseña de 6 dígitos para entrar",
-    pinLength: Int = 6,
+    subtitle: String = "Ingresa el PIN de 4 dígitos para entrar",
+    pinLength: Int = 4,
     onVerify: (String) -> Boolean,
     onSuccess: () -> Unit,
     onDismiss: () -> Unit
