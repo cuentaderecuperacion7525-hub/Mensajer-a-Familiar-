@@ -44,6 +44,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -53,6 +54,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +72,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.BuildConfig
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.MessageStatus
@@ -76,9 +82,11 @@ import com.example.ui.theme.LocalDarkTheme
 import com.example.ui.theme.LocalThemeController
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.theme.ReadBlue
+import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateChecker
 import com.example.util.AppUpdateUiState
 import com.example.util.parseHexColor
+import java.io.File
 
 @Composable
 fun MemberAvatar(
@@ -623,12 +631,32 @@ fun AppUpdateDialog(
     updateState: AppUpdateUiState,
     onCheckAgain: () -> Unit,
     onSaveRepoSlug: (String) -> Unit,
-    onOpenUrl: (String) -> Unit,
+    onDownloadUpdate: (AppReleaseInfo) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val hasUnifiedSigning = remember(context) { AppUpdateChecker.isConsistentDebugSigning(context) }
     var repoInput by remember(currentRepoSlug) { mutableStateOf(currentRepoSlug) }
+    var canInstallPackages by remember { mutableStateOf(AppUpdateChecker.canRequestPackageInstalls(context)) }
+    var waitingPermissionReturn by remember { mutableStateOf(false) }
+    var installErrorMsg by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val allowed = AppUpdateChecker.canRequestPackageInstalls(context)
+                canInstallPackages = allowed
+                if (allowed && waitingPermissionReturn && updateState is AppUpdateUiState.ReadyToInstall) {
+                    waitingPermissionReturn = false
+                    AppUpdateChecker.launchApkInstaller(context, File(updateState.apkFilePath))
+                        .onFailure { installErrorMsg = it.localizedMessage }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -708,9 +736,9 @@ fun AppUpdateDialog(
                     is AppUpdateUiState.NotConfigured -> {
                         Text(
                             text = if (isAdmin) {
-                                "Configura el repositorio de GitHub donde se compilan las actualizaciones para descargar nuevas versiones desde aquí."
+                                "Configura el repositorio de actualizaciones para descargar e instalar nuevas versiones directamente aquí."
                             } else {
-                                "El administrador (Papá) aún no ha vinculado el repositorio de actualizaciones en Panel de Administración → Seguridad."
+                                "El administrador (Papá) aún no ha vinculado el origen de actualizaciones en Panel de Administración → Seguridad."
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -767,28 +795,15 @@ fun AppUpdateDialog(
                                 }
                             }
                         }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Button(
+                            onClick = onCheckAgain,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("update_recheck_button")
                         ) {
-                            if (updateState.releasePageUrl.isNotBlank()) {
-                                OutlinedButton(
-                                    onClick = { onOpenUrl(updateState.releasePageUrl) },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Ver GitHub")
-                                }
-                            }
-                            Button(
-                                onClick = onCheckAgain,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("update_recheck_button")
-                            ) {
-                                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Buscar de nuevo")
-                            }
+                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Buscar de nuevo")
                         }
                     }
 
@@ -821,14 +836,14 @@ fun AppUpdateDialog(
                             }
                         }
                         Button(
-                            onClick = { onOpenUrl(rel.downloadUrl) },
+                            onClick = { onDownloadUpdate(rel) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("update_download_button")
                         ) {
                             Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Descargar actualización")
+                            Text("Descargar e instalar")
                         }
                         if (hasUnifiedSigning == false) {
                             Surface(
@@ -844,11 +859,138 @@ fun AppUpdateDialog(
                                 )
                             }
                         }
-                        OutlinedButton(
-                            onClick = { onOpenUrl(rel.releasePageUrl) },
+                    }
+
+                    is AppUpdateUiState.Downloading -> {
+                        val rel = updateState.release
+                        val pct = updateState.progressPercent
+                        val downloadedMb = updateState.downloadedBytes / (1024f * 1024f)
+                        val totalMb = updateState.totalBytes / (1024f * 1024f)
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Descargando v${rel.versionName}...",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                                Text(
+                                    text = if (pct >= 0) "$pct%" else String.format("%.1f MB", downloadedMb),
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.testTag("update_progress_percent")
+                                )
+                            }
+                            if (pct >= 0) {
+                                LinearProgressIndicator(
+                                    progress = { (pct / 100f).coerceIn(0f, 1f) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .testTag("update_progress_bar")
+                                )
+                            } else {
+                                LinearProgressIndicator(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .testTag("update_progress_bar")
+                                )
+                            }
+                            val sizeLabel = if (updateState.totalBytes > 0L) {
+                                String.format("%.1f MB de %.1f MB", downloadedMb, totalMb)
+                            } else {
+                                String.format("%.1f MB descargados", downloadedMb)
+                            }
+                            Text(
+                                text = "$sizeLabel · No salgas de esta ventana; el instalador se abrirá automáticamente.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    is AppUpdateUiState.ReadyToInstall -> {
+                        val apkFile = remember(updateState.apkFilePath) { File(updateState.apkFilePath) }
+
+                        LaunchedEffect(updateState.apkFilePath) {
+                            installErrorMsg = null
+                            canInstallPackages = AppUpdateChecker.canRequestPackageInstalls(context)
+                            if (canInstallPackages) {
+                                AppUpdateChecker.launchApkInstaller(context, apkFile)
+                                    .onFailure { installErrorMsg = it.localizedMessage }
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Abrir página de versión en GitHub")
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.CheckCircle,
+                                    contentDescription = "Descarga completa",
+                                    tint = OnlineGreen
+                                )
+                                Column {
+                                    Text(
+                                        text = "Descarga completa (100%)",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                                    )
+                                    Text(
+                                        text = if (canInstallPackages) {
+                                            "Versión v${updateState.release.versionName} lista para instalar."
+                                        } else {
+                                            "Activa el permiso \"Instalar aplicaciones desconocidas\" para NidoFamiliar y volverás directo al instalador."
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        if (!installErrorMsg.isNullOrBlank()) {
+                            Text(
+                                text = installErrorMsg.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                installErrorMsg = null
+                                if (AppUpdateChecker.canRequestPackageInstalls(context)) {
+                                    AppUpdateChecker.launchApkInstaller(context, apkFile)
+                                        .onFailure { installErrorMsg = it.localizedMessage }
+                                } else {
+                                    waitingPermissionReturn = true
+                                    AppUpdateChecker.openInstallPermissionSettings(context)
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("update_install_button")
+                        ) {
+                            Icon(Icons.Filled.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (canInstallPackages) "Instalar ahora" else "Permitir e instalar")
                         }
                     }
 
@@ -875,26 +1017,13 @@ fun AppUpdateDialog(
                                 )
                             }
                         }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Button(
+                            onClick = onCheckAgain,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("update_retry_button")
                         ) {
-                            if (updateState.repoUrl != null) {
-                                OutlinedButton(
-                                    onClick = { onOpenUrl(updateState.repoUrl) },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Abrir GitHub")
-                                }
-                            }
-                            Button(
-                                onClick = onCheckAgain,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("update_retry_button")
-                            ) {
-                                Text("Reintentar")
-                            }
+                            Text("Reintentar")
                         }
                     }
                 }

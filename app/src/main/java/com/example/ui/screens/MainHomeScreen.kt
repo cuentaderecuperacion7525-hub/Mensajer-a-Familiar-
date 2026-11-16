@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
-import android.content.Intent
-import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.CallMissed
@@ -63,7 +63,6 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -82,7 +81,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -102,6 +101,7 @@ import com.example.ui.components.UserProfileOptionsDialog
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.viewmodel.ChatThreadUi
 import com.example.ui.viewmodel.MainTab
+import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateUiState
 import com.example.util.TimeFormatters
 
@@ -127,6 +127,7 @@ fun MainHomeScreen(
     onUpdateOwnStatus: (Boolean, String) -> Unit,
     onCheckForUpdate: () -> Unit,
     onSaveUpdateRepoSlug: (String) -> Unit,
+    onDownloadUpdate: (AppReleaseInfo) -> Unit,
     onResetUpdateState: () -> Unit,
     onSelectTab: (MainTab) -> Unit,
     onSearchChange: (String) -> Unit,
@@ -144,7 +145,6 @@ fun MainHomeScreen(
     onSaveNote: (String?, String, String, String, Boolean) -> Unit,
     onDeleteNote: (String) -> Unit
 ) {
-    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showNewChatDialog by remember { mutableStateOf(false) }
     var showProfileOptionsDialog by remember { mutableStateOf(false) }
@@ -204,35 +204,6 @@ fun MainHomeScreen(
                             }
                         },
                         actions = {
-                            IconButton(
-                                onClick = onToggleTheme,
-                                modifier = Modifier.testTag("home_theme_toggle")
-                            ) {
-                                Icon(
-                                    imageVector = if (isDarkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
-                                    contentDescription = if (isDarkTheme) "Cambiar a tema blanco" else "Cambiar a tema oscuro"
-                                )
-                            }
-                            if (activeMember.isAdmin) {
-                                IconButton(
-                                    onClick = onOpenAdminPanel,
-                                    modifier = Modifier.testTag("home_admin_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.AdminPanelSettings,
-                                        contentDescription = "Panel de administración"
-                                    )
-                                }
-                            }
-                            IconButton(
-                                onClick = onSwitchProfile,
-                                modifier = Modifier.testTag("home_switch_profile_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.SwapHoriz,
-                                    contentDescription = "Switch de perfil"
-                                )
-                            }
                             Box {
                                 IconButton(
                                     onClick = { showOverflowMenu = true },
@@ -499,13 +470,7 @@ fun MainHomeScreen(
             updateState = updateState,
             onCheckAgain = onCheckForUpdate,
             onSaveRepoSlug = onSaveUpdateRepoSlug,
-            onOpenUrl = { url ->
-                try {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                    context.startActivity(intent)
-                } catch (_: Exception) {
-                }
-            },
+            onDownloadUpdate = onDownloadUpdate,
             onDismiss = {
                 showUpdateDialog = false
                 onResetUpdateState()
@@ -621,25 +586,69 @@ private fun ChatsListSection(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = onSearchChange,
-            placeholder = { Text("Buscar chats o mensajes...") },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Buscar") },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { onSearchChange("") }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Limpiar búsqueda")
-                    }
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(28.dp),
+        Surface(
+            shape = RoundedCornerShape(21.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-                .testTag("chat_list_search")
-        )
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+                .height(42.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = "Buscar",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (searchQuery.isEmpty()) {
+                        Text(
+                            text = "Buscar chats o mensajes...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchChange,
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("chat_list_search")
+                    )
+                }
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(
+                        onClick = { onSearchChange("") },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "Limpiar búsqueda",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
 
         if (filtered.isEmpty()) {
             Box(

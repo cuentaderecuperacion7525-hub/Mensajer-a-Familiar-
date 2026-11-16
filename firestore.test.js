@@ -224,3 +224,102 @@ test("Call signaling enforces terminal state lock once ENDED", async () => {
     })
   );
 });
+
+test("Invite join succeeds even if existing family has legacy 6-digit PIN and 25+ memberUids", async () => {
+  const existingUids = [ALICE_UID];
+  for (let i = 1; i <= 26; i++) {
+    existingUids.push(`legacy_device_${i}`);
+  }
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore();
+    await adminDb.collection("families").doc("fam_legacy").set({
+      ownerUid: ALICE_UID,
+      name: "Mi Familia",
+      inviteCode: "NIDO01",
+      memberUids: existingUids,
+      masterPin: "000000",
+      switchPin: "258000",
+      updateRepoSlug: "",
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    });
+    await adminDb.collection("familyInvites").doc("NIDO01").set({
+      inviteCode: "NIDO01",
+      familyId: "fam_legacy",
+      familyName: "Mi Familia",
+      ownerUid: ALICE_UID,
+      active: true,
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    });
+  });
+
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  await assertSucceeds(
+    bobDb.collection("families").doc("fam_legacy").update({
+      memberUids: arrayUnion(BOB_UID),
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Stranger still cannot modify masterPin on join
+  await assertFails(
+    testEnv.authenticatedContext(EVE_UID).firestore().collection("families").doc("fam_legacy").update({
+      memberUids: arrayUnion(EVE_UID),
+      masterPin: "7525",
+      updatedAt: serverTs(),
+    })
+  );
+});
+
+test("Family settings update allowed only for ownerUid; join works even without createdAt", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore();
+    await adminDb.collection("families").doc("fam_nocreated").set({
+      ownerUid: ALICE_UID,
+      name: "Mi Familia",
+      inviteCode: "NIDO01",
+      memberUids: [ALICE_UID],
+      masterPin: "7525",
+      switchPin: "2580",
+      updateRepoSlug: "",
+      updatedAt: serverTs(),
+    });
+    await adminDb.collection("familyInvites").doc("NIDO01").set({
+      inviteCode: "NIDO01",
+      familyId: "fam_nocreated",
+      familyName: "Mi Familia",
+      ownerUid: ALICE_UID,
+      active: true,
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    });
+  });
+
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  await assertSucceeds(
+    bobDb.collection("families").doc("fam_nocreated").update({
+      memberUids: arrayUnion(BOB_UID),
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Non-owner member cannot update updateRepoSlug or PINs
+  await assertFails(
+    bobDb.collection("families").doc("fam_nocreated").update({
+      updateRepoSlug: "evil/repo",
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Owner can update updateRepoSlug
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  await assertSucceeds(
+    aliceDb.collection("families").doc("fam_nocreated").update({
+      updateRepoSlug: "owner/repo",
+      updatedAt: serverTs(),
+    })
+  );
+});
+
+

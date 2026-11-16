@@ -39,7 +39,7 @@ service cloud.firestore {
     function isValidUidList(uids) {
       return uids is list &&
              uids.size() >= 1 &&
-             uids.size() <= 25 &&
+             uids.size() <= 500 &&
              (uids.size() == 0 || uids[0] is string);
     }
 
@@ -252,10 +252,12 @@ service cloud.firestore {
                        isValidFamily(incoming());
       allow update: if isSignedIn() &&
                        isValidId(familyId) &&
-                       isValidFamily(incoming()) &&
                        incoming().ownerUid == existing().ownerUid &&
-                       incoming().createdAt == existing().createdAt && (
-                         // Action 1: Join via valid invite code
+                       (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) &&
+                       isValidUidList(incoming().memberUids) &&
+                       incoming().ownerUid in incoming().memberUids &&
+                       isValidTimestamp(incoming().updatedAt) && (
+                         // Action 1: Join via valid invite code (do not block on legacy pre-v2.0.3 PIN formats)
                          (!(request.auth.uid in existing().memberUids) &&
                           request.auth.uid in incoming().memberUids &&
                           incoming().memberUids.hasAll(existing().memberUids) &&
@@ -266,6 +268,11 @@ service cloud.firestore {
                           get(/databases/$(database)/documents/familyInvites/$(existing().inviteCode)).data.familyId == familyId) ||
                          // Action 2: Owner updates family configuration (PINs, name, repo, inviteCode)
                          (existing().ownerUid == request.auth.uid &&
+                          incoming().name is string && incoming().name.size() >= 1 && incoming().name.size() <= 50 &&
+                          isValidInviteCode(incoming().inviteCode) &&
+                          (!('masterPin' in incoming().diff(existing()).affectedKeys()) || isValidPin(incoming().masterPin)) &&
+                          (!('switchPin' in incoming().diff(existing()).affectedKeys()) || isValidPin(incoming().switchPin)) &&
+                          (!('updateRepoSlug' in incoming()) || incoming().updateRepoSlug == null || (incoming().updateRepoSlug is string && incoming().updateRepoSlug.size() <= 120)) &&
                           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'inviteCode', 'memberUids', 'masterPin', 'switchPin', 'updateRepoSlug', 'updatedAt']))
                        );
       allow delete: if isSignedIn() && isValidId(familyId) && existing().ownerUid == request.auth.uid;

@@ -247,6 +247,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             return Result.failure(IllegalArgumentException("Ingresa un código familiar válido (6 caracteres)."))
         }
         val invRef = db.collection("familyInvites").document(code)
+        var currentPath = invRef.path
         return try {
             val invSnap = invRef.get().await()
             if (!invSnap.exists() || invSnap.getBoolean("active") != true) {
@@ -255,13 +256,25 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             val familyId = invSnap.getString("familyId")
                 ?: return Result.failure(IllegalStateException("Invitación inválida."))
             val fRef = familyRef(familyId)
+            currentPath = fRef.path
 
-            fRef.update(
-                mapOf(
-                    "memberUids" to FieldValue.arrayUnion(uid),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
+            try {
+                fRef.update(
+                    mapOf(
+                        "memberUids" to FieldValue.arrayUnion(uid),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            } catch (updateErr: Exception) {
+                if (updateErr is CancellationException) throw updateErr
+                val alreadyMember = runCatching {
+                    val existingUids = (fRef.get().await().get("memberUids") as? List<*>)
+                        ?.mapNotNull { it as? String }
+                        ?: emptyList()
+                    uid in existingUids
+                }.getOrDefault(false)
+                if (!alreadyMember) throw updateErr
+            }
 
             // Immediately sync joining UID onto existing members & chats listed in bootstrap
             val bootstrap = fRef.collection("meta").document("bootstrap").get().await()
@@ -292,7 +305,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, invRef.path)
+            handleFirestoreError(e, OperationType.UPDATE, currentPath)
             Result.failure(e)
         }
     }
@@ -310,7 +323,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                     if (missing.isNotEmpty()) {
                         doc.reference.update(
                             mapOf(
-                                "memberUids" to (existingUids + missing).distinct().take(25),
+                                "memberUids" to (existingUids + missing).distinct().take(500),
                                 "updatedAt" to FieldValue.serverTimestamp()
                             )
                         ).await()

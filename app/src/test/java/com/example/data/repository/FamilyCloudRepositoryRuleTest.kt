@@ -70,6 +70,11 @@ class FamilyCloudRepositoryRuleTest : FirestoreEmulatorTestBase() {
     assertTrue("joinFamilyByInviteCode failed: ${joinResult.exceptionOrNull()}", joinResult.isSuccess)
     assertEquals(familyId, joinResult.getOrThrow())
 
+    val rejoinResult = withTimeout(DEFAULT_TIMEOUT_MS) {
+      bobRepo.joinFamilyByInviteCode(bobUid, family.inviteCode)
+    }
+    assertTrue("re-joining existing family should succeed cleanly", rejoinResult.isSuccess)
+
     val bobMembers = withTimeout(FLOW_TIMEOUT_MS) {
       bobRepo.observeMembers(familyId, bobUid).first { list -> list.any { it.id == adminMemberId } }
     }

@@ -300,6 +300,7 @@ fun NidoFamiliarApp(
                         onUpdateOwnStatus = vm::updateOwnProfileStatus,
                         onCheckForUpdate = vm::checkForAppUpdate,
                         onSaveUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = true) },
+                        onDownloadUpdate = vm::downloadAndInstallUpdate,
                         onResetUpdateState = vm::resetUpdateState,
                         onSelectTab = vm::selectTab,
                         onSearchChange = vm::updateSearchQuery,

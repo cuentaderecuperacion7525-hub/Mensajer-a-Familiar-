@@ -1,13 +1,21 @@
 package com.example.util
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
@@ -27,17 +35,25 @@ sealed interface AppUpdateUiState {
     data class NotConfigured(val installedVersionName: String, val installedVersionCode: Int) : AppUpdateUiState
     data class UpToDate(
         val installedVersionName: String,
-        val installedVersionCode: Int,
-        val releasePageUrl: String
+        val installedVersionCode: Int
     ) : AppUpdateUiState
     data class UpdateAvailable(
         val installedVersionName: String,
         val installedVersionCode: Int,
         val release: AppReleaseInfo
     ) : AppUpdateUiState
+    data class Downloading(
+        val release: AppReleaseInfo,
+        val progressPercent: Int,
+        val downloadedBytes: Long,
+        val totalBytes: Long
+    ) : AppUpdateUiState
+    data class ReadyToInstall(
+        val release: AppReleaseInfo,
+        val apkFilePath: String
+    ) : AppUpdateUiState
     data class Error(
-        val message: String,
-        val repoUrl: String? = null
+        val message: String
     ) : AppUpdateUiState
 }
 
@@ -98,6 +114,15 @@ object AppUpdateChecker {
             .readTimeout(12, TimeUnit.SECONDS)
             .followRedirects(false)
             .followSslRedirects(false)
+            .build()
+    }
+
+    private val downloadClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
             .build()
     }
 
@@ -163,8 +188,7 @@ object AppUpdateChecker {
         if (slug.isEmpty()) {
             return@withContext AppUpdateUiState.UpToDate(
                 installedVersionName = installedVersionName,
-                installedVersionCode = installedVersionCode,
-                releasePageUrl = ""
+                installedVersionCode = installedVersionCode
             )
         }
 
@@ -184,8 +208,7 @@ object AppUpdateChecker {
                 if (code == HttpURLConnection.HTTP_NOT_FOUND) {
                     return@withContext AppUpdateUiState.UpToDate(
                         installedVersionName = installedVersionName,
-                        installedVersionCode = installedVersionCode,
-                        releasePageUrl = repoWebUrl
+                        installedVersionCode = installedVersionCode
                     )
                 }
                 if (code in 200..299) {
@@ -235,8 +258,7 @@ object AppUpdateChecker {
                     } else {
                         AppUpdateUiState.UpToDate(
                             installedVersionName = installedVersionName,
-                            installedVersionCode = installedVersionCode,
-                            releasePageUrl = htmlUrl
+                            installedVersionCode = installedVersionCode
                         )
                     }
                 }
@@ -300,15 +322,13 @@ object AppUpdateChecker {
                     } else {
                         AppUpdateUiState.UpToDate(
                             installedVersionName = installedVersionName,
-                            installedVersionCode = installedVersionCode,
-                            releasePageUrl = releasePage
+                            installedVersionCode = installedVersionCode
                         )
                     }
                 } else if (response.code == HttpURLConnection.HTTP_NOT_FOUND || location.endsWith("/releases")) {
                     return@withContext AppUpdateUiState.UpToDate(
                         installedVersionName = installedVersionName,
-                        installedVersionCode = installedVersionCode,
-                        releasePageUrl = repoWebUrl
+                        installedVersionCode = installedVersionCode
                     )
                 }
             }
@@ -319,8 +339,129 @@ object AppUpdateChecker {
         val detail = lastException?.let { "${it.javaClass.simpleName}: ${it.localizedMessage.orEmpty()}".trim() }
             ?: "sin respuesta"
         AppUpdateUiState.Error(
-            message = "No se pudo conectar con GitHub ($detail). Revisa tu internet e intenta nuevamente.",
-            repoUrl = repoWebUrl
+            message = "No se pudo verificar la actualización ($detail). Revisa tu internet e intenta nuevamente."
         )
+    }
+
+    suspend fun downloadApkToCache(
+        context: Context,
+        release: AppReleaseInfo,
+        onProgress: (progressPercent: Int, downloadedBytes: Long, totalBytes: Long) -> Unit
+    ): Result<File> = withContext(Dispatchers.IO) {
+        val url = release.downloadUrl.trim()
+        val isLikelyApk = url.contains(".apk", ignoreCase = true) ||
+            url.contains("/releases/download/", ignoreCase = true)
+        if (!isLikelyApk) {
+            return@withContext Result.failure(
+                IllegalStateException("Esta versión no tiene un archivo APK disponible para descargar.")
+            )
+        }
+
+        val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
+        updatesDir.listFiles()?.forEach { old ->
+            if (old.isFile) old.delete()
+        }
+        val partFile = File(updatesDir, "NidoFamiliar-update.apk.part")
+        val targetFile = File(updatesDir, "NidoFamiliar-update.apk")
+
+        return@withContext runCatching {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "NidoFamiliar-Android")
+                .header("Accept", "application/vnd.android.package-archive, application/octet-stream, */*")
+                .build()
+
+            downloadClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    error("Error al descargar (HTTP ${response.code})")
+                }
+                val body = response.body ?: error("Respuesta vacía al descargar el APK")
+                val totalBytes = body.contentLength()
+                var downloaded = 0L
+                var lastPercent = -1
+                var lastEmitTime = 0L
+                var checkedMagic = false
+
+                onProgress(if (totalBytes > 0L) 0 else -1, 0L, totalBytes)
+
+                body.byteStream().use { input ->
+                    FileOutputStream(partFile).use { output ->
+                        val buffer = ByteArray(8 * 1024)
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val read = input.read(buffer)
+                            if (read <= 0) break
+                            if (!checkedMagic) {
+                                checkedMagic = true
+                                val isZipHeader = read >= 2 && buffer[0] == 0x50.toByte() && buffer[1] == 0x4B.toByte()
+                                if (!isZipHeader) {
+                                    error("El archivo descargado no es un APK válido.")
+                                }
+                            }
+                            output.write(buffer, 0, read)
+                            downloaded += read
+
+                            val now = System.currentTimeMillis()
+                            val pct = if (totalBytes > 0L) {
+                                ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
+                            } else {
+                                -1
+                            }
+                            if ((pct != lastPercent && pct >= 0) || now - lastEmitTime >= 150L) {
+                                lastPercent = pct
+                                lastEmitTime = now
+                                onProgress(pct, downloaded, totalBytes)
+                            }
+                        }
+                        output.flush()
+                    }
+                }
+
+                if (downloaded <= 0L) {
+                    error("El archivo APK descargado está vacío.")
+                }
+                if (targetFile.exists()) targetFile.delete()
+                if (!partFile.renameTo(targetFile)) {
+                    partFile.copyTo(targetFile, overwrite = true)
+                    partFile.delete()
+                }
+                onProgress(100, downloaded, if (totalBytes > 0L) totalBytes else downloaded)
+                targetFile
+            }
+        }.onFailure {
+            partFile.delete()
+        }
+    }
+
+    fun canRequestPackageInstalls(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.packageManager.canRequestPackageInstalls()
+        } else {
+            true
+        }
+    }
+
+    fun openInstallPermissionSettings(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:${context.packageName}")
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }
+    }
+
+    fun launchApkInstaller(context: Context, apkFile: File): Result<Unit> = runCatching {
+        require(apkFile.exists()) { "No se encontró el archivo de actualización descargado." }
+        val authority = "${context.packageName}.fileprovider"
+        val contentUri = FileProvider.getUriForFile(context, authority, apkFile)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(intent)
     }
 }

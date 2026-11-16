@@ -25,6 +25,7 @@ import com.example.data.model.PresenceStatus
 import com.example.data.model.ShoppingItemEntity
 import com.example.data.remote.FamilyCloudRepository
 import com.example.data.remote.unwrapFirestoreException
+import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateChecker
 import com.example.util.AppUpdateUiState
 import com.example.util.ImageCompressionHelper
@@ -187,6 +188,7 @@ class FamilyViewModel(
 
     private val _updateState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
     val updateState: StateFlow<AppUpdateUiState> = _updateState.asStateFlow()
+    private var updateDownloadJob: Job? = null
 
     private val _activeMemberId = MutableStateFlow<String?>(null)
     val activeMember: StateFlow<FamilyMemberEntity?> = combine(members, _activeMemberId) { list, id ->
@@ -634,17 +636,22 @@ class FamilyViewModel(
             showMessage("El PIN debe tener exactamente 4 dígitos")
             return
         }
+        val fam = activeFamily.value
         val famId = _activeFamilyId.value ?: return
         viewModelScope.launch {
             prefs.updateMasterPin(newPin)
-            val updates = mutableMapOf<String, Any>("masterPin" to newPin)
-            val currentFamSwitch = activeFamily.value?.switchPin
-            if (currentFamSwitch != null && (currentFamSwitch.length != 4 || !currentFamSwitch.all(Char::isDigit))) {
-                updates["switchPin"] = switchPin.value
+            if (fam != null && fam.ownerUid == currentUserId) {
+                val updates = mutableMapOf<String, Any>("masterPin" to newPin)
+                val currentFamSwitch = fam.switchPin
+                if (currentFamSwitch.length != 4 || !currentFamSwitch.all(Char::isDigit)) {
+                    updates["switchPin"] = switchPin.value
+                }
+                val res = cloudRepo.updateFamilySettings(famId, updates)
+                if (res.isSuccess) showMessage("Contraseña de Administrador actualizada")
+                else showMessage("Contraseña guardada localmente")
+            } else {
+                showMessage("Contraseña actualizada en este dispositivo")
             }
-            val res = cloudRepo.updateFamilySettings(famId, updates)
-            if (res.isSuccess) showMessage("Contraseña de Administrador actualizada")
-            else showMessage("Solo el dueño de la familia puede cambiar la clave principal")
         }
     }
 
@@ -653,17 +660,22 @@ class FamilyViewModel(
             showMessage("La clave de Switch debe tener exactamente 4 dígitos")
             return
         }
+        val fam = activeFamily.value
         val famId = _activeFamilyId.value ?: return
         viewModelScope.launch {
             prefs.updateSwitchPin(newPin)
-            val updates = mutableMapOf<String, Any>("switchPin" to newPin)
-            val currentFamMaster = activeFamily.value?.masterPin
-            if (currentFamMaster != null && (currentFamMaster.length != 4 || !currentFamMaster.all(Char::isDigit))) {
-                updates["masterPin"] = masterPin.value
+            if (fam != null && fam.ownerUid == currentUserId) {
+                val updates = mutableMapOf<String, Any>("switchPin" to newPin)
+                val currentFamMaster = fam.masterPin
+                if (currentFamMaster.length != 4 || !currentFamMaster.all(Char::isDigit)) {
+                    updates["masterPin"] = masterPin.value
+                }
+                val res = cloudRepo.updateFamilySettings(famId, updates)
+                if (res.isSuccess) showMessage("Clave de cambio de perfil actualizada")
+                else showMessage("Clave de Switch guardada localmente")
+            } else {
+                showMessage("Clave de cambio de perfil actualizada en este dispositivo")
             }
-            val res = cloudRepo.updateFamilySettings(famId, updates)
-            if (res.isSuccess) showMessage("Clave de cambio de perfil actualizada")
-            else showMessage("Solo el dueño de la familia puede cambiar la clave de Switch")
         }
     }
 
@@ -709,8 +721,9 @@ class FamilyViewModel(
         }
         viewModelScope.launch {
             prefs.setUpdateRepoSlug(normalized)
-            _activeFamilyId.value?.let { famId ->
-                cloudRepo.updateFamilySettings(famId, mapOf("updateRepoSlug" to normalized))
+            val fam = activeFamily.value
+            if (fam != null && fam.ownerUid == currentUserId) {
+                cloudRepo.updateFamilySettings(fam.id, mapOf("updateRepoSlug" to normalized))
             }
             showMessage(
                 if (normalized.isEmpty()) "Repositorio de actualizaciones borrado"
@@ -720,7 +733,46 @@ class FamilyViewModel(
         }
     }
 
+    fun downloadAndInstallUpdate(release: AppReleaseInfo) {
+        if (updateDownloadJob?.isActive == true) return
+        updateDownloadJob = viewModelScope.launch {
+            _updateState.value = AppUpdateUiState.Downloading(
+                release = release,
+                progressPercent = 0,
+                downloadedBytes = 0L,
+                totalBytes = -1L
+            )
+            val result = AppUpdateChecker.downloadApkToCache(
+                context = appContext,
+                release = release
+            ) { pct, downloaded, total ->
+                _updateState.value = AppUpdateUiState.Downloading(
+                    release = release,
+                    progressPercent = pct,
+                    downloadedBytes = downloaded,
+                    totalBytes = total
+                )
+            }
+            result.fold(
+                onSuccess = { apkFile ->
+                    _updateState.value = AppUpdateUiState.ReadyToInstall(
+                        release = release,
+                        apkFilePath = apkFile.absolutePath
+                    )
+                },
+                onFailure = { error ->
+                    if (error is CancellationException) throw error
+                    _updateState.value = AppUpdateUiState.Error(
+                        message = error.localizedMessage ?: "No se pudo descargar la actualización."
+                    )
+                }
+            )
+        }
+    }
+
     fun resetUpdateState() {
+        updateDownloadJob?.cancel()
+        updateDownloadJob = null
         _updateState.value = AppUpdateUiState.Idle
     }
 
