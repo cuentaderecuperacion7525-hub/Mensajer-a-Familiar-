@@ -1,10 +1,13 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -86,6 +89,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -133,7 +137,7 @@ fun ChatRoomScreen(
     onBack: () -> Unit,
     onSendText: (text: String, replyToId: String?) -> Unit,
     onSendImage: (uri: Uri, caption: String, replyToId: String?) -> Unit,
-    onSendLocation: (name: String, address: String, replyToId: String?) -> Unit,
+    onSendLocation: (name: String, address: String, lat: Double?, lng: Double?, replyToId: String?) -> Unit,
     onSendPoll: (question: String, options: List<String>) -> Unit,
     onVotePoll: (messageId: String, optionId: String) -> Unit,
     onEditMessage: (messageId: String, newText: String) -> Unit,
@@ -144,10 +148,11 @@ fun ChatRoomScreen(
     onStartVoiceRecording: () -> Unit,
     onCancelVoiceRecording: () -> Unit,
     onSendVoiceRecording: (replyToId: String?) -> Unit,
-    onToggleVoicePlay: (messageId: String, durationSec: Int) -> Unit,
+    onToggleVoicePlay: (messageId: String) -> Unit,
     onStartCall: (CallType) -> Unit,
-    onSimulatePresence: (PresenceStatus) -> Unit
+    onTypingChange: (isTyping: Boolean) -> Unit
 ) {
+    val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -174,7 +179,6 @@ fun ChatRoomScreen(
 
     var showEmojiDrawer by remember { mutableStateOf(false) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
-    var showMoreMenu by remember { mutableStateOf(false) }
     var showLocationDialog by remember { mutableStateOf(false) }
     var showPollDialog by remember { mutableStateOf(false) }
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -183,6 +187,22 @@ fun ChatRoomScreen(
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
         onResult = { uri -> if (uri != null) pendingImageUri = uri }
+    )
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted ->
+            if (granted) onStartVoiceRecording()
+            else scope.launch { snackbarHostState.showSnackbar("Permiso de micrófono necesario para grabar audio") }
+        }
+    )
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { perms ->
+            val granted = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+            if (granted) showLocationDialog = true
+            else scope.launch { snackbarHostState.showSnackbar("Permiso de ubicación denegado") }
+        }
     )
 
     val matchedIndices = remember(visibleMessages, inChatQuery) {
@@ -382,21 +402,6 @@ fun ChatRoomScreen(
                                 ) {
                                     Icon(Icons.Filled.Videocam, contentDescription = "Videollamada")
                                 }
-                                Box {
-                                    IconButton(onClick = { showMoreMenu = true }) {
-                                        Icon(Icons.Filled.MoreVert, contentDescription = "Más opciones")
-                                    }
-                                    DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
-                                        DropdownMenuItem(
-                                            text = { Text("Simular \"Escribiendo...\"") },
-                                            onClick = { showMoreMenu = false; onSimulatePresence(PresenceStatus.TYPING) }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Simular \"Grabando audio...\"") },
-                                            onClick = { showMoreMenu = false; onSimulatePresence(PresenceStatus.RECORDING) }
-                                        )
-                                    }
-                                }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(
                                 containerColor = MaterialTheme.colorScheme.surface,
@@ -499,7 +504,7 @@ fun ChatRoomScreen(
                                 if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) }
                             },
                             onImageClick = { uri -> viewerImageUri = uri },
-                            onToggleVoicePlay = { onToggleVoicePlay(msg.id, msg.voiceDurationSec) },
+                            onToggleVoicePlay = { onToggleVoicePlay(msg.id) },
                             onVotePoll = { optId -> onVotePoll(msg.id, optId) },
                             onToggleReaction = { emoji -> onToggleReaction(msg.id, emoji) }
                         )
@@ -663,7 +668,10 @@ fun ChatRoomScreen(
                                 }
                                 OutlinedTextField(
                                     value = inputText,
-                                    onValueChange = { inputText = it },
+                                    onValueChange = {
+                                        inputText = it
+                                        onTypingChange(it.isNotBlank())
+                                    },
                                     placeholder = { Text("Escribe un mensaje...") },
                                     maxLines = 4,
                                     shape = RoundedCornerShape(24.dp),
@@ -699,7 +707,22 @@ fun ChatRoomScreen(
                                             leadingIcon = { Icon(Icons.Filled.LocationOn, contentDescription = null) },
                                             onClick = {
                                                 showAttachmentMenu = false
-                                                showLocationDialog = true
+                                                val hasFine = ContextCompat.checkSelfPermission(
+                                                    context, Manifest.permission.ACCESS_FINE_LOCATION
+                                                ) == PackageManager.PERMISSION_GRANTED
+                                                val hasCoarse = ContextCompat.checkSelfPermission(
+                                                    context, Manifest.permission.ACCESS_COARSE_LOCATION
+                                                ) == PackageManager.PERMISSION_GRANTED
+                                                if (hasFine || hasCoarse) {
+                                                    showLocationDialog = true
+                                                } else {
+                                                    locationPermissionLauncher.launch(
+                                                        arrayOf(
+                                                            Manifest.permission.ACCESS_FINE_LOCATION,
+                                                            Manifest.permission.ACCESS_COARSE_LOCATION
+                                                        )
+                                                    )
+                                                }
                                             }
                                         )
                                         DropdownMenuItem(
@@ -741,7 +764,13 @@ fun ChatRoomScreen(
                                     }
                                 } else {
                                     IconButton(
-                                        onClick = onStartVoiceRecording,
+                                        onClick = {
+                                            val granted = ContextCompat.checkSelfPermission(
+                                                context, Manifest.permission.RECORD_AUDIO
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                            if (granted) onStartVoiceRecording()
+                                            else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        },
                                         modifier = Modifier
                                             .size(48.dp)
                                             .clip(CircleShape)
@@ -861,8 +890,8 @@ fun ChatRoomScreen(
     if (showLocationDialog) {
         LocationPickerDialog(
             onDismiss = { showLocationDialog = false },
-            onSendLocation = { name, address ->
-                onSendLocation(name, address, replyingTo?.id)
+            onSendLocation = { name, address, lat, lng ->
+                onSendLocation(name, address, lat, lng, replyingTo?.id)
                 replyingTo = null
                 showLocationDialog = false
             }

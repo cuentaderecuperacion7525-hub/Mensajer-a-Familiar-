@@ -1,0 +1,245 @@
+{
+  "entities": {
+    "FamilyInvite": {
+      "title": "FamilyInvite",
+      "description": "Maps a 6-to-12 character invite code to a private family group so additional devices can join with Google Sign-In.",
+      "type": "object",
+      "properties": {
+        "inviteCode": { "type": "string", "description": "Alphanumeric invite code matching document ID." },
+        "familyId": { "type": "string", "description": "Target family document ID." },
+        "familyName": { "type": "string", "description": "Display name of the family." },
+        "ownerUid": { "type": "string", "description": "Firebase Auth UID of the family owner." },
+        "active": { "type": "boolean", "description": "Whether the invite code is currently accepting joins." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["inviteCode", "familyId", "familyName", "ownerUid", "active", "createdAt", "updatedAt"]
+    },
+    "Family": {
+      "title": "Family",
+      "description": "Root family workspace storing access UIDs, admin/switch 6-digit PINs, invite code, and update repository.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "description": "Firebase Auth UID of the admin/creator." },
+        "name": { "type": "string", "description": "Family display name." },
+        "inviteCode": { "type": "string", "description": "Invite code to join this family." },
+        "memberUids": { "type": "array", "description": "Bounded list of Firebase Auth UIDs belonging to this family." },
+        "masterPin": { "type": "string", "description": "6-digit password protecting Admin profile." },
+        "switchPin": { "type": "string", "description": "6-digit key to unlock Switch profile action." },
+        "updateRepoSlug": { "type": "string", "description": "Optional GitHub owner/repo slug for app updates." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["ownerUid", "name", "inviteCode", "memberUids", "masterPin", "switchPin", "createdAt", "updatedAt"]
+    },
+    "FamilyBootstrap": {
+      "title": "FamilyBootstrap",
+      "description": "Directory of known member and chat IDs enabling newly joined devices to fetch initial records immediately.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "description": "Firebase Auth UID of creator." },
+        "memberIds": { "type": "array", "description": "List of member profile document IDs." },
+        "chatIds": { "type": "array", "description": "List of chat thread document IDs." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["ownerUid", "memberIds", "chatIds", "createdAt", "updatedAt"]
+    },
+    "FamilyMember": {
+      "title": "FamilyMember",
+      "description": "Individual family member profile displayed in the Netflix-style selector and live presence indicators.",
+      "type": "object",
+      "properties": {
+        "memberUids": { "type": "array", "description": "Authorized family Firebase Auth UIDs." },
+        "authorUid": { "type": "string", "description": "Creator Firebase Auth UID." },
+        "name": { "type": "string", "description": "Display name." },
+        "roleLabel": { "type": "string", "description": "Family role label." },
+        "isAdmin": { "type": "boolean", "description": "Whether this profile has admin access." },
+        "avatarColorHex": { "type": "string", "description": "Hex color for avatar tile." },
+        "avatarEmoji": { "type": "string", "description": "Emoji avatar." },
+        "phoneNumber": { "type": "string", "description": "Optional phone number for direct carrier calls." },
+        "isOnline": { "type": "boolean", "description": "Current online status." },
+        "lastSeenText": { "type": "string", "description": "Status or last seen label." },
+        "liveStatus": { "type": "string", "enum": ["ONLINE", "TYPING", "RECORDING", "LAST_SEEN"], "description": "Live activity indicator." },
+        "liveChatId": { "type": "string", "description": "Chat ID where user is currently typing or recording." },
+        "liveStatusAt": { "type": "integer", "description": "Epoch millis of last live presence update." },
+        "linkedAuthUid": { "type": "string", "description": "Optional Auth UID using this profile." },
+        "createdAtMs": { "type": "integer", "description": "Client creation epoch millis." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["memberUids", "authorUid", "name", "roleLabel", "isAdmin", "avatarColorHex", "avatarEmoji", "isOnline", "lastSeenText", "liveStatus", "createdAt", "updatedAt"]
+    },
+    "ChatThread": {
+      "title": "ChatThread",
+      "description": "Direct or group family chat thread.",
+      "type": "object",
+      "properties": {
+        "memberUids": { "type": "array", "description": "Authorized family Firebase Auth UIDs." },
+        "authorUid": { "type": "string", "description": "Creator Firebase Auth UID." },
+        "type": { "type": "string", "enum": ["DIRECT", "GROUP"], "description": "Chat type." },
+        "title": { "type": "string", "description": "Group name or Directo." },
+        "avatarColorHex": { "type": "string", "description": "Avatar color hex." },
+        "avatarEmoji": { "type": "string", "description": "Avatar emoji." },
+        "participantIds": { "type": "array", "description": "List of FamilyMember IDs in this thread." },
+        "pinnedMessageId": { "type": "string", "description": "Optional pinned message ID." },
+        "lastMessageAt": { "type": "integer", "description": "Epoch millis of last activity." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["memberUids", "authorUid", "type", "title", "avatarColorHex", "avatarEmoji", "participantIds", "lastMessageAt", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Text, compressed photo, AAC voice note, real GPS location, or poll message synced in real time.",
+      "type": "object",
+      "properties": {
+        "memberUids": { "type": "array", "description": "Authorized family Firebase Auth UIDs." },
+        "authorUid": { "type": "string", "description": "Sender Firebase Auth UID." },
+        "chatId": { "type": "string", "description": "Parent ChatThread document ID." },
+        "senderId": { "type": "string", "description": "Sender FamilyMember ID." },
+        "text": { "type": "string", "description": "Message body or caption." },
+        "type": { "type": "string", "enum": ["TEXT", "IMAGE", "VOICE", "LOCATION", "POLL", "DELETED"], "description": "Message type." },
+        "status": { "type": "string", "enum": ["SENDING", "SENT", "DELIVERED", "READ"], "description": "Delivery state." },
+        "timestamp": { "type": "integer", "description": "Epoch millis timestamp." },
+        "replyToMessageId": { "type": "string", "description": "Optional replied message ID." },
+        "isEdited": { "type": "boolean", "description": "Whether the message was edited." },
+        "reactions": { "type": "object", "description": "Map of memberId to emoji." },
+        "hiddenForMemberIds": { "type": "array", "description": "Member IDs who deleted this message for themselves." },
+        "mediaData": { "type": "string", "description": "Base64 data URI for compressed photo or AAC voice note." },
+        "voiceDurationSec": { "type": "integer", "description": "Duration in seconds for voice notes." },
+        "voiceWaveform": { "type": "array", "description": "Normalized amplitude floats." },
+        "locationName": { "type": "string", "description": "Location title." },
+        "locationAddress": { "type": "string", "description": "Resolved street address." },
+        "locationLat": { "type": "number", "description": "GPS latitude." },
+        "locationLng": { "type": "number", "description": "GPS longitude." },
+        "pollQuestion": { "type": "string", "description": "Poll question text." },
+        "pollOptions": { "type": "array", "description": "List of poll option maps with id, text, voterIds." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["memberUids", "authorUid", "chatId", "senderId", "text", "type", "status", "timestamp", "isEdited", "createdAt", "updatedAt"]
+    },
+    "CallRecord": {
+      "title": "CallRecord",
+      "description": "Real-time call invitation and call history record across family devices.",
+      "type": "object",
+      "properties": {
+        "memberUids": { "type": "array", "description": "Authorized family Firebase Auth UIDs." },
+        "authorUid": { "type": "string", "description": "Caller Firebase Auth UID." },
+        "chatId": { "type": "string", "description": "Associated chat ID." },
+        "title": { "type": "string", "description": "Call display title." },
+        "callerMemberId": { "type": "string", "description": "Caller FamilyMember ID." },
+        "targetMemberIds": { "type": "array", "description": "Recipient FamilyMember IDs." },
+        "avatarColorHex": { "type": "string", "description": "Avatar color." },
+        "avatarEmoji": { "type": "string", "description": "Avatar emoji." },
+        "callType": { "type": "string", "enum": ["VOICE", "VIDEO"], "description": "Voice or video." },
+        "callStatus": { "type": "string", "enum": ["RINGING", "CONNECTED", "ENDED", "DECLINED", "MISSED"], "description": "Live call signaling status." },
+        "direction": { "type": "string", "enum": ["OUTGOING", "INCOMING", "MISSED"], "description": "Call direction." },
+        "durationSec": { "type": "integer", "description": "Call duration in seconds." },
+        "connectedAt": { "type": "integer", "description": "Epoch millis when answered." },
+        "timestamp": { "type": "integer", "description": "Epoch millis when initiated." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["memberUids", "authorUid", "chatId", "title", "callerMemberId", "targetMemberIds", "avatarColorHex", "avatarEmoji", "callType", "callStatus", "direction", "durationSec", "timestamp", "createdAt", "updatedAt"]
+    },
+    "ShoppingItem": {
+      "title": "ShoppingItem",
+      "description": "Shared family shopping list item.",
+      "type": "object",
+      "properties": {
+        "memberUids": { "type": "array", "description": "Authorized family Firebase Auth UIDs." },
+        "authorUid": { "type": "string", "description": "Creator Firebase Auth UID." },
+        "name": { "type": "string", "description": "Item name." },
+        "quantity": { "type": "string", "description": "Quantity label." },
+        "category": { "type": "string", "description": "Category label." },
+        "isChecked": { "type": "boolean", "description": "Purchased check state." },
+        "addedById": { "type": "string", "description": "Member ID who added it." },
+        "timestamp": { "type": "integer", "description": "Creation epoch millis." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["memberUids", "authorUid", "name", "quantity", "category", "isChecked", "addedById", "timestamp", "createdAt", "updatedAt"]
+    },
+    "FamilyEvent": {
+      "title": "FamilyEvent",
+      "description": "Shared family calendar event.",
+      "type": "object",
+      "properties": {
+        "memberUids": { "type": "array", "description": "Authorized family Firebase Auth UIDs." },
+        "authorUid": { "type": "string", "description": "Creator Firebase Auth UID." },
+        "title": { "type": "string", "description": "Event title." },
+        "dateLabel": { "type": "string", "description": "Date label." },
+        "timeLabel": { "type": "string", "description": "Time label." },
+        "description": { "type": "string", "description": "Event details." },
+        "assignedMemberId": { "type": "string", "description": "Responsible member ID." },
+        "colorHex": { "type": "string", "description": "Accent color." },
+        "timestamp": { "type": "integer", "description": "Creation epoch millis." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["memberUids", "authorUid", "title", "dateLabel", "timeLabel", "description", "assignedMemberId", "colorHex", "timestamp", "createdAt", "updatedAt"]
+    },
+    "FamilyNote": {
+      "title": "FamilyNote",
+      "description": "Shared family board announcement or pinned note.",
+      "type": "object",
+      "properties": {
+        "memberUids": { "type": "array", "description": "Authorized family Firebase Auth UIDs." },
+        "authorUid": { "type": "string", "description": "Creator Firebase Auth UID." },
+        "title": { "type": "string", "description": "Note title." },
+        "content": { "type": "string", "description": "Note body." },
+        "authorId": { "type": "string", "description": "Member ID of author." },
+        "colorHex": { "type": "string", "description": "Background color hex." },
+        "isPinned": { "type": "boolean", "description": "Pinned status." },
+        "timestamp": { "type": "integer", "description": "Creation epoch millis." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["memberUids", "authorUid", "title", "content", "authorId", "colorHex", "isPinned", "timestamp", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/familyInvites/{inviteCode}": {
+      "schema": { "$ref": "#/entities/FamilyInvite" },
+      "description": "Invite code lookup documents for joining a family."
+    },
+    "/families/{familyId}": {
+      "schema": { "$ref": "#/entities/Family" },
+      "description": "Top-level family tenant records."
+    },
+    "/families/{familyId}/meta/bootstrap": {
+      "schema": { "$ref": "#/entities/FamilyBootstrap" },
+      "description": "Single bootstrap index document per family."
+    },
+    "/families/{familyId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/FamilyMember" },
+      "description": "Synced family member profiles and live presence."
+    },
+    "/families/{familyId}/chats/{chatId}": {
+      "schema": { "$ref": "#/entities/ChatThread" },
+      "description": "Synced direct and group chat threads."
+    },
+    "/families/{familyId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Synced chat messages including media, GPS locations, and polls."
+    },
+    "/families/{familyId}/calls/{callId}": {
+      "schema": { "$ref": "#/entities/CallRecord" },
+      "description": "Real-time call signaling and call history logs."
+    },
+    "/families/{familyId}/shoppingItems/{itemId}": {
+      "schema": { "$ref": "#/entities/ShoppingItem" },
+      "description": "Synced family shopping list items."
+    },
+    "/families/{familyId}/events/{eventId}": {
+      "schema": { "$ref": "#/entities/FamilyEvent" },
+      "description": "Synced family events."
+    },
+    "/families/{familyId}/notes/{noteId}": {
+      "schema": { "$ref": "#/entities/FamilyNote" },
+      "description": "Synced family board notes."
+    }
+  }
+}

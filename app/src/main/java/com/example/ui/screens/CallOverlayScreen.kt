@@ -22,7 +22,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -43,6 +46,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -62,6 +66,7 @@ fun CallOverlayScreen(
     onEndCall: () -> Unit
 ) {
     BackHandler { onEndCall() }
+    val context = LocalContext.current
 
     val pulse = rememberInfiniteTransition(label = "call_pulse")
     val ringScale by pulse.animateFloat(
@@ -102,7 +107,7 @@ fun CallOverlayScreen(
                     shape = RoundedCornerShape(50.dp)
                 ) {
                     Text(
-                        text = if (callState.callType == CallType.VIDEO) "VIDEOLLAMADA SIMULADA" else "LLAMADA DE VOZ SIMULADA",
+                        text = if (callState.callType == CallType.VIDEO) "VIDEOLLAMADA" else "LLAMADA DE VOZ",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
@@ -116,8 +121,11 @@ fun CallOverlayScreen(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = if (callState.isConnected) TimeFormatters.formatDuration(callState.durationSec)
-                    else "Llamando...",
+                    text = when {
+                        callState.isConnected -> "Conectado · ${TimeFormatters.formatDuration(callState.durationSec)}"
+                        callState.isOutgoing -> "Sonando en dispositivos..."
+                        else -> "Conectando..."
+                    },
                     style = MaterialTheme.typography.titleMedium,
                     color = Color(0xFF93C5FD)
                 )
@@ -203,6 +211,22 @@ fun CallOverlayScreen(
                             active = !callState.isCameraOn,
                             tag = "call_camera_button",
                             onClick = onToggleCamera
+                        )
+                    }
+                    if (callState.targetPhoneNumber.isNotBlank()) {
+                        CallControlButton(
+                            icon = Icons.Filled.Call,
+                            label = "Teléfono",
+                            active = false,
+                            tag = "call_carrier_button",
+                            onClick = {
+                                try {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_DIAL, Uri.parse("tel:${callState.targetPhoneNumber}"))
+                                    )
+                                } catch (_: Exception) {
+                                }
+                            }
                         )
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {

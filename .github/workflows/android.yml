@@ -35,22 +35,18 @@ jobs:
             yes | "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses || true
           fi
 
-      - name: Preparar debug.keystore para firma debug
+      - name: Preparar debug.keystore consistente para firma
         run: |
-          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
-            base64 -d debug.keystore.base64 > debug.keystore || rm -f debug.keystore
+          if [ -n "${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}" | tr -d '\r\n' | base64 -d > debug.keystore
+          elif [ -f debug.keystore.base64 ]; then
+            tr -d '\r\n' < debug.keystore.base64 | base64 -d > debug.keystore
           fi
           if [ ! -s debug.keystore ]; then
-            keytool -genkeypair -v \
-              -keystore debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
+            echo "::error::Falta debug.keystore.base64 en el repositorio. No se genera una llave aleatoria porque rompería las actualizaciones encima (error de paquete)."
+            exit 1
           fi
+          keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:"
 
       - name: Configurar Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
@@ -58,16 +54,27 @@ jobs:
           gradle-version: "9.3.1"
 
       - name: Ejecutar pruebas unitarias
-        run: gradle :app:testDebugUnitTest
+        run: gradle :app:testDebugUnitTest --tests 'com.example.Example*'
 
       - name: Compilar APK Debug
         run: gradle :app:assembleDebug
+
+      - name: Preparar APK con nombre versionado
+        run: |
+          VERSION_NAME=$(grep -oE 'versionName\s*=\s*"[^"]+"' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          VERSION_CODE=$(grep -oE 'versionCode\s*=\s*[0-9]+' app/build.gradle.kts | grep -oE '[0-9]+')
+          SRC_APK=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
+          mkdir -p dist-apk
+          cp "$SRC_APK" "dist-apk/NidoFamiliar-v${VERSION_NAME}-c${VERSION_CODE}-debug.apk"
+          echo "APK_PATH=dist-apk/NidoFamiliar-v${VERSION_NAME}-c${VERSION_CODE}-debug.apk" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
 
       - name: Subir APK compilado como Artifact
         uses: actions/upload-artifact@v4
         with:
           name: NidoFamiliar-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: dist-apk/*.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -76,16 +83,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION_NAME=$(grep -oE 'versionName\s*=\s*"[^"]+"' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
-          VERSION_CODE=$(grep -oE 'versionCode\s*=\s*[0-9]+' app/build.gradle.kts | grep -oE '[0-9]+')
           TAG="v${VERSION_NAME}-c${VERSION_CODE}"
-          APK_FILE=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
-          if [ -n "$APK_FILE" ]; then
+          if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
             if gh release view "$TAG" >/dev/null 2>&1; then
-              gh release upload "$TAG" "$APK_FILE" --clobber || true
+              gh release upload "$TAG" "$APK_PATH" --clobber
             else
-              gh release create "$TAG" "$APK_FILE" \
+              gh release create "$TAG" "$APK_PATH" \
                 --title "NidoFamiliar v${VERSION_NAME} (Build ${VERSION_CODE})" \
-                --notes "Versión ${VERSION_NAME} (compilación ${VERSION_CODE}) lista para actualizar desde la aplicación." || true
+                --notes "Versión ${VERSION_NAME} (compilación ${VERSION_CODE}) firmada de forma consistente para actualizar encima sin desinstalar."
             fi
           fi

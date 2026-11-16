@@ -1,11 +1,15 @@
 package com.example.util
 
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 data class AppReleaseInfo(
@@ -38,6 +42,47 @@ sealed interface AppUpdateUiState {
 }
 
 object AppUpdateChecker {
+
+    private const val EXPECTED_DEBUG_SHA256 =
+        "33D2C0F213FED29E496863488A303962B27C80F5C8C17F10C59B47DFFA15385C"
+
+    fun getInstalledSigningSha256(context: Context): String? = runCatching {
+        val pm = context.packageManager
+        val pkgName = context.packageName
+        @Suppress("DEPRECATION")
+        val certBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val info = pm.getPackageInfo(pkgName, PackageManager.GET_SIGNING_CERTIFICATES)
+            val signingInfo = info.signingInfo
+            val sigs = if (signingInfo?.hasMultipleSigners() == true) {
+                signingInfo.apkContentsSigners
+            } else {
+                signingInfo?.signingCertificateHistory
+            }
+            sigs?.firstOrNull()?.toByteArray()
+        } else {
+            val info = pm.getPackageInfo(pkgName, PackageManager.GET_SIGNATURES)
+            info.signatures?.firstOrNull()?.toByteArray()
+        } ?: return@runCatching null
+
+        MessageDigest.getInstance("SHA-256")
+            .digest(certBytes)
+            .joinToString("") { "%02X".format(it) }
+    }.getOrNull()
+
+    fun isConsistentDebugSigning(context: Context): Boolean? {
+        val sha = getInstalledSigningSha256(context) ?: return null
+        return sha.equals(EXPECTED_DEBUG_SHA256, ignoreCase = true)
+    }
+
+    fun extractApkUrlFromHtml(html: String, slug: String): String? {
+        val escapedSlug = Regex.escape(slug)
+        val regex = Regex(
+            """href="(/$escapedSlug/releases/download/[^"]+\.apk)"""",
+            RegexOption.IGNORE_CASE
+        )
+        val path = regex.find(html)?.groupValues?.getOrNull(1) ?: return null
+        return "https://github.com$path"
+    }
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -218,13 +263,26 @@ object AppUpdateChecker {
                         .trim()
                     val (remoteVerName, remoteVerCode) = parseReleaseVersion(tagName, tagName)
                     val releasePage = "https://github.com/$slug/releases/tag/$tagName"
-                    val apkUrl = "https://github.com/$slug/releases/download/$tagName/app-debug.apk"
+                    val expandedAssetsUrl = "https://github.com/$slug/releases/expanded_assets/$tagName"
+                    val resolvedApkUrl = runCatching {
+                        val assetsReq = Request.Builder()
+                            .url(expandedAssetsUrl)
+                            .header("User-Agent", "NidoFamiliar-Android")
+                            .build()
+                        client.newCall(assetsReq).execute().use { assetsResp ->
+                            if (assetsResp.isSuccessful) {
+                                extractApkUrlFromHtml(assetsResp.body?.string().orEmpty(), slug)
+                            } else {
+                                null
+                            }
+                        }
+                    }.getOrNull() ?: releasePage
                     val releaseInfo = AppReleaseInfo(
                         tagName = tagName,
                         versionName = remoteVerName,
                         versionCode = remoteVerCode,
                         releaseNotes = "Nueva compilación disponible en GitHub ($tagName).",
-                        downloadUrl = apkUrl,
+                        downloadUrl = resolvedApkUrl,
                         releasePageUrl = releasePage
                     )
                     return@withContext if (isRemoteNewer(

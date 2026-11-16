@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -15,10 +16,15 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -26,16 +32,27 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.data.local.PreferencesManager
 import com.example.data.model.ChatType
 import com.example.data.model.FamilyMemberEntity
+import com.example.data.model.PresenceStatus
+import com.example.data.remote.FamilyCloudRepository
+import com.example.data.remote.GoogleAuthHelper
+import com.example.data.remote.authStateFlow
 import com.example.ui.components.PinVerificationDialog
 import com.example.ui.screens.AdminPanelScreen
 import com.example.ui.screens.CallOverlayScreen
 import com.example.ui.screens.ChatRoomScreen
+import com.example.ui.screens.FamilySetupScreen
+import com.example.ui.screens.GoogleSignInScreen
+import com.example.ui.screens.IncomingCallOverlay
 import com.example.ui.screens.MainHomeScreen
 import com.example.ui.screens.ProfileSelectorScreen
 import com.example.ui.theme.NidoFamiliarTheme
 import com.example.ui.viewmodel.FamilyViewModel
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
+import kotlinx.coroutines.launch
 
 object Routes {
     const val SELECTOR = "selector"
@@ -50,8 +67,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val vm: FamilyViewModel = viewModel()
-            val isDarkTheme by vm.isDarkTheme.collectAsStateWithLifecycle()
+            val context = LocalContext.current
+            val appContext = context.applicationContext
+            val prefs = remember { PreferencesManager(appContext) }
+            val scope = rememberCoroutineScope()
+            val isDarkTheme by prefs.isDarkThemeFlow.collectAsStateWithLifecycle(initialValue = false)
 
             val view = LocalView.current
             if (!view.isInEditMode) {
@@ -63,8 +83,50 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            val currentUser by remember { Firebase.auth.authStateFlow() }
+                .collectAsStateWithLifecycle(initialValue = Firebase.auth.currentUser)
+
             NidoFamiliarTheme(darkTheme = isDarkTheme) {
-                NidoFamiliarApp(vm = vm, isDarkTheme = isDarkTheme)
+                val signedInUser = currentUser
+                if (signedInUser == null) {
+                    GoogleSignInScreen(
+                        isDarkTheme = isDarkTheme,
+                        onToggleTheme = {
+                            scope.launch { prefs.setDarkTheme(!isDarkTheme) }
+                        },
+                        onSignedIn = {}
+                    )
+                } else {
+                    val vm: FamilyViewModel = viewModel(
+                        key = "family_vm_${signedInUser.uid}",
+                        factory = remember(signedInUser.uid) {
+                            object : ViewModelProvider.Factory {
+                                @Suppress("UNCHECKED_CAST")
+                                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                    return FamilyViewModel(
+                                        appContext = appContext,
+                                        cloudRepo = FamilyCloudRepository(appContext),
+                                        prefs = prefs,
+                                        currentUserId = signedInUser.uid
+                                    ) as T
+                                }
+                            }
+                        }
+                    )
+                    NidoFamiliarApp(
+                        vm = vm,
+                        userEmail = signedInUser.email.orEmpty(),
+                        userName = signedInUser.displayName.orEmpty(),
+                        isDarkTheme = isDarkTheme,
+                        onSignOutGoogle = {
+                            scope.launch {
+                                prefs.setActiveMemberId(null)
+                                prefs.setActiveFamilyId(null)
+                                GoogleAuthHelper.signOut(appContext)
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -73,9 +135,16 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun NidoFamiliarApp(
     vm: FamilyViewModel,
-    isDarkTheme: Boolean
+    userEmail: String,
+    userName: String,
+    isDarkTheme: Boolean,
+    onSignOutGoogle: () -> Unit
 ) {
     val isSessionReady by vm.isSessionReady.collectAsStateWithLifecycle()
+    val myFamilies by vm.myFamilies.collectAsStateWithLifecycle()
+    val activeFamily by vm.activeFamily.collectAsStateWithLifecycle()
+    val activeFamilyId by vm.activeFamilyId.collectAsStateWithLifecycle()
+    val isFamilyActionBusy by vm.isFamilyActionBusy.collectAsStateWithLifecycle()
     val members by vm.members.collectAsStateWithLifecycle()
     val activeMember by vm.activeMember.collectAsStateWithLifecycle()
 
@@ -83,13 +152,32 @@ fun NidoFamiliarApp(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .background(MaterialTheme.colorScheme.background),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
+    if (activeFamilyId == null) {
+        FamilySetupScreen(
+            userEmail = userEmail,
+            userName = userName,
+            families = myFamilies,
+            isBusy = isFamilyActionBusy,
+            isDarkTheme = isDarkTheme,
+            onToggleTheme = vm::toggleTheme,
+            onSelectFamily = vm::selectFamilySpace,
+            onCreateFamily = vm::createNewFamily,
+            onJoinFamily = vm::joinFamilyWithCode,
+            onSignOutGoogle = onSignOutGoogle
         )
         return
     }
 
     val navController = rememberNavController()
-    val initialRoute = remember { if (activeMember != null) Routes.HOME else Routes.SELECTOR }
+    val initialRoute = remember(activeFamilyId) { if (activeMember != null) Routes.HOME else Routes.SELECTOR }
     val selectedTab by vm.selectedTab.collectAsStateWithLifecycle()
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val chatPreviews by vm.chatPreviews.collectAsStateWithLifecycle()
@@ -104,6 +192,7 @@ fun NidoFamiliarApp(
     val updateRepoSlug by vm.updateRepoSlug.collectAsStateWithLifecycle()
     val updateState by vm.updateState.collectAsStateWithLifecycle()
     val activeCall by vm.activeCall.collectAsStateWithLifecycle()
+    val incomingCall by vm.incomingCall.collectAsStateWithLifecycle()
     val voiceRecording by vm.voiceRecording.collectAsStateWithLifecycle()
     val playingVoiceId by vm.playingVoiceMessageId.collectAsStateWithLifecycle()
     val playingVoiceProgress by vm.playingVoiceProgress.collectAsStateWithLifecycle()
@@ -120,6 +209,7 @@ fun NidoFamiliarApp(
             composable(Routes.SELECTOR) {
                 ProfileSelectorScreen(
                     members = members,
+                    familyName = activeFamily?.name.orEmpty(),
                     isDarkTheme = isDarkTheme,
                     onToggleTheme = vm::toggleTheme,
                     onSelectMember = { member ->
@@ -131,7 +221,8 @@ fun NidoFamiliarApp(
                                 popUpTo(Routes.SELECTOR) { inclusive = true }
                             }
                         }
-                    }
+                    },
+                    onChangeFamily = vm::clearActiveFamilySpace
                 )
             }
 
@@ -194,7 +285,7 @@ fun NidoFamiliarApp(
                                 navController.navigate(Routes.ADMIN)
                             }
                         },
-                        onStartCall = vm::startSimulatedCall,
+                        onStartCall = vm::startCall,
                         onAddShoppingItem = vm::addShoppingItem,
                         onToggleShoppingItem = vm::toggleShoppingItem,
                         onDeleteShoppingItem = vm::deleteShoppingItem,
@@ -239,7 +330,9 @@ fun NidoFamiliarApp(
                         },
                         onSendText = { text, replyId -> vm.sendTextMessage(chatId, text, replyId) },
                         onSendImage = { uri, caption, replyId -> vm.sendImageMessage(chatId, uri, caption, replyId) },
-                        onSendLocation = { name, addr, replyId -> vm.sendLocationMessage(chatId, name, addr, replyId) },
+                        onSendLocation = { name, addr, lat, lng, replyId ->
+                            vm.sendLocationMessage(chatId, name, addr, lat, lng, replyId)
+                        },
                         onSendPoll = { q, opts -> vm.sendPollMessage(chatId, q, opts) },
                         onVotePoll = vm::voteOnPoll,
                         onEditMessage = vm::editMessage,
@@ -247,12 +340,12 @@ fun NidoFamiliarApp(
                         onTogglePin = { msgId -> vm.togglePinMessage(chatId, msgId) },
                         onDeleteForMe = vm::deleteMessagesForMe,
                         onDeleteForEveryone = vm::deleteMessagesForEveryone,
-                        onStartVoiceRecording = vm::startVoiceRecording,
+                        onStartVoiceRecording = { vm.startVoiceRecording(chatId) },
                         onCancelVoiceRecording = vm::cancelVoiceRecording,
                         onSendVoiceRecording = { replyId -> vm.finishAndSendVoiceRecording(chatId, replyId) },
                         onToggleVoicePlay = vm::toggleVoicePlayback,
                         onStartCall = { callType ->
-                            vm.startSimulatedCall(
+                            vm.startCall(
                                 chatId = chatId,
                                 title = chatUi.displayTitle,
                                 avatarEmoji = chatUi.displayEmoji,
@@ -260,7 +353,13 @@ fun NidoFamiliarApp(
                                 callType = callType
                             )
                         },
-                        onSimulatePresence = { status -> vm.triggerBriefPresenceDemo(chatId, status) }
+                        onTypingChange = { isTyping ->
+                            vm.updateLivePresence(
+                                chatId = chatId,
+                                status = if (isTyping) PresenceStatus.TYPING else PresenceStatus.ONLINE,
+                                forceClear = !isTyping
+                            )
+                        }
                     )
                 }
             }
@@ -270,6 +369,8 @@ fun NidoFamiliarApp(
                     members = members,
                     chats = rawChats,
                     currentMemberId = activeMember?.id,
+                    familyName = activeFamily?.name.orEmpty(),
+                    inviteCode = activeFamily?.inviteCode.orEmpty(),
                     currentMasterPin = masterPin,
                     currentSwitchPin = switchPin,
                     currentUpdateRepo = updateRepoSlug,
@@ -280,7 +381,8 @@ fun NidoFamiliarApp(
                     onDeleteGroup = vm::deleteGroup,
                     onUpdateMasterPin = vm::updateMasterPin,
                     onUpdateSwitchPin = vm::updateSwitchPin,
-                    onUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = false) }
+                    onUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = false) },
+                    onChangeFamilySpace = vm::clearActiveFamilySpace
                 )
             }
         }
@@ -329,8 +431,19 @@ fun NidoFamiliarApp(
                 onToggleMute = vm::toggleCallMute,
                 onToggleSpeaker = vm::toggleCallSpeaker,
                 onToggleCamera = vm::toggleCallCamera,
-                onEndCall = vm::endSimulatedCall
+                onEndCall = vm::endActiveCall
+            )
+        }
+
+        incomingCall?.let { call ->
+            val caller = members.find { it.id == call.callerId }
+            IncomingCallOverlay(
+                call = call,
+                callerMember = caller,
+                onAccept = { vm.acceptIncomingCall(call) },
+                onDecline = { vm.declineIncomingCall(call) }
             )
         }
     }
 }
+

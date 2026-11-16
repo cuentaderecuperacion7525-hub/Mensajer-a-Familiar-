@@ -61,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -73,9 +74,8 @@ import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.MessageStatus
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.theme.ReadBlue
+import com.example.util.AppUpdateChecker
 import com.example.util.AppUpdateUiState
-import com.example.ui.theme.OnlineGreen
-import com.example.ui.theme.ReadBlue
 import com.example.util.parseHexColor
 
 @Composable
@@ -623,6 +623,8 @@ fun AppUpdateDialog(
     onOpenUrl: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val hasUnifiedSigning = remember(context) { AppUpdateChecker.isConsistentDebugSigning(context) }
     var repoInput by remember(currentRepoSlug) { mutableStateOf(currentRepoSlug) }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -824,6 +826,20 @@ fun AppUpdateDialog(
                             Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Descargar actualización")
+                        }
+                        if (hasUnifiedSigning == false) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Aviso: la versión instalada actualmente usa una firma anterior distinta. Si aparece conflicto de paquete, desinstala una sola vez antes de instalar esta versión; las siguientes ya actualizarán encima automáticamente.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
                         }
                         OutlinedButton(
                             onClick = { onOpenUrl(rel.releasePageUrl) },

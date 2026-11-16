@@ -36,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -63,9 +64,11 @@ import com.example.util.parseHexColor
 @Composable
 fun ProfileSelectorScreen(
     members: List<FamilyMemberEntity>,
+    familyName: String,
     isDarkTheme: Boolean,
     onToggleTheme: () -> Unit,
-    onSelectMember: (FamilyMemberEntity) -> Unit
+    onSelectMember: (FamilyMemberEntity) -> Unit,
+    onChangeFamily: () -> Unit
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
@@ -155,7 +158,7 @@ fun ProfileSelectorScreen(
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Toca tu perfil para abrir tus chats familiares",
+                text = if (familyName.isNotBlank()) "$familyName · Toca tu perfil" else "Toca tu perfil para abrir tus chats familiares",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -185,6 +188,15 @@ fun ProfileSelectorScreen(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+            TextButton(
+                onClick = onChangeFamily,
+                modifier = Modifier.testTag("selector_change_family")
+            ) {
+                Text(
+                    text = "Cambiar espacio familiar",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Poll
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -47,6 +49,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -56,6 +59,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +67,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -81,9 +86,12 @@ import com.example.ui.theme.IncomingBubbleLight
 import com.example.ui.theme.LocalDarkTheme
 import com.example.ui.theme.OutgoingBubbleDark
 import com.example.ui.theme.OutgoingBubbleLight
+import com.example.util.ImageCompressionHelper
+import com.example.util.LocationHelper
 import com.example.util.MessageFormatter
 import com.example.util.TimeFormatters
 import com.example.util.parseHexColor
+import kotlinx.coroutines.launch
 
 val QuickReactionEmojis = listOf("❤️", "😂", "👍", "😮", "🙏", "🎉")
 
@@ -116,6 +124,7 @@ fun ChatMessageBubble(
     onVotePoll: (String) -> Unit,
     onToggleReaction: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val dark = LocalDarkTheme.current
     val bubbleBg = when {
         isSelected -> MaterialTheme.colorScheme.primaryContainer
@@ -242,7 +251,7 @@ fun ChatMessageBubble(
                     MessageType.IMAGE -> {
                         if (!message.mediaUri.isNullOrBlank()) {
                             AsyncImage(
-                                model = message.mediaUri,
+                                model = ImageCompressionHelper.resolveCoilModel(message.mediaUri),
                                 contentDescription = "Imagen compartida",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
@@ -325,10 +334,24 @@ fun ChatMessageBubble(
                         }
                     }
                     MessageType.LOCATION -> {
+                        val locTitle = message.locationName ?: "Ubicación"
+                        val locAddr = message.locationAddress.orEmpty()
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    if (isMultiSelectMode) onToggleSelect()
+                                    else LocationHelper.openInMaps(
+                                        context = context,
+                                        name = locTitle,
+                                        address = locAddr,
+                                        lat = message.locationLat,
+                                        lng = message.locationLng
+                                    )
+                                }
                         ) {
                             Column {
                                 Box(
@@ -368,16 +391,22 @@ fun ChatMessageBubble(
                                 }
                                 Column(modifier = Modifier.padding(10.dp)) {
                                     Text(
-                                        text = message.locationName ?: "Ubicación",
+                                        text = locTitle,
                                         style = MaterialTheme.typography.titleSmall
                                     )
-                                    if (!message.locationAddress.isNullOrBlank()) {
+                                    if (locAddr.isNotBlank()) {
                                         Text(
-                                            text = message.locationAddress,
+                                            text = locAddr,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Toca para abrir en el mapa",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
                                 }
                             }
                         }
@@ -671,7 +700,7 @@ fun FullScreenImageDialog(
                 .clickable(onClick = onDismiss)
         ) {
             AsyncImage(
-                model = imageUri,
+                model = ImageCompressionHelper.resolveCoilModel(imageUri),
                 contentDescription = "Imagen ampliada",
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize().padding(16.dp)
@@ -692,66 +721,91 @@ fun FullScreenImageDialog(
 @Composable
 fun LocationPickerDialog(
     onDismiss: () -> Unit,
-    onSendLocation: (name: String, address: String) -> Unit
+    onSendLocation: (name: String, address: String, lat: Double?, lng: Double?) -> Unit
 ) {
-    val presets = listOf(
-        "Casa Familiar" to "Calle Esmeralda 128, Jardines",
-        "Colegio San Martín" to "Av. Educación 540, Centro",
-        "Supermercado Central" to "Blvd. Norte 890, Plaza Sur",
-        "Parque del Lago" to "Paseo de los Álamos s/n"
-    )
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var customName by remember { mutableStateOf("") }
     var customAddress by remember { mutableStateOf("") }
+    var resolvedLat by remember { mutableStateOf<Double?>(null) }
+    var resolvedLng by remember { mutableStateOf<Double?>(null) }
+    var isFetchingGps by remember { mutableStateOf(false) }
+    var gpsError by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Compartir ubicación") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Lugares frecuentes", style = MaterialTheme.typography.labelMedium)
-                presets.forEach { (name, addr) ->
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { onSendLocation(name, addr) }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Filled.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(name, style = MaterialTheme.typography.titleSmall)
-                                Text(addr, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            isFetchingGps = true
+                            gpsError = null
+                            LocationHelper.fetchCurrentGpsLocation(context)
+                                .onSuccess { gps ->
+                                    if (customName.isBlank()) customName = gps.title
+                                    customAddress = gps.address
+                                    resolvedLat = gps.latitude
+                                    resolvedLng = gps.longitude
+                                }
+                                .onFailure { err ->
+                                    gpsError = err.localizedMessage ?: "No se pudo obtener el GPS actual."
+                                }
+                            isFetchingGps = false
                         }
+                    },
+                    enabled = !isFetchingGps,
+                    modifier = Modifier.fillMaxWidth().testTag("fetch_gps_button")
+                ) {
+                    if (isFetchingGps) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Obteniendo GPS...")
+                    } else {
+                        Icon(Icons.Filled.MyLocation, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Obtener mi ubicación GPS actual")
                     }
                 }
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                if (gpsError != null) {
+                    Text(
+                        text = gpsError!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                if (resolvedLat != null && resolvedLng != null) {
+                    Text(
+                        text = String.format(java.util.Locale.US, "GPS listo: %.5f, %.5f", resolvedLat, resolvedLng),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
                 OutlinedTextField(
                     value = customName,
                     onValueChange = { customName = it },
-                    label = { Text("Otro lugar") },
+                    label = { Text("Nombre del lugar") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().testTag("location_name_input")
                 )
                 OutlinedTextField(
                     value = customAddress,
                     onValueChange = { customAddress = it },
                     label = { Text("Dirección o referencia") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth().testTag("location_address_input")
                 )
             }
         },
         confirmButton = {
             Button(
-                onClick = { onSendLocation(customName, customAddress) },
-                enabled = customName.isNotBlank()
+                onClick = { onSendLocation(customName, customAddress, resolvedLat, resolvedLng) },
+                enabled = customName.isNotBlank() || resolvedLat != null,
+                modifier = Modifier.testTag("location_send_button")
             ) { Text("Enviar ubicación") }
         },
         dismissButton = {

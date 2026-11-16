@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,11 +30,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FamilyRestroom
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -47,6 +51,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -68,7 +73,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -92,17 +100,20 @@ fun AdminPanelScreen(
     members: List<FamilyMemberEntity>,
     chats: List<ChatThreadEntity>,
     currentMemberId: String?,
+    familyName: String,
+    inviteCode: String,
     currentMasterPin: String,
     currentSwitchPin: String,
     currentUpdateRepo: String,
     onBack: () -> Unit,
-    onSaveMember: (id: String?, name: String, role: String, isAdmin: Boolean, color: String, emoji: String) -> Unit,
+    onSaveMember: (id: String?, name: String, role: String, isAdmin: Boolean, color: String, emoji: String, phoneNumber: String) -> Unit,
     onDeleteMember: (String) -> Unit,
     onSaveGroup: (id: String?, title: String, color: String, emoji: String, participantIds: List<String>) -> Unit,
     onDeleteGroup: (String) -> Unit,
     onUpdateMasterPin: (String) -> Unit,
     onUpdateSwitchPin: (String) -> Unit,
-    onUpdateRepoSlug: (String) -> Unit
+    onUpdateRepoSlug: (String) -> Unit,
+    onChangeFamilySpace: () -> Unit
 ) {
     var selectedSection by remember { mutableIntStateOf(0) }
     var editingMember by remember { mutableStateOf<FamilyMemberEntity?>(null) }
@@ -121,7 +132,7 @@ fun AdminPanelScreen(
                     Column {
                         Text("Panel de Administración", style = MaterialTheme.typography.titleLarge)
                         Text(
-                            "Control familiar de Papá",
+                            text = familyName.ifBlank { "Control familiar" },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -215,12 +226,15 @@ fun AdminPanelScreen(
                         onDelete = onDeleteGroup
                     )
                     2 -> AdminPinSettings(
+                        familyName = familyName,
+                        inviteCode = inviteCode,
                         currentMasterPin = currentMasterPin,
                         currentSwitchPin = currentSwitchPin,
                         currentUpdateRepo = currentUpdateRepo,
                         onUpdateMasterPin = onUpdateMasterPin,
                         onUpdateSwitchPin = onUpdateSwitchPin,
-                        onUpdateRepoSlug = onUpdateRepoSlug
+                        onUpdateRepoSlug = onUpdateRepoSlug,
+                        onChangeFamilySpace = onChangeFamilySpace
                     )
                 }
             }
@@ -231,8 +245,8 @@ fun AdminPanelScreen(
         MemberEditorDialog(
             initial = editingMember,
             onDismiss = { showMemberDialog = false },
-            onSave = { name, role, isAdmin, color, emoji ->
-                onSaveMember(editingMember?.id, name, role, isAdmin, color, emoji)
+            onSave = { name, role, isAdmin, color, emoji, phoneNumber ->
+                onSaveMember(editingMember?.id, name, role, isAdmin, color, emoji, phoneNumber)
                 showMemberDialog = false
             }
         )
@@ -385,13 +399,20 @@ private fun AdminGroupsList(
 
 @Composable
 private fun AdminPinSettings(
+    familyName: String,
+    inviteCode: String,
     currentMasterPin: String,
     currentSwitchPin: String,
     currentUpdateRepo: String,
     onUpdateMasterPin: (String) -> Unit,
     onUpdateSwitchPin: (String) -> Unit,
-    onUpdateRepoSlug: (String) -> Unit
+    onUpdateRepoSlug: (String) -> Unit,
+    onChangeFamilySpace: () -> Unit
 ) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var copiedInvite by remember { mutableStateOf(false) }
+
     var currentInput by remember { mutableStateOf("") }
     var newPin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
@@ -411,6 +432,100 @@ private fun AdminPinSettings(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        if (inviteCode.isNotBlank()) {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.FamilyRestroom,
+                            contentDescription = "Invitación familiar",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            "Código de invitación familiar",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+                    Text(
+                        "Comparte este código para que otros teléfonos de la familia se unan a \"$familyName\" desde sus cuentas de Google.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = inviteCode,
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 4.sp
+                                ),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.testTag("admin_invite_code")
+                            )
+                            IconButton(
+                                onClick = {
+                                    clipboard.setText(AnnotatedString(inviteCode))
+                                    copiedInvite = true
+                                }
+                            ) {
+                                Icon(Icons.Filled.ContentCopy, contentDescription = "Copiar código")
+                            }
+                        }
+                    }
+                    if (copiedInvite) {
+                        Text(
+                            "Código copiado al portapapeles",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(
+                                        Intent.EXTRA_TEXT,
+                                        "Únete a nuestra familia \"$familyName\" en NidoFamiliar con el código: $inviteCode"
+                                    )
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "Compartir código familiar"))
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Compartir")
+                        }
+                        OutlinedButton(
+                            onClick = onChangeFamilySpace,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Cambiar familia")
+                        }
+                    }
+                }
+            }
+        }
+
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -640,10 +755,11 @@ private fun AdminPinSettings(
 private fun MemberEditorDialog(
     initial: FamilyMemberEntity?,
     onDismiss: () -> Unit,
-    onSave: (name: String, role: String, isAdmin: Boolean, color: String, emoji: String) -> Unit
+    onSave: (name: String, role: String, isAdmin: Boolean, color: String, emoji: String, phoneNumber: String) -> Unit
 ) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var role by remember { mutableStateOf(initial?.roleLabel ?: "") }
+    var phone by remember { mutableStateOf(initial?.phoneNumber ?: "") }
     var isAdmin by remember { mutableStateOf(initial?.isAdmin ?: false) }
     var selectedColor by remember { mutableStateOf(initial?.avatarColorHex ?: AvatarColors.first()) }
     var selectedEmoji by remember { mutableStateOf(initial?.avatarEmoji ?: MemberEmojis.first()) }
@@ -652,7 +768,10 @@ private fun MemberEditorDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "Nuevo miembro" else "Editar miembro") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -666,6 +785,14 @@ private fun MemberEditorDialog(
                     label = { Text("Rol familiar") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("member_role_input")
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("Teléfono (opcional para marcar)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("member_phone_input")
                 )
                 Text("Avatar", style = MaterialTheme.typography.labelMedium)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -715,7 +842,7 @@ private fun MemberEditorDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(name, role, isAdmin, selectedColor, selectedEmoji) },
+                onClick = { onSave(name, role, isAdmin, selectedColor, selectedEmoji, phone) },
                 enabled = name.isNotBlank(),
                 modifier = Modifier.testTag("save_member_button")
             ) {

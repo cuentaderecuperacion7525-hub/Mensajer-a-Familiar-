@@ -40,5 +40,12 @@ class ExampleRobolectricTest {
     assertEquals(3, code)
     assertTrue(AppUpdateChecker.isRemoteNewer(2, "1.1", 3, "1.2"))
     assertFalse(AppUpdateChecker.isRemoteNewer(2, "1.1", 2, "1.1"))
+    val sampleHtml = """
+      <a href="/miusuario/Mensajer-a-Familiar-/releases/download/v2.0.1-c6/NidoFamiliar-v2.0.1-c6-debug.apk">APK</a>
+    """.trimIndent()
+    assertEquals(
+      "https://github.com/miusuario/Mensajer-a-Familiar-/releases/download/v2.0.1-c6/NidoFamiliar-v2.0.1-c6-debug.apk",
+      AppUpdateChecker.extractApkUrlFromHtml(sampleHtml, "miusuario/Mensajer-a-Familiar-")
+    )
   }
 }

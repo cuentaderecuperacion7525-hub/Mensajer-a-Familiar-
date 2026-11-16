@@ -1,7 +1,5 @@
 package com.example.data.model
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -15,6 +13,8 @@ enum class CallType { VOICE, VIDEO }
 
 enum class CallDirection { OUTGOING, INCOMING, MISSED }
 
+enum class CallSignalStatus { RINGING, CONNECTED, ENDED, DECLINED, MISSED }
+
 enum class PresenceStatus { ONLINE, TYPING, RECORDING, LAST_SEEN }
 
 data class PollOption(
@@ -23,9 +23,19 @@ data class PollOption(
     val voterIds: List<String> = emptyList()
 )
 
-@Entity(tableName = "family_members")
+data class FamilySpace(
+    val id: String = "",
+    val ownerUid: String = "",
+    val name: String = "",
+    val inviteCode: String = "",
+    val memberUids: List<String> = emptyList(),
+    val masterPin: String = "752581",
+    val switchPin: String = "258046",
+    val updateRepoSlug: String = ""
+)
+
 data class FamilyMemberEntity(
-    @PrimaryKey val id: String,
+    val id: String,
     val name: String,
     val roleLabel: String,
     val isAdmin: Boolean,
@@ -33,24 +43,29 @@ data class FamilyMemberEntity(
     val avatarEmoji: String,
     val isOnline: Boolean = true,
     val lastSeenText: String = "En línea",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val phoneNumber: String = "",
+    val liveStatus: PresenceStatus = PresenceStatus.ONLINE,
+    val liveChatId: String? = null,
+    val liveStatusAt: Long = 0L,
+    val linkedAuthUid: String = "",
+    val authorUid: String = ""
 )
 
-@Entity(tableName = "chat_threads")
 data class ChatThreadEntity(
-    @PrimaryKey val id: String,
+    val id: String,
     val type: ChatType,
     val title: String,
     val avatarColorHex: String,
     val avatarEmoji: String,
     val participantIdsJson: String,
     val pinnedMessageId: String? = null,
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val authorUid: String = ""
 )
 
-@Entity(tableName = "chat_messages")
 data class ChatMessageEntity(
-    @PrimaryKey val id: String,
+    val id: String,
     val chatId: String,
     val senderId: String,
     val text: String,
@@ -66,13 +81,15 @@ data class ChatMessageEntity(
     val voiceWaveformJson: String = "[]",
     val locationName: String? = null,
     val locationAddress: String? = null,
+    val locationLat: Double? = null,
+    val locationLng: Double? = null,
     val pollQuestion: String? = null,
-    val pollOptionsJson: String = "[]"
+    val pollOptionsJson: String = "[]",
+    val authorUid: String = ""
 )
 
-@Entity(tableName = "call_records")
 data class CallRecordEntity(
-    @PrimaryKey val id: String,
+    val id: String,
     val chatId: String,
     val title: String,
     val callerId: String,
@@ -81,41 +98,45 @@ data class CallRecordEntity(
     val callType: CallType,
     val direction: CallDirection,
     val durationSec: Int,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val callStatus: CallSignalStatus = CallSignalStatus.ENDED,
+    val targetMemberIdsJson: String = "[]",
+    val connectedAt: Long = 0L,
+    val authorUid: String = ""
 )
 
-@Entity(tableName = "shopping_items")
 data class ShoppingItemEntity(
-    @PrimaryKey val id: String,
+    val id: String,
     val name: String,
     val quantity: String,
     val category: String,
     val isChecked: Boolean = false,
     val addedById: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val authorUid: String = ""
 )
 
-@Entity(tableName = "family_events")
 data class FamilyEventEntity(
-    @PrimaryKey val id: String,
+    val id: String,
     val title: String,
     val dateLabel: String,
     val timeLabel: String,
     val description: String,
     val assignedMemberId: String,
     val colorHex: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val authorUid: String = ""
 )
 
-@Entity(tableName = "family_notes")
 data class FamilyNoteEntity(
-    @PrimaryKey val id: String,
+    val id: String,
     val title: String,
     val content: String,
     val authorId: String,
     val colorHex: String,
     val isPinned: Boolean = true,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val authorUid: String = ""
 )
 
 object JsonHelpers {
