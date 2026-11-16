@@ -38,6 +38,8 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Videocam
@@ -46,6 +48,8 @@ import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -89,6 +93,7 @@ import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.ShoppingItemEntity
 import com.example.ui.components.MemberAvatar
 import com.example.ui.components.MessageStatusIcon
+import com.example.ui.components.UserProfileOptionsDialog
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.viewmodel.ChatThreadUi
 import com.example.ui.viewmodel.MainTab
@@ -99,6 +104,7 @@ import com.example.util.TimeFormatters
 fun MainHomeScreen(
     activeMember: FamilyMemberEntity,
     allMembers: List<FamilyMemberEntity>,
+    userGroupsCount: Int,
     isDarkTheme: Boolean,
     selectedTab: MainTab,
     searchQuery: String,
@@ -110,6 +116,7 @@ fun MainHomeScreen(
     snackbarMessage: String?,
     onClearSnackbar: () -> Unit,
     onToggleTheme: () -> Unit,
+    onUpdateOwnStatus: (Boolean, String) -> Unit,
     onSelectTab: (MainTab) -> Unit,
     onSearchChange: (String) -> Unit,
     onOpenChat: (String) -> Unit,
@@ -128,6 +135,8 @@ fun MainHomeScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var showNewChatDialog by remember { mutableStateOf(false) }
+    var showProfileOptionsDialog by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(snackbarMessage) {
         if (snackbarMessage != null) {
@@ -152,7 +161,7 @@ fun MainHomeScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
-                                    .clickable { onSwitchProfile() }
+                                    .clickable { showProfileOptionsDialog = true }
                                     .padding(end = 8.dp)
                                     .testTag("active_profile_switcher")
                             ) {
@@ -160,19 +169,23 @@ fun MainHomeScreen(
                                     emoji = activeMember.avatarEmoji,
                                     colorHex = activeMember.avatarColorHex,
                                     size = 38.dp,
-                                    isOnline = true,
+                                    isOnline = activeMember.isOnline,
                                     showOnlineDot = true
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
                                     Text(
                                         text = "NidoFamiliar",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "Sesión: ${activeMember.name} · Cambiar",
+                                        text = "${activeMember.name} · ${activeMember.lastSeenText}",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -204,8 +217,76 @@ fun MainHomeScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.SwapHoriz,
-                                    contentDescription = "Cambiar de perfil"
+                                    contentDescription = "Switch de perfil"
                                 )
+                            }
+                            Box {
+                                IconButton(
+                                    onClick = { showOverflowMenu = true },
+                                    modifier = Modifier.testTag("home_more_menu_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.MoreVert,
+                                        contentDescription = "Opciones de perfil"
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showOverflowMenu,
+                                    onDismissRequest = { showOverflowMenu = false },
+                                    modifier = Modifier.testTag("home_more_menu")
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Mi perfil y características") },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.Person, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            showProfileOptionsDialog = true
+                                        },
+                                        modifier = Modifier.testTag("menu_profile_options")
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Switch (Cambiar de perfil)") },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.SwapHoriz, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            onSwitchProfile()
+                                        },
+                                        modifier = Modifier.testTag("menu_switch_profile")
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(if (isDarkTheme) "Cambiar a tema blanco" else "Cambiar a tema oscuro")
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = if (isDarkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
+                                                contentDescription = null
+                                            )
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            onToggleTheme()
+                                        },
+                                        modifier = Modifier.testTag("menu_toggle_theme")
+                                    )
+                                    if (activeMember.isAdmin) {
+                                        DropdownMenuItem(
+                                            text = { Text("Panel de Administración") },
+                                            leadingIcon = {
+                                                Icon(Icons.Filled.AdminPanelSettings, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                showOverflowMenu = false
+                                                onOpenAdminPanel()
+                                            },
+                                            modifier = Modifier.testTag("menu_admin_panel")
+                                        )
+                                    }
+                                }
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
@@ -367,6 +448,22 @@ fun MainHomeScreen(
             confirmButton = {
                 TextButton(onClick = { showNewChatDialog = false }) { Text("Cerrar") }
             }
+        )
+    }
+
+    if (showProfileOptionsDialog) {
+        UserProfileOptionsDialog(
+            member = activeMember,
+            userGroupsCount = userGroupsCount,
+            isDarkTheme = isDarkTheme,
+            onToggleTheme = onToggleTheme,
+            onUpdateStatus = { online, statusText ->
+                onUpdateOwnStatus(online, statusText)
+                showProfileOptionsDialog = false
+            },
+            onOpenAdminPanel = onOpenAdminPanel,
+            onRequestSwitchProfile = onSwitchProfile,
+            onDismiss = { showProfileOptionsDialog = false }
         )
     }
 }

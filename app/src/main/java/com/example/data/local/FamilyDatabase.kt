@@ -89,7 +89,7 @@ object SeedData {
             name = "Papá",
             roleLabel = "Administrador",
             isAdmin = true,
-            avatarColorHex = "#0F7A5C",
+            avatarColorHex = "#1A73E8",
             avatarEmoji = "👨🏽",
             isOnline = true,
             lastSeenText = "En línea",
@@ -123,7 +123,7 @@ object SeedData {
             id = "chat_familia",
             type = ChatType.GROUP,
             title = "Familia Unida 🏡",
-            avatarColorHex = "#0F7A5C",
+            avatarColorHex = "#1A73E8",
             avatarEmoji = "🏡",
             participantIdsJson = JsonHelpers.encodeStringList(listOf(papa.id, mama.id, hijo.id)),
             pinnedMessageId = "msg_g_1",
@@ -374,7 +374,7 @@ object SeedData {
                 timeLabel = "19:30 PM",
                 description = "En casa de los abuelos, llevamos el postre",
                 assignedMemberId = mama.id,
-                colorHex = "#0F7A5C",
+                colorHex = "#1A73E8",
                 createdAt = now - 150 * min
             )
         )
@@ -392,10 +392,10 @@ object SeedData {
             ),
             FamilyNoteEntity(
                 id = "note_2",
-                title = "PIN Maestro de Administración",
-                content = "Recuerda que el PIN inicial de Papá para administrar miembros y grupos es 1234 (editable en el Panel Admin).",
-                authorId = papa.id,
-                colorHex = "#DCFCE7",
+                title = "Horarios de recolección",
+                content = "Recordatorio: sacar los envases reciclables los martes y jueves antes de las 20:00.",
+                authorId = mama.id,
+                colorHex = "#E8F1FD",
                 isPinned = true,
                 createdAt = now - 400 * min
             )

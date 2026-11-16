@@ -530,7 +530,7 @@ private fun NotesBoardSection(
                                 Icon(
                                     Icons.Filled.PushPin,
                                     contentDescription = if (note.isPinned) "Desfijar" else "Fijar",
-                                    tint = if (note.isPinned) Color(0xFF0F7A5C) else Color(0xFF6B7280)
+                                    tint = if (note.isPinned) Color(0xFF1A73E8) else Color(0xFF6B7280)
                                 )
                             }
                             IconButton(onClick = { onDelete(note.id) }) {

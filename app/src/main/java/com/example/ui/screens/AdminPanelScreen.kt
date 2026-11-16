@@ -21,9 +21,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -88,12 +91,14 @@ fun AdminPanelScreen(
     chats: List<ChatThreadEntity>,
     currentMemberId: String?,
     currentMasterPin: String,
+    currentSwitchPin: String,
     onBack: () -> Unit,
     onSaveMember: (id: String?, name: String, role: String, isAdmin: Boolean, color: String, emoji: String) -> Unit,
     onDeleteMember: (String) -> Unit,
     onSaveGroup: (id: String?, title: String, color: String, emoji: String, participantIds: List<String>) -> Unit,
     onDeleteGroup: (String) -> Unit,
-    onUpdateMasterPin: (String) -> Unit
+    onUpdateMasterPin: (String) -> Unit,
+    onUpdateSwitchPin: (String) -> Unit
 ) {
     var selectedSection by remember { mutableIntStateOf(0) }
     var editingMember by remember { mutableStateOf<FamilyMemberEntity?>(null) }
@@ -181,7 +186,7 @@ fun AdminPanelScreen(
                     Tab(
                         selected = selectedSection == 2,
                         onClick = { selectedSection = 2 },
-                        text = { Text("PIN Maestro") },
+                        text = { Text("Seguridad") },
                         modifier = Modifier.testTag("admin_tab_pin")
                     )
                 }
@@ -207,7 +212,9 @@ fun AdminPanelScreen(
                     )
                     2 -> AdminPinSettings(
                         currentMasterPin = currentMasterPin,
-                        onUpdateMasterPin = onUpdateMasterPin
+                        currentSwitchPin = currentSwitchPin,
+                        onUpdateMasterPin = onUpdateMasterPin,
+                        onUpdateSwitchPin = onUpdateSwitchPin
                     )
                 }
             }
@@ -373,18 +380,24 @@ private fun AdminGroupsList(
 @Composable
 private fun AdminPinSettings(
     currentMasterPin: String,
-    onUpdateMasterPin: (String) -> Unit
+    currentSwitchPin: String,
+    onUpdateMasterPin: (String) -> Unit,
+    onUpdateSwitchPin: (String) -> Unit
 ) {
     var currentInput by remember { mutableStateOf("") }
     var newPin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
     var feedback by remember { mutableStateOf<String?>(null) }
 
+    var newSwitchPin by remember { mutableStateOf("") }
+    var switchFeedback by remember { mutableStateOf<String?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Card(
             shape = RoundedCornerShape(20.dp),
@@ -396,26 +409,117 @@ private fun AdminPinSettings(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        Icons.Filled.Key,
-                        contentDescription = "PIN Maestro",
+                        Icons.Filled.SwapHoriz,
+                        contentDescription = "Clave de Switch",
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        "Actualizar PIN Maestro",
+                        "Clave de Switch (Salir de perfil)",
                         style = MaterialTheme.typography.titleMedium
                     )
                 }
                 Text(
-                    "El PIN protege la creación de perfiles, grupos y cambios administrativos de Papá.",
+                    "Si alguien entra por error a otro perfil, necesitará esta clave autorizada por Papá para usar la opción Switch y volver al selector.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Clave activa actual:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = currentSwitchPin,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 4.sp
+                            ),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.testTag("admin_active_switch_pin")
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = newSwitchPin,
+                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) newSwitchPin = it },
+                    label = { Text("Nueva clave de Switch (4 a 6 dígitos)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("admin_new_switch_pin_input")
+                )
+
+                if (switchFeedback != null) {
+                    Text(
+                        text = switchFeedback!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        if (newSwitchPin.length !in 4..6) {
+                            switchFeedback = "La clave de Switch debe tener entre 4 y 6 dígitos."
+                        } else {
+                            switchFeedback = null
+                            onUpdateSwitchPin(newSwitchPin)
+                            newSwitchPin = ""
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("admin_save_switch_pin_button")
+                ) {
+                    Text("Guardar clave de Switch")
+                }
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Filled.Key,
+                        contentDescription = "Contraseña de Papá",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        "Contraseña de acceso de Papá",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+                Text(
+                    "Protege el ingreso al perfil administrador de Papá y el control familiar.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 OutlinedTextField(
                     value = currentInput,
-                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) currentInput = it },
-                    label = { Text("PIN actual") },
+                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) currentInput = it },
+                    label = { Text("Contraseña actual") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
@@ -423,8 +527,8 @@ private fun AdminPinSettings(
                 )
                 OutlinedTextField(
                     value = newPin,
-                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) newPin = it },
-                    label = { Text("Nuevo PIN (4 dígitos)") },
+                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) newPin = it },
+                    label = { Text("Nueva contraseña (6 dígitos)") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
@@ -432,8 +536,8 @@ private fun AdminPinSettings(
                 )
                 OutlinedTextField(
                     value = confirmPin,
-                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) confirmPin = it },
-                    label = { Text("Confirmar nuevo PIN") },
+                    onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) confirmPin = it },
+                    label = { Text("Confirmar nueva contraseña") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
@@ -451,9 +555,9 @@ private fun AdminPinSettings(
                 Button(
                     onClick = {
                         when {
-                            currentInput != currentMasterPin -> feedback = "El PIN actual no coincide."
-                            newPin.length != 4 -> feedback = "El nuevo PIN debe tener exactamente 4 dígitos."
-                            newPin != confirmPin -> feedback = "Los nuevos PIN no coinciden."
+                            currentInput != currentMasterPin -> feedback = "La contraseña actual no coincide."
+                            newPin.length != 6 -> feedback = "La nueva contraseña debe tener exactamente 6 dígitos."
+                            newPin != confirmPin -> feedback = "Las nuevas contraseñas no coinciden."
                             else -> {
                                 feedback = null
                                 onUpdateMasterPin(newPin)
@@ -465,7 +569,7 @@ private fun AdminPinSettings(
                     },
                     modifier = Modifier.fillMaxWidth().testTag("admin_save_pin_button")
                 ) {
-                    Text("Guardar nuevo PIN")
+                    Text("Guardar nueva contraseña")
                 }
             }
         }

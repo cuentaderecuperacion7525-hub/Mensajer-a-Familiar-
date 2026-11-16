@@ -83,6 +83,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val masterPin: StateFlow<String> = repo.masterPin
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PreferencesManager.DEFAULT_PIN)
 
+    val switchPin: StateFlow<String> = prefs.switchPinFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PreferencesManager.DEFAULT_SWITCH_PIN)
+
     val isDarkTheme: StateFlow<Boolean> = prefs.isDarkThemeFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
@@ -351,10 +354,34 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     fun verifyPin(entered: String): Boolean = entered == masterPin.value
 
+    fun verifySwitchKey(entered: String): Boolean =
+        entered == switchPin.value || entered == masterPin.value
+
     fun updateMasterPin(newPin: String) {
         viewModelScope.launch {
             repo.updateMasterPin(newPin)
-            showMessage("PIN maestro actualizado correctamente")
+            showMessage("Contraseña de Papá actualizada correctamente")
+        }
+    }
+
+    fun updateSwitchPin(newPin: String) {
+        viewModelScope.launch {
+            prefs.updateSwitchPin(newPin)
+            showMessage("Clave de cambio de perfil actualizada")
+        }
+    }
+
+    fun updateOwnProfileStatus(isOnline: Boolean, statusText: String) {
+        val current = activeMember.value ?: return
+        val cleanStatus = statusText.trim().ifEmpty { if (isOnline) "En línea" else "Desconectado" }
+        viewModelScope.launch {
+            repo.upsertMember(
+                current.copy(
+                    isOnline = isOnline,
+                    lastSeenText = if (isOnline && cleanStatus == "Desconectado") "En línea" else cleanStatus
+                )
+            )
+            showMessage("Estado del perfil actualizado")
         }
     }
 
@@ -504,7 +531,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                         id = newId,
                         type = ChatType.DIRECT,
                         title = "Directo",
-                        avatarColorHex = other?.avatarColorHex ?: "#0F7A5C",
+                        avatarColorHex = other?.avatarColorHex ?: "#1A73E8",
                         avatarEmoji = other?.avatarEmoji ?: "💬",
                         participantIdsJson = JsonHelpers.encodeStringList(listOf(currentId, otherMemberId)),
                         updatedAt = System.currentTimeMillis()

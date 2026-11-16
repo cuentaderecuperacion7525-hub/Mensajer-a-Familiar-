@@ -24,6 +24,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.data.model.ChatType
 import com.example.data.model.FamilyMemberEntity
 import com.example.ui.components.PinVerificationDialog
 import com.example.ui.screens.AdminPanelScreen
@@ -85,14 +86,15 @@ fun NidoFamiliarApp(
     val events by vm.events.collectAsStateWithLifecycle()
     val notes by vm.notes.collectAsStateWithLifecycle()
     val masterPin by vm.masterPin.collectAsStateWithLifecycle()
+    val switchPin by vm.switchPin.collectAsStateWithLifecycle()
     val activeCall by vm.activeCall.collectAsStateWithLifecycle()
     val voiceRecording by vm.voiceRecording.collectAsStateWithLifecycle()
     val playingVoiceId by vm.playingVoiceMessageId.collectAsStateWithLifecycle()
     val playingVoiceProgress by vm.playingVoiceProgress.collectAsStateWithLifecycle()
     val snackbarMessage by vm.snackbarMessage.collectAsStateWithLifecycle()
 
-    var pendingAdminTargetMember by remember { mutableStateOf<FamilyMemberEntity?>(null) }
-    var showPinForAdmin by remember { mutableStateOf(false) }
+    var pendingProtectedMember by remember { mutableStateOf<FamilyMemberEntity?>(null) }
+    var showSwitchKeyDialog by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
@@ -105,14 +107,14 @@ fun NidoFamiliarApp(
                     isDarkTheme = isDarkTheme,
                     onToggleTheme = vm::toggleTheme,
                     onSelectMember = { member ->
-                        vm.selectProfile(member.id)
-                        navController.navigate(Routes.HOME) {
-                            popUpTo(Routes.SELECTOR) { inclusive = true }
+                        if (member.isAdmin) {
+                            pendingProtectedMember = member
+                        } else {
+                            vm.selectProfile(member.id)
+                            navController.navigate(Routes.HOME) {
+                                popUpTo(Routes.SELECTOR) { inclusive = true }
+                            }
                         }
-                    },
-                    onOpenAdminFromSelector = { adminMember ->
-                        pendingAdminTargetMember = adminMember
-                        showPinForAdmin = true
                     }
                 )
             }
@@ -126,9 +128,13 @@ fun NidoFamiliarApp(
                         }
                     }
                 } else {
+                    val userGroupsCount = remember(chatPreviews) {
+                        chatPreviews.count { it.chat.type == ChatType.GROUP }
+                    }
                     MainHomeScreen(
                         activeMember = member,
                         allMembers = members,
+                        userGroupsCount = userGroupsCount,
                         isDarkTheme = isDarkTheme,
                         selectedTab = selectedTab,
                         searchQuery = searchQuery,
@@ -140,6 +146,7 @@ fun NidoFamiliarApp(
                         snackbarMessage = snackbarMessage,
                         onClearSnackbar = vm::clearSnackbar,
                         onToggleTheme = vm::toggleTheme,
+                        onUpdateOwnStatus = vm::updateOwnProfileStatus,
                         onSelectTab = vm::selectTab,
                         onSearchChange = vm::updateSearchQuery,
                         onOpenChat = { chatId ->
@@ -152,14 +159,19 @@ fun NidoFamiliarApp(
                             }
                         },
                         onSwitchProfile = {
-                            vm.logoutToSelector()
-                            navController.navigate(Routes.SELECTOR) {
-                                popUpTo(Routes.HOME) { inclusive = true }
+                            if (member.isAdmin) {
+                                vm.logoutToSelector()
+                                navController.navigate(Routes.SELECTOR) {
+                                    popUpTo(Routes.HOME) { inclusive = true }
+                                }
+                            } else {
+                                showSwitchKeyDialog = true
                             }
                         },
                         onOpenAdminPanel = {
-                            pendingAdminTargetMember = null
-                            showPinForAdmin = true
+                            if (member.isAdmin) {
+                                navController.navigate(Routes.ADMIN)
+                            }
                         },
                         onStartCall = vm::startSimulatedCall,
                         onAddShoppingItem = vm::addShoppingItem,
@@ -238,31 +250,52 @@ fun NidoFamiliarApp(
                     chats = rawChats,
                     currentMemberId = activeMember?.id,
                     currentMasterPin = masterPin,
+                    currentSwitchPin = switchPin,
                     onBack = { navController.popBackStack() },
                     onSaveMember = vm::saveFamilyMember,
                     onDeleteMember = vm::deleteFamilyMember,
                     onSaveGroup = vm::saveGroup,
                     onDeleteGroup = vm::deleteGroup,
-                    onUpdateMasterPin = vm::updateMasterPin
+                    onUpdateMasterPin = vm::updateMasterPin,
+                    onUpdateSwitchPin = vm::updateSwitchPin
                 )
             }
         }
 
-        if (showPinForAdmin) {
+        pendingProtectedMember?.let { protectedMember ->
             PinVerificationDialog(
+                title = "Contraseña de ${protectedMember.name}",
+                subtitle = "Ingresa la contraseña de ${masterPin.length} dígitos para entrar",
+                pinLength = masterPin.length,
                 onVerify = vm::verifyPin,
                 onSuccess = {
-                    showPinForAdmin = false
-                    val target = pendingAdminTargetMember
-                    pendingAdminTargetMember = null
-                    if (target != null && activeMember == null) {
-                        vm.selectProfile(target.id)
+                    pendingProtectedMember = null
+                    vm.selectProfile(protectedMember.id)
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.SELECTOR) { inclusive = true }
                     }
-                    navController.navigate(Routes.ADMIN)
                 },
                 onDismiss = {
-                    showPinForAdmin = false
-                    pendingAdminTargetMember = null
+                    pendingProtectedMember = null
+                }
+            )
+        }
+
+        if (showSwitchKeyDialog) {
+            PinVerificationDialog(
+                title = "Cambiar de perfil (Switch)",
+                subtitle = "Ingresa la clave autorizada por el administrador (${switchPin.length} dígitos)",
+                pinLength = switchPin.length,
+                onVerify = vm::verifySwitchKey,
+                onSuccess = {
+                    showSwitchKeyDialog = false
+                    vm.logoutToSelector()
+                    navController.navigate(Routes.SELECTOR) {
+                        popUpTo(Routes.HOME) { inclusive = true }
+                    }
+                },
+                onDismiss = {
+                    showSwitchKeyDialog = false
                 }
             )
         }

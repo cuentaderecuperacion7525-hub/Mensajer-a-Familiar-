@@ -89,7 +89,7 @@ object TimeFormatters {
     }
 }
 
-fun parseHexColor(hex: String, fallback: Color = Color(0xFF0F7A5C)): Color {
+fun parseHexColor(hex: String, fallback: Color = Color(0xFF1A73E8)): Color {
     return try {
         Color(android.graphics.Color.parseColor(hex))
     } catch (_: Exception) {

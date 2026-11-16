@@ -15,13 +15,19 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 class PreferencesManager(private val context: Context) {
     companion object {
         private val KEY_MASTER_PIN = stringPreferencesKey("master_pin")
+        private val KEY_SWITCH_PIN = stringPreferencesKey("switch_pin")
         private val KEY_ACTIVE_MEMBER_ID = stringPreferencesKey("active_member_id")
         private val KEY_IS_DARK_THEME = booleanPreferencesKey("is_dark_theme")
-        const val DEFAULT_PIN = "1234"
+        const val DEFAULT_PIN = "752581"
+        const val DEFAULT_SWITCH_PIN = "2580"
     }
 
     val masterPinFlow: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_MASTER_PIN] ?: DEFAULT_PIN
+    }
+
+    val switchPinFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_SWITCH_PIN] ?: DEFAULT_SWITCH_PIN
     }
 
     val activeMemberIdFlow: Flow<String?> = context.dataStore.data.map { prefs ->
@@ -35,6 +41,12 @@ class PreferencesManager(private val context: Context) {
     suspend fun updateMasterPin(newPin: String) {
         context.dataStore.edit { prefs ->
             prefs[KEY_MASTER_PIN] = newPin
+        }
+    }
+
+    suspend fun updateSwitchPin(newPin: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_SWITCH_PIN] = newPin
         }
     }
 

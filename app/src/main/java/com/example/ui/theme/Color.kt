@@ -2,27 +2,27 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Clean White & Modern Messaging Accent Palette
-val EmeraldPrimary = Color(0xFF00A884)
+// Classic Clean White & Modern Messaging Blue Accent Palette
+val EmeraldPrimary = Color(0xFF1A73E8)
 val EmeraldOnPrimary = Color(0xFFFFFFFF)
-val EmeraldContainer = Color(0xFFE3F7F1)
-val EmeraldOnContainer = Color(0xFF00382B)
+val EmeraldContainer = Color(0xFFE8F1FD)
+val EmeraldOnContainer = Color(0xFF0D3B7A)
 
-val EmeraldPrimaryDark = Color(0xFF00A884)
-val EmeraldOnPrimaryDark = Color(0xFF00291F)
-val EmeraldContainerDark = Color(0xFF094537)
-val EmeraldOnContainerDark = Color(0xFFCFF7E8)
+val EmeraldPrimaryDark = Color(0xFF5EA2FF)
+val EmeraldOnPrimaryDark = Color(0xFF07234A)
+val EmeraldContainerDark = Color(0xFF1A365D)
+val EmeraldOnContainerDark = Color(0xFFD6E7FF)
 
 // Secondary Clean Slate
 val SageSecondary = Color(0xFF54656F)
 val SageOnSecondary = Color(0xFFFFFFFF)
-val SageContainer = Color(0xFFF0F2F5)
+val SageContainer = Color(0xFFF1F3F6)
 val SageOnContainer = Color(0xFF111B21)
 
-val SageSecondaryDark = Color(0xFF8696A0)
-val SageOnSecondaryDark = Color(0xFF111B21)
-val SageContainerDark = Color(0xFF202C33)
-val SageOnContainerDark = Color(0xFFE9EDEF)
+val SageSecondaryDark = Color(0xFF8B949E)
+val SageOnSecondaryDark = Color(0xFF0D1117)
+val SageContainerDark = Color(0xFF21262D)
+val SageOnContainerDark = Color(0xFFE6EDF3)
 
 // Tertiary Accent
 val AmberTertiary = Color(0xFF0284C7)
@@ -38,49 +38,49 @@ val AmberOnContainerDark = Color(0xFFE0F2FE)
 // Crisp White Light Surfaces
 val LightBackground = Color(0xFFFFFFFF)
 val LightSurface = Color(0xFFFFFFFF)
-val LightSurfaceVariant = Color(0xFFF0F2F5)
-val LightOnSurface = Color(0xFF111B21)
-val LightOnSurfaceVariant = Color(0xFF667781)
-val LightOutline = Color(0xFFE4E7EC)
+val LightSurfaceVariant = Color(0xFFF2F4F7)
+val LightOnSurface = Color(0xFF111827)
+val LightOnSurfaceVariant = Color(0xFF6B7280)
+val LightOutline = Color(0xFFE5E7EB)
 
 // Sleek Dark Surfaces
-val DarkBackground = Color(0xFF0B141A)
-val DarkSurface = Color(0xFF111B21)
-val DarkSurfaceVariant = Color(0xFF202C33)
-val DarkOnSurface = Color(0xFFE9EDEF)
-val DarkOnSurfaceVariant = Color(0xFF8696A0)
-val DarkOutline = Color(0xFF2A3942)
+val DarkBackground = Color(0xFF0D1117)
+val DarkSurface = Color(0xFF161B22)
+val DarkSurfaceVariant = Color(0xFF21262D)
+val DarkOnSurface = Color(0xFFF0F6FC)
+val DarkOnSurfaceVariant = Color(0xFF8B949E)
+val DarkOutline = Color(0xFF30363D)
 
 // Semantic Messaging Tokens
-val ChatWallpaperLight = Color(0xFFF4F6F9)
-val ChatWallpaperDark = Color(0xFF0B141A)
+val ChatWallpaperLight = Color(0xFFF5F7FA)
+val ChatWallpaperDark = Color(0xFF0D1117)
 
-val OutgoingBubbleLight = Color(0xFFE0F7EE)
-val OutgoingBubbleDark = Color(0xFF005C4B)
+val OutgoingBubbleLight = Color(0xFFDCEBFF)
+val OutgoingBubbleDark = Color(0xFF194275)
 
 val IncomingBubbleLight = Color(0xFFFFFFFF)
-val IncomingBubbleDark = Color(0xFF202C33)
+val IncomingBubbleDark = Color(0xFF21262D)
 
-val OnlineGreen = Color(0xFF00A884)
-val ReadBlue = Color(0xFF25A5E6)
+val OnlineGreen = Color(0xFF22C55E)
+val ReadBlue = Color(0xFF1A73E8)
 val DangerRed = Color(0xFFD9383A)
 
 // Avatar Preset Colors
 val AvatarColors = listOf(
-    "#00A884", // Esmeralda moderno
-    "#2563EB", // Azul
+    "#1A73E8", // Azul mensajería
+    "#2563EB", // Azul índigo
     "#D97706", // Ámbar
     "#DB2777", // Rosa
     "#7C3AED", // Violeta
     "#0891B2", // Cian
     "#DC2626", // Rojo coral
-    "#4F46E5", // Índigo
+    "#0F766E", // Turquesa
 )
 
 // Board Note Card Colors
 val NoteColors = listOf(
     "#FFF9DB", // Amarillo suave
-    "#E6F9F0", // Menta claro
-    "#E8F4FD", // Cielo
+    "#E8F1FD", // Azul claro
+    "#F3E8FF", // Lavanda suave
     "#FCEBF4", // Rosa claro
 )

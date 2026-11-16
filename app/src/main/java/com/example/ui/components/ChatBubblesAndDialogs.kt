@@ -335,7 +335,7 @@ fun ChatMessageBubble(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(86.dp)
-                                        .background(Color(0xFFD9EDE2)),
+                                        .background(Color(0xFFE7EEF6)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Canvas(modifier = Modifier.fillMaxSize()) {

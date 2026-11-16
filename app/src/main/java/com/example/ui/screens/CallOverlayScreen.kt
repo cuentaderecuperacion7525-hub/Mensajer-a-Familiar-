@@ -81,9 +81,9 @@ fun CallOverlayScreen(
             .background(
                 Brush.verticalGradient(
                     colors = if (callState.callType == CallType.VIDEO && callState.isCameraOn) {
-                        listOf(Color(0xFF0A2E23), Color(0xFF0F4C3A), Color(0xFF071B15))
+                        listOf(Color(0xFF0F172A), Color(0xFF1E293B), Color(0xFF0B1120))
                     } else {
-                        listOf(Color(0xFF09231B), Color(0xFF0F3B2D), Color(0xFF061510))
+                        listOf(Color(0xFF0B1120), Color(0xFF172133), Color(0xFF090D16))
                     }
                 )
             )
@@ -119,7 +119,7 @@ fun CallOverlayScreen(
                     text = if (callState.isConnected) TimeFormatters.formatDuration(callState.durationSec)
                     else "Llamando...",
                     style = MaterialTheme.typography.titleMedium,
-                    color = Color(0xFFA7F3D0)
+                    color = Color(0xFF93C5FD)
                 )
             }
 
@@ -250,7 +250,7 @@ private fun CallControlButton(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (active) Color(0xFF0F7A5C) else Color.White
+                tint = if (active) Color(0xFF1A73E8) else Color.White
             )
         }
         Spacer(modifier = Modifier.height(4.dp))

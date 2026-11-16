@@ -6,24 +6,43 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -43,6 +62,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.MessageStatus
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.theme.ReadBlue
@@ -107,10 +127,309 @@ fun MessageStatusIcon(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun UserProfileOptionsDialog(
+    member: FamilyMemberEntity,
+    userGroupsCount: Int,
+    isDarkTheme: Boolean,
+    onToggleTheme: () -> Unit,
+    onUpdateStatus: (isOnline: Boolean, statusText: String) -> Unit,
+    onOpenAdminPanel: () -> Unit,
+    onRequestSwitchProfile: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var isOnlineInput by remember(member.id, member.isOnline) { mutableStateOf(member.isOnline) }
+    var statusInput by remember(member.id, member.lastSeenText) { mutableStateOf(member.lastSeenText) }
+    val quickStatuses = listOf("En línea", "En casa", "Ocupado", "En el trabajo", "En la escuela")
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(26.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 420.dp)
+                .testTag("profile_options_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    MemberAvatar(
+                        emoji = member.avatarEmoji,
+                        colorHex = member.avatarColorHex,
+                        size = 56.dp,
+                        isOnline = isOnlineInput,
+                        showOnlineDot = true
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = member.name,
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                            )
+                            if (member.isAdmin) {
+                                Icon(
+                                    imageVector = Icons.Filled.Shield,
+                                    contentDescription = "Administrador",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = if (member.isAdmin) "${member.roleLabel} · Administrador" else member.roleLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("profile_close_button")
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = "Cerrar")
+                    }
+                }
+
+                // Características del usuario
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Características del perfil",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Rol familiar", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(member.roleLabel, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium))
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Filled.Groups, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Grupos familiares", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text("$userGroupsCount activos", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium))
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Acceso", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = if (member.isAdmin) "Protegido con contraseña" else "Acceso directo",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium)
+                            )
+                        }
+                    }
+                }
+
+                // Estado y disponibilidad
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Mostrarme en línea", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                text = if (isOnlineInput) "Visible para la familia" else "Apareces como desconectado",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isOnlineInput,
+                            onCheckedChange = { checked ->
+                                isOnlineInput = checked
+                                if (checked && statusInput == "Desconectado") {
+                                    statusInput = "En línea"
+                                } else if (!checked && statusInput == "En línea") {
+                                    statusInput = "Desconectado"
+                                }
+                            },
+                            modifier = Modifier.testTag("profile_online_switch")
+                        )
+                    }
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        quickStatuses.forEach { preset ->
+                            FilterChip(
+                                selected = statusInput == preset,
+                                onClick = {
+                                    statusInput = preset
+                                    isOnlineInput = preset == "En línea" || preset == "En casa"
+                                },
+                                label = { Text(preset, style = MaterialTheme.typography.labelSmall) }
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = statusInput,
+                        onValueChange = { statusInput = it },
+                        label = { Text("Estado personalizado") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("profile_status_input")
+                    )
+
+                    Button(
+                        onClick = { onUpdateStatus(isOnlineInput, statusInput) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("profile_save_status_button")
+                    ) {
+                        Text("Guardar estado")
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+
+                // Apariencia
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onToggleTheme() }
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(
+                            imageVector = if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                            contentDescription = "Tema de la aplicación",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column {
+                            Text("Tema oscuro", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                text = if (isDarkTheme) "Activo (oscuro)" else "Desactivado (blanco)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = isDarkTheme,
+                        onCheckedChange = { onToggleTheme() },
+                        modifier = Modifier.testTag("profile_theme_switch")
+                    )
+                }
+
+                // Switch de perfil con clave del administrador
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            onDismiss()
+                            onRequestSwitchProfile()
+                        }
+                        .testTag("profile_switch_row")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.SwapHoriz,
+                                contentDescription = "Switch de perfil",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Column {
+                                Text("Switch de perfil", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    text = if (member.isAdmin) {
+                                        "Salir al selector de perfiles"
+                                    } else {
+                                        "Salir con clave del administrador"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = false,
+                            onCheckedChange = {
+                                onDismiss()
+                                onRequestSwitchProfile()
+                            },
+                            modifier = Modifier.testTag("profile_switch_control")
+                        )
+                    }
+                }
+
+                if (member.isAdmin) {
+                    OutlinedButton(
+                        onClick = {
+                            onDismiss()
+                            onOpenAdminPanel()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("profile_admin_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AdminPanelSettings,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Abrir Panel de Administración")
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun PinVerificationDialog(
-    title: String = "PIN Maestro de Papá",
-    subtitle: String = "Ingresa el PIN de 4 dígitos para acceder",
+    title: String = "Contraseña de Papá",
+    subtitle: String = "Ingresa la contraseña de 6 dígitos para entrar",
+    pinLength: Int = 6,
     onVerify: (String) -> Boolean,
     onSuccess: () -> Unit,
     onDismiss: () -> Unit
@@ -138,7 +457,7 @@ fun PinVerificationDialog(
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Lock,
-                        contentDescription = "Seguridad PIN",
+                        contentDescription = "Seguridad de perfil",
                         tint = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
@@ -159,14 +478,14 @@ fun PinVerificationDialog(
 
                 // PIN Dots
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    repeat(4) { idx ->
+                    repeat(pinLength) { idx ->
                         val filled = idx < entered.length
                         Box(
                             modifier = Modifier
-                                .size(16.dp)
+                                .size(14.dp)
                                 .clip(CircleShape)
                                 .background(
                                     when {
@@ -187,18 +506,14 @@ fun PinVerificationDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 if (isError) {
                     Text(
-                        text = "PIN incorrecto. Intenta de nuevo.",
+                        text = "Clave incorrecta. Intenta de nuevo.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error
                     )
                 } else {
-                    Text(
-                        text = "PIN inicial predeterminado: 1234",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 val rows = listOf(
                     listOf("1", "2", "3"),
@@ -242,11 +557,11 @@ fun PinVerificationDialog(
                                             .size(58.dp)
                                             .clip(CircleShape)
                                             .clickable {
-                                                if (entered.length < 4) {
+                                                if (entered.length < pinLength) {
                                                     isError = false
                                                     val next = entered + key
                                                     entered = next
-                                                    if (next.length == 4) {
+                                                    if (next.length == pinLength) {
                                                         if (onVerify(next)) {
                                                             onSuccess()
                                                         } else {
