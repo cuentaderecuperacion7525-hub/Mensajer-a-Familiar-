@@ -970,6 +970,7 @@ fun AppUpdateDialog(
 
                         LaunchedEffect(updateState.apkFilePath) {
                             installErrorMsg = null
+                            apkInspection = null
                             canInstallPackages = AppUpdateChecker.canRequestPackageInstalls(context)
                             val inspected = withContext(Dispatchers.IO) {
                                 AppUpdateChecker.inspectApkFile(

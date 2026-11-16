@@ -429,6 +429,7 @@ object AppUpdateChecker {
             val apiRequest = Request.Builder()
                 .url("https://api.github.com/repos/$slug/releases/latest")
                 .header("Accept", "application/vnd.github+json")
+                .header("Cache-Control", "no-cache")
                 .header("User-Agent", "FamiChat-Android")
                 .build()
 
@@ -465,6 +466,7 @@ object AppUpdateChecker {
             val listRequest = Request.Builder()
                 .url("https://api.github.com/repos/$slug/releases?per_page=10")
                 .header("Accept", "application/vnd.github+json")
+                .header("Cache-Control", "no-cache")
                 .header("User-Agent", "FamiChat-Android")
                 .build()
 
@@ -498,6 +500,7 @@ object AppUpdateChecker {
         try {
             val webRequest = Request.Builder()
                 .url("https://github.com/$slug/releases/latest")
+                .header("Cache-Control", "no-cache")
                 .header("User-Agent", "FamiChat-Android")
                 .build()
 
@@ -712,7 +715,6 @@ object AppUpdateChecker {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
-            putExtra(Intent.EXTRA_RETURN_RESULT, true)
         }
 
         if (viewIntent.resolveActivity(context.packageManager) != null) {

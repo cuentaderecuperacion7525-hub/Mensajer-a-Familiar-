@@ -2,12 +2,22 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Typeface
 import android.net.Uri
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.StrikethroughSpan
+import android.text.style.StyleSpan
+import android.view.ActionMode
+import android.view.Menu
+import android.view.MenuItem
+import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.view.MenuItemCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -54,9 +64,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEmotions
-import androidx.compose.material.icons.filled.FormatBold
-import androidx.compose.material.icons.filled.FormatItalic
-import androidx.compose.material.icons.filled.FormatStrikethrough
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -90,6 +97,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -97,16 +106,22 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalTextToolbar
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
@@ -115,6 +130,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import com.example.data.model.CallType
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ChatType
@@ -634,61 +650,6 @@ fun ChatRoomScreen(
                             WindowInsets.navigationBars.union(WindowInsets.ime).only(WindowInsetsSides.Bottom)
                         )
                 ) {
-                    // Contextual Quick Format Toolbar (*negrita*, _cursiva_, ~tachado~) shown only when text is selected
-                    val hasTextSelection = !voiceRecording.isRecording &&
-                        !inputTextValue.selection.collapsed &&
-                        inputTextValue.text.substring(
-                            inputTextValue.selection.min.coerceIn(0, inputTextValue.text.length),
-                            inputTextValue.selection.max.coerceIn(0, inputTextValue.text.length)
-                        ).isNotBlank()
-
-                    AnimatedVisibility(visible = hasTextSelection) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(18.dp),
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                                border = BorderStroke(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
-                                ),
-                                tonalElevation = 1.dp
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Text(
-                                        text = "Formato:",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    FormatChipButton(
-                                        icon = Icons.Filled.FormatBold,
-                                        desc = "Negrita",
-                                        tag = "format_bold_button"
-                                    ) { inputTextValue = applyFormatToSelection(inputTextValue, "*") }
-                                    FormatChipButton(
-                                        icon = Icons.Filled.FormatItalic,
-                                        desc = "Cursiva",
-                                        tag = "format_italic_button"
-                                    ) { inputTextValue = applyFormatToSelection(inputTextValue, "_") }
-                                    FormatChipButton(
-                                        icon = Icons.Filled.FormatStrikethrough,
-                                        desc = "Tachado",
-                                        tag = "format_strike_button"
-                                    ) { inputTextValue = applyFormatToSelection(inputTextValue, "~") }
-                                }
-                            }
-                        }
-                    }
-
                     Surface(
                         shape = RoundedCornerShape(26.dp),
                         color = MaterialTheme.colorScheme.surface,
@@ -863,21 +824,41 @@ fun ChatRoomScreen(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
-                                        BasicTextField(
-                                            value = inputTextValue,
-                                            onValueChange = {
-                                                inputTextValue = it
-                                                onTypingChange(it.text.isNotBlank())
+                                        val formattingTextToolbar = rememberFormattingTextToolbar(
+                                            hasNonBlankSelection = {
+                                                !inputTextValue.selection.collapsed &&
+                                                    inputTextValue.text.substring(
+                                                        inputTextValue.selection.min.coerceIn(0, inputTextValue.text.length),
+                                                        inputTextValue.selection.max.coerceIn(0, inputTextValue.text.length)
+                                                    ).isNotBlank()
                                             },
-                                            maxLines = 5,
-                                            textStyle = MaterialTheme.typography.bodyLarge.copy(
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            ),
-                                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .testTag("chat_message_input")
+                                            onApplyBold = {
+                                                inputTextValue = applyFormatToSelection(inputTextValue, "*")
+                                            },
+                                            onApplyItalic = {
+                                                inputTextValue = applyFormatToSelection(inputTextValue, "_")
+                                            },
+                                            onApplyStrike = {
+                                                inputTextValue = applyFormatToSelection(inputTextValue, "~")
+                                            }
                                         )
+                                        CompositionLocalProvider(LocalTextToolbar provides formattingTextToolbar) {
+                                            BasicTextField(
+                                                value = inputTextValue,
+                                                onValueChange = {
+                                                    inputTextValue = it
+                                                    onTypingChange(it.text.isNotBlank())
+                                                },
+                                                maxLines = 5,
+                                                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                ),
+                                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .testTag("chat_message_input")
+                                            )
+                                        }
                                     }
 
                                     Box {
@@ -1135,30 +1116,169 @@ fun ChatRoomScreen(
     }
 }
 
+private const val MENU_ID_COPY = 0
+private const val MENU_ID_PASTE = 1
+private const val MENU_ID_CUT = 2
+private const val MENU_ID_SELECT_ALL = 3
+private const val MENU_ID_BOLD = 101
+private const val MENU_ID_ITALIC = 102
+private const val MENU_ID_STRIKE = 103
+
 @Composable
-private fun FormatChipButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    desc: String,
-    tag: String,
-    onClick: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .testTag(tag)
-    ) {
-        Box(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-            Icon(
-                imageVector = icon,
-                contentDescription = desc,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+private fun rememberFormattingTextToolbar(
+    hasNonBlankSelection: () -> Boolean,
+    onApplyBold: () -> Unit,
+    onApplyItalic: () -> Unit,
+    onApplyStrike: () -> Unit
+): TextToolbar {
+    val view = LocalView.current
+    val latestHasSelection by rememberUpdatedState(hasNonBlankSelection)
+    val latestBold by rememberUpdatedState(onApplyBold)
+    val latestItalic by rememberUpdatedState(onApplyItalic)
+    val latestStrike by rememberUpdatedState(onApplyStrike)
+
+    val toolbar = remember(view) {
+        object : TextToolbar {
+            private var actionMode: ActionMode? = null
+            private var selectionRect: Rect = Rect.Zero
+            private var onCopyRequested: (() -> Unit)? = null
+            private var onPasteRequested: (() -> Unit)? = null
+            private var onCutRequested: (() -> Unit)? = null
+            private var onSelectAllRequested: (() -> Unit)? = null
+
+            override val status: TextToolbarStatus
+                get() = if (actionMode != null) TextToolbarStatus.Shown else TextToolbarStatus.Hidden
+
+            private fun populateMenu(menu: Menu) {
+                menu.clear()
+                onCopyRequested?.let {
+                    menu.add(0, MENU_ID_COPY, 0, android.R.string.copy)
+                        .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                }
+                onPasteRequested?.let {
+                    menu.add(0, MENU_ID_PASTE, 1, android.R.string.paste)
+                        .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                }
+                onCutRequested?.let {
+                    menu.add(0, MENU_ID_CUT, 2, android.R.string.cut)
+                        .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                }
+                val canFormatSelection = (onCopyRequested != null || onCutRequested != null) &&
+                    latestHasSelection()
+                if (canFormatSelection) {
+                    val boldTitle = SpannableString("B").apply {
+                        setSpan(StyleSpan(Typeface.BOLD), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
+                    menu.add(0, MENU_ID_BOLD, 3, boldTitle).apply {
+                        setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                        MenuItemCompat.setContentDescription(this, "Negrita")
+                    }
+
+                    val italicTitle = SpannableString("I").apply {
+                        setSpan(StyleSpan(Typeface.BOLD_ITALIC), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
+                    menu.add(0, MENU_ID_ITALIC, 4, italicTitle).apply {
+                        setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                        MenuItemCompat.setContentDescription(this, "Cursiva")
+                    }
+
+                    val strikeTitle = SpannableString("S").apply {
+                        setSpan(StrikethroughSpan(), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        setSpan(StyleSpan(Typeface.BOLD), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
+                    menu.add(0, MENU_ID_STRIKE, 5, strikeTitle).apply {
+                        setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                        MenuItemCompat.setContentDescription(this, "Tachado")
+                    }
+                }
+                onSelectAllRequested?.let {
+                    menu.add(0, MENU_ID_SELECT_ALL, 6, android.R.string.selectAll)
+                        .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+                }
+            }
+
+            private val callback = object : ActionMode.Callback2() {
+                override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+                    if (menu != null) populateMenu(menu)
+                    return true
+                }
+
+                override fun onPrepareActionMode(mode: ActionMode?, menu: Menu?): Boolean {
+                    if (menu != null) {
+                        populateMenu(menu)
+                        return true
+                    }
+                    return false
+                }
+
+                override fun onActionItemClicked(mode: ActionMode?, item: MenuItem?): Boolean {
+                    when (item?.itemId) {
+                        MENU_ID_COPY -> onCopyRequested?.invoke()
+                        MENU_ID_PASTE -> onPasteRequested?.invoke()
+                        MENU_ID_CUT -> onCutRequested?.invoke()
+                        MENU_ID_BOLD -> latestBold()
+                        MENU_ID_ITALIC -> latestItalic()
+                        MENU_ID_STRIKE -> latestStrike()
+                        MENU_ID_SELECT_ALL -> onSelectAllRequested?.invoke()
+                        else -> return false
+                    }
+                    mode?.finish()
+                    return true
+                }
+
+                override fun onDestroyActionMode(mode: ActionMode?) {
+                    if (actionMode === mode) {
+                        actionMode = null
+                    }
+                }
+
+                override fun onGetContentRect(
+                    mode: ActionMode?,
+                    targetView: View?,
+                    outRect: android.graphics.Rect?
+                ) {
+                    outRect?.set(
+                        selectionRect.left.roundToInt(),
+                        selectionRect.top.roundToInt(),
+                        selectionRect.right.roundToInt(),
+                        selectionRect.bottom.roundToInt()
+                    )
+                }
+            }
+
+            override fun showMenu(
+                rect: Rect,
+                onCopyRequested: (() -> Unit)?,
+                onPasteRequested: (() -> Unit)?,
+                onCutRequested: (() -> Unit)?,
+                onSelectAllRequested: (() -> Unit)?
+            ) {
+                this.selectionRect = rect
+                this.onCopyRequested = onCopyRequested
+                this.onPasteRequested = onPasteRequested
+                this.onCutRequested = onCutRequested
+                this.onSelectAllRequested = onSelectAllRequested
+                val existing = actionMode
+                if (existing == null) {
+                    actionMode = view.startActionMode(callback, ActionMode.TYPE_FLOATING)
+                } else {
+                    existing.invalidate()
+                    existing.invalidateContentRect()
+                }
+            }
+
+            override fun hide() {
+                actionMode?.finish()
+                actionMode = null
+            }
         }
     }
+
+    DisposableEffect(toolbar) {
+        onDispose { toolbar.hide() }
+    }
+
+    return toolbar
 }
 
 internal fun applyFormatToSelection(current: TextFieldValue, token: String): TextFieldValue {
