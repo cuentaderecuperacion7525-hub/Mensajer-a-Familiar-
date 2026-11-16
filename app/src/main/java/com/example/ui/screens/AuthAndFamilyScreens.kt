@@ -165,7 +165,7 @@ fun GoogleSignInScreen(
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Chat,
-                    contentDescription = "Logo NidoFamiliar",
+                    contentDescription = "Logo FamiChat",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(44.dp)
                 )
@@ -174,7 +174,7 @@ fun GoogleSignInScreen(
             Spacer(modifier = Modifier.height(22.dp))
 
             Text(
-                text = "Bienvenido a NidoFamiliar",
+                text = "Bienvenido a FamiChat",
                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                 textAlign = TextAlign.Center
             )
@@ -294,7 +294,7 @@ fun FamilySetupScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "NidoFamiliar",
+                        text = "FamiChat",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                     if (userEmail.isNotBlank()) {
@@ -560,7 +560,7 @@ fun IncomingCallOverlay(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Llamada familiar en NidoFamiliar",
+                    text = "Llamada familiar en FamiChat",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color(0xFF93C5FD)
                 )

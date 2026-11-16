@@ -188,7 +188,7 @@ fun MainHomeScreen(
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
                                     Text(
-                                        text = "NidoFamiliar",
+                                        text = "FamiChat",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -430,9 +430,11 @@ fun MainHomeScreen(
                                     Column {
                                         Text(member.name, style = MaterialTheme.typography.titleSmall)
                                         Text(
-                                            member.roleLabel,
+                                            text = "${member.roleLabel} · ${member.lastSeenText}",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = if (member.isOnline) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
@@ -720,10 +722,13 @@ private fun ChatRowItem(
                 )
             }
             Spacer(modifier = Modifier.height(2.dp))
+            val isLiveSubtitle = item.isOnline ||
+                item.subtitleStatus.contains("escribiendo", ignoreCase = true) ||
+                item.subtitleStatus.contains("grabando", ignoreCase = true)
             Text(
-                text = if (item.isOnline) "En línea" else item.subtitleStatus,
+                text = item.subtitleStatus,
                 style = MaterialTheme.typography.labelSmall,
-                color = if (item.isOnline) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (isLiveSubtitle) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

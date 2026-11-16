@@ -291,7 +291,7 @@ fun UserProfileOptionsDialog(
                             checked = isOnlineInput,
                             onCheckedChange = { checked ->
                                 isOnlineInput = checked
-                                if (checked && statusInput == "Desconectado") {
+                                if (checked && (statusInput == "Desconectado" || statusInput == "No se ha conectado")) {
                                     statusInput = "En línea"
                                 } else if (!checked && statusInput == "En línea") {
                                     statusInput = "Desconectado"
@@ -987,7 +987,7 @@ fun AppUpdateDialog(
                                         text = if (canInstallPackages) {
                                             "Versión v${updateState.release.versionName} lista para instalar."
                                         } else {
-                                            "Activa el permiso \"Instalar aplicaciones desconocidas\" para NidoFamiliar y volverás directo al instalador."
+                                            "Activa el permiso \"Instalar aplicaciones desconocidas\" para FamiChat y volverás directo al instalador."
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant

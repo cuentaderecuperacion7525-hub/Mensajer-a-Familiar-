@@ -200,7 +200,7 @@ object AppUpdateChecker {
             val apiRequest = Request.Builder()
                 .url("https://api.github.com/repos/$slug/releases/latest")
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "NidoFamiliar-Android")
+                .header("User-Agent", "FamiChat-Android")
                 .build()
 
             client.newCall(apiRequest).execute().use { response ->
@@ -216,7 +216,7 @@ object AppUpdateChecker {
                     val tagName = json.optString("tag_name", "")
                     val title = json.optString("name", tagName)
                     val notes = json.optString("body", "")
-                        .ifBlank { "Mejoras y correcciones de NidoFamiliar." }
+                        .ifBlank { "Mejoras y correcciones de FamiChat." }
                     val htmlUrl = json.optString("html_url", repoWebUrl)
 
                     var apkUrl = htmlUrl
@@ -270,7 +270,7 @@ object AppUpdateChecker {
         try {
             val webRequest = Request.Builder()
                 .url("https://github.com/$slug/releases/latest")
-                .header("User-Agent", "NidoFamiliar-Android")
+                .header("User-Agent", "FamiChat-Android")
                 .build()
 
             noRedirectClient.newCall(webRequest).execute().use { response ->
@@ -288,7 +288,7 @@ object AppUpdateChecker {
                     val resolvedApkUrl = runCatching {
                         val assetsReq = Request.Builder()
                             .url(expandedAssetsUrl)
-                            .header("User-Agent", "NidoFamiliar-Android")
+                            .header("User-Agent", "FamiChat-Android")
                             .build()
                         client.newCall(assetsReq).execute().use { assetsResp ->
                             if (assetsResp.isSuccessful) {
@@ -359,13 +359,13 @@ object AppUpdateChecker {
         updatesDir.listFiles()?.forEach { old ->
             if (old.isFile) old.delete()
         }
-        val partFile = File(updatesDir, "NidoFamiliar-update.apk.part")
-        val targetFile = File(updatesDir, "NidoFamiliar-update.apk")
+        val partFile = File(updatesDir, "FamiChat-update.apk.part")
+        val targetFile = File(updatesDir, "FamiChat-update.apk")
 
         return@withContext runCatching {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "NidoFamiliar-Android")
+                .header("User-Agent", "FamiChat-Android")
                 .header("Accept", "application/vnd.android.package-archive, application/octet-stream, */*")
                 .build()
 

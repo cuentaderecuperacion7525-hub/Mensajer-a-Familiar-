@@ -504,7 +504,7 @@ private fun AdminPinSettings(
                                     type = "text/plain"
                                     putExtra(
                                         Intent.EXTRA_TEXT,
-                                        "Únete a nuestra familia \"$familyName\" en NidoFamiliar con el código: $inviteCode"
+                                        "Únete a nuestra familia \"$familyName\" en FamiChat con el código: $inviteCode"
                                     )
                                 }
                                 context.startActivity(Intent.createChooser(sendIntent, "Compartir código familiar"))

@@ -30,11 +30,13 @@ import com.example.util.AppUpdateChecker
 import com.example.util.AppUpdateUiState
 import com.example.util.ImageCompressionHelper
 import com.example.util.MessageFormatter
+import com.example.util.PresenceResolver
 import com.example.util.TimeFormatters
 import com.example.util.VoiceAudioHelper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,9 +47,11 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 enum class MainTab { CHATS, GROUPS, CALLS, BOARD }
@@ -122,12 +126,45 @@ class FamilyViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val members: StateFlow<List<FamilyMemberEntity>> = _activeFamilyId
+    private val _activeMemberId = MutableStateFlow<String?>(null)
+    private val _isAppForeground = MutableStateFlow(false)
+    private val _manualOffline = MutableStateFlow(false)
+
+    private val presenceClock = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(PresenceResolver.CLOCK_TICK_MS)
+        }
+    }
+
+    private val rawMembers: StateFlow<List<FamilyMemberEntity>> = _activeFamilyId
         .flatMapLatest { fid ->
             if (fid.isNullOrBlank()) flowOf(emptyList())
             else cloudRepo.observeMembers(fid, currentUserId).safeFirestoreFlow(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val members: StateFlow<List<FamilyMemberEntity>> = combine(
+        rawMembers,
+        _activeMemberId,
+        _isAppForeground,
+        _manualOffline,
+        presenceClock
+    ) { list, currentId, inForeground, manualOff, now ->
+        list.map { member ->
+            val isLocalCurrent = member.id == currentId
+            val resolved = PresenceResolver.resolve(
+                member = member,
+                nowMs = now,
+                isLocalActiveInForeground = isLocalCurrent && inForeground,
+                manualInvisible = isLocalCurrent && manualOff
+            )
+            member.copy(
+                isOnline = resolved.isOnline,
+                lastSeenText = resolved.statusText
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val rawChats: StateFlow<List<ChatThreadEntity>> = _activeFamilyId
         .flatMapLatest { fid ->
@@ -192,7 +229,6 @@ class FamilyViewModel(
     val updateState: StateFlow<AppUpdateUiState> = _updateState.asStateFlow()
     private var updateDownloadJob: Job? = null
 
-    private val _activeMemberId = MutableStateFlow<String?>(null)
     val activeMember: StateFlow<FamilyMemberEntity?> = combine(members, _activeMemberId) { list, id ->
         list.find { it.id == id }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -243,6 +279,7 @@ class FamilyViewModel(
     private var recordingJob: Job? = null
     private var playbackJob: Job? = null
     private var presenceClearJob: Job? = null
+    private var heartbeatJob: Job? = null
     private var lastSentPresenceKey: String = ""
     private var lastSentPresenceAt: Long = 0L
     private var lastSyncedMemberUids: Set<String> = emptySet()
@@ -295,9 +332,7 @@ class FamilyViewModel(
             }
 
             val liveActiveOther = otherMembers.firstOrNull { m ->
-                m.liveChatId == chat.id &&
-                    (now - m.liveStatusAt) < 7000L &&
-                    (m.liveStatus == PresenceStatus.TYPING || m.liveStatus == PresenceStatus.RECORDING)
+                PresenceResolver.isLiveChatAction(m, chat.id, now)
             }
 
             val subtitleStatus = when (liveActiveOther?.liveStatus) {
@@ -305,11 +340,12 @@ class FamilyViewModel(
                 PresenceStatus.RECORDING -> if (chat.type == ChatType.GROUP) "${liveActiveOther.name} grabando audio..." else "Grabando audio..."
                 else -> {
                     if (chat.type == ChatType.DIRECT) {
-                        if (otherMember?.isOnline == true) "En línea"
-                        else otherMember?.lastSeenText ?: "Desconectado"
+                        otherMember?.lastSeenText ?: "No se ha conectado"
                     } else {
+                        val onlineOthers = otherMembers.count { it.isOnline }
                         val names = participants.joinToString(", ") { it.name }
-                        "${participants.size} miembros · $names"
+                        if (onlineOthers > 0) "$onlineOthers en línea · $names"
+                        else "${participants.size} miembros · $names"
                     }
                 }
             }
@@ -361,6 +397,9 @@ class FamilyViewModel(
                     }.getOrDefault(emptyList())
                     if (loadedMembers.any { it.id == savedMemberId }) {
                         _activeMemberId.value = savedMemberId
+                        if (_isAppForeground.value && !_manualOffline.value) {
+                            startPresenceHeartbeat()
+                        }
                     } else {
                         prefs.setActiveMemberId(null)
                     }
@@ -502,50 +541,147 @@ class FamilyViewModel(
         }
     }
 
+    fun setAppForeground(inForeground: Boolean) {
+        if (_isAppForeground.value == inForeground) return
+        _isAppForeground.value = inForeground
+        if (inForeground) {
+            if (_activeMemberId.value != null && !_manualOffline.value) {
+                startPresenceHeartbeat()
+            }
+        } else {
+            heartbeatJob?.cancel()
+            heartbeatJob = null
+            val famId = _activeFamilyId.value ?: return
+            val memberId = _activeMemberId.value ?: return
+            val raw = rawMembers.value.find { it.id == memberId }
+            val awayLabel = offlineStatusLabelFor(raw?.lastSeenText.orEmpty())
+            viewModelScope.launch {
+                withContext(NonCancellable) {
+                    cloudRepo.updateMemberPresence(
+                        familyId = famId,
+                        memberId = memberId,
+                        isOnline = false,
+                        lastSeenText = awayLabel,
+                        liveStatus = PresenceStatus.LAST_SEEN,
+                        liveChatId = null,
+                        liveStatusAt = System.currentTimeMillis()
+                    )
+                }
+            }
+        }
+    }
+
+    private fun startPresenceHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = viewModelScope.launch {
+            while (_isAppForeground.value && !_manualOffline.value) {
+                val famId = _activeFamilyId.value
+                val memberId = _activeMemberId.value
+                if (famId != null && memberId != null) {
+                    val now = System.currentTimeMillis()
+                    val raw = rawMembers.value.find { it.id == memberId }
+                    val keepingLiveAction = raw != null &&
+                        (raw.liveStatus == PresenceStatus.TYPING || raw.liveStatus == PresenceStatus.RECORDING) &&
+                        !raw.liveChatId.isNullOrBlank() &&
+                        (now - raw.liveStatusAt) < PresenceResolver.LIVE_ACTION_TTL_MS
+                    val nextStatus = if (keepingLiveAction) raw!!.liveStatus else PresenceStatus.ONLINE
+                    val nextChatId = if (keepingLiveAction) raw?.liveChatId else null
+                    val onlineLabel = onlineStatusLabelFor(raw?.lastSeenText.orEmpty())
+                    cloudRepo.updateMemberPresence(
+                        familyId = famId,
+                        memberId = memberId,
+                        isOnline = true,
+                        lastSeenText = onlineLabel,
+                        liveStatus = nextStatus,
+                        liveChatId = nextChatId,
+                        liveStatusAt = now,
+                        linkedAuthUid = currentUserId
+                    )
+                }
+                delay(PresenceResolver.HEARTBEAT_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun onlineStatusLabelFor(currentLabel: String): String {
+        val trimmed = currentLabel.trim()
+        return if (trimmed.isBlank() ||
+            trimmed == "Desconectado" ||
+            trimmed == "No se ha conectado" ||
+            trimmed.startsWith("Últ.")
+        ) {
+            "En línea"
+        } else {
+            trimmed
+        }
+    }
+
+    private fun offlineStatusLabelFor(currentLabel: String): String {
+        val trimmed = currentLabel.trim()
+        return if (trimmed.isBlank() ||
+            trimmed == "En línea" ||
+            trimmed == "En casa" ||
+            trimmed == "No se ha conectado" ||
+            trimmed.startsWith("Últ.")
+        ) {
+            "Desconectado"
+        } else {
+            trimmed
+        }
+    }
+
     fun selectProfile(memberId: String) {
+        _manualOffline.value = false
         _activeMemberId.value = memberId
         _activeChatId.value = null
         _searchQuery.value = ""
         viewModelScope.launch {
             prefs.setActiveMemberId(memberId)
             val famId = _activeFamilyId.value ?: return@launch
-            val m = members.value.find { it.id == memberId } ?: return@launch
-            cloudRepo.upsertMember(
+            val now = System.currentTimeMillis()
+            val raw = rawMembers.value.find { it.id == memberId }
+            val nextLabel = onlineStatusLabelFor(raw?.lastSeenText.orEmpty())
+            cloudRepo.updateMemberPresence(
                 familyId = famId,
-                member = m.copy(
-                    isOnline = true,
-                    lastSeenText = "En línea",
-                    liveStatus = PresenceStatus.ONLINE,
-                    linkedAuthUid = currentUserId
-                ),
-                memberUids = currentMemberUids(),
-                callerUid = currentUserId,
-                isCreate = false
+                memberId = memberId,
+                isOnline = true,
+                lastSeenText = nextLabel,
+                liveStatus = PresenceStatus.ONLINE,
+                liveChatId = null,
+                liveStatusAt = now,
+                linkedAuthUid = currentUserId
             )
+            if (_isAppForeground.value) {
+                startPresenceHeartbeat()
+            }
         }
     }
 
     fun logoutToSelector() {
         val famId = _activeFamilyId.value
-        val prevMember = activeMember.value
+        val prevMemberId = _activeMemberId.value
+        val prevRaw = prevMemberId?.let { id -> rawMembers.value.find { it.id == id } }
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+        _manualOffline.value = false
         _activeMemberId.value = null
         _activeChatId.value = null
         stopPlayback()
         cancelVoiceRecording()
         viewModelScope.launch {
             prefs.setActiveMemberId(null)
-            if (famId != null && prevMember != null) {
-                cloudRepo.upsertMember(
-                    familyId = famId,
-                    member = prevMember.copy(
+            if (famId != null && prevMemberId != null) {
+                withContext(NonCancellable) {
+                    cloudRepo.updateMemberPresence(
+                        familyId = famId,
+                        memberId = prevMemberId,
+                        isOnline = false,
+                        lastSeenText = offlineStatusLabelFor(prevRaw?.lastSeenText.orEmpty()),
                         liveStatus = PresenceStatus.LAST_SEEN,
                         liveChatId = null,
-                        liveStatusAt = 0L
-                    ),
-                    memberUids = currentMemberUids(),
-                    callerUid = currentUserId,
-                    isCreate = false
-                )
+                        liveStatusAt = System.currentTimeMillis()
+                    )
+                }
             }
         }
     }
@@ -577,7 +713,8 @@ class FamilyViewModel(
 
     fun updateLivePresence(chatId: String, status: PresenceStatus, forceClear: Boolean = false) {
         val famId = _activeFamilyId.value ?: return
-        val me = activeMember.value ?: return
+        val memberId = _activeMemberId.value ?: return
+        if (_manualOffline.value) return
         val now = System.currentTimeMillis()
         val key = "$chatId:${status.name}"
 
@@ -589,18 +726,19 @@ class FamilyViewModel(
         lastSentPresenceKey = key
         lastSentPresenceAt = now
 
+        val raw = rawMembers.value.find { it.id == memberId }
+        val onlineLabel = onlineStatusLabelFor(raw?.lastSeenText.orEmpty())
         presenceClearJob?.cancel()
         viewModelScope.launch {
-            cloudRepo.upsertMember(
+            cloudRepo.updateMemberPresence(
                 familyId = famId,
-                member = me.copy(
-                    liveStatus = status,
-                    liveChatId = if (status == PresenceStatus.ONLINE) null else chatId,
-                    liveStatusAt = if (status == PresenceStatus.ONLINE) 0L else now
-                ),
-                memberUids = currentMemberUids(),
-                callerUid = currentUserId,
-                isCreate = false
+                memberId = memberId,
+                isOnline = status != PresenceStatus.LAST_SEEN,
+                lastSeenText = if (status == PresenceStatus.LAST_SEEN) "Desconectado" else onlineLabel,
+                liveStatus = status,
+                liveChatId = if (status == PresenceStatus.ONLINE || status == PresenceStatus.LAST_SEEN) null else chatId,
+                liveStatusAt = now,
+                linkedAuthUid = currentUserId
             )
         }
         if (status == PresenceStatus.TYPING || status == PresenceStatus.RECORDING) {
@@ -683,20 +821,34 @@ class FamilyViewModel(
 
     fun updateOwnProfileStatus(isOnline: Boolean, statusText: String) {
         val famId = _activeFamilyId.value ?: return
-        val current = activeMember.value ?: return
+        val memberId = _activeMemberId.value ?: return
+        _manualOffline.value = !isOnline
+        val now = System.currentTimeMillis()
         val cleanStatus = statusText.trim().ifEmpty { if (isOnline) "En línea" else "Desconectado" }
+        val finalLabel = if (isOnline && (cleanStatus == "Desconectado" || cleanStatus == "No se ha conectado")) {
+            "En línea"
+        } else if (!isOnline && (cleanStatus == "En línea" || cleanStatus == "No se ha conectado")) {
+            "Desconectado"
+        } else {
+            cleanStatus
+        }
         viewModelScope.launch {
-            cloudRepo.upsertMember(
+            cloudRepo.updateMemberPresence(
                 familyId = famId,
-                member = current.copy(
-                    isOnline = isOnline,
-                    lastSeenText = if (isOnline && cleanStatus == "Desconectado") "En línea" else cleanStatus,
-                    liveStatus = if (isOnline) PresenceStatus.ONLINE else PresenceStatus.LAST_SEEN
-                ),
-                memberUids = currentMemberUids(),
-                callerUid = currentUserId,
-                isCreate = false
+                memberId = memberId,
+                isOnline = isOnline,
+                lastSeenText = finalLabel,
+                liveStatus = if (isOnline) PresenceStatus.ONLINE else PresenceStatus.LAST_SEEN,
+                liveChatId = null,
+                liveStatusAt = now,
+                linkedAuthUid = currentUserId
             )
+            if (isOnline && _isAppForeground.value) {
+                startPresenceHeartbeat()
+            } else {
+                heartbeatJob?.cancel()
+                heartbeatJob = null
+            }
             showMessage("Estado del perfil actualizado")
         }
     }
@@ -798,7 +950,7 @@ class FamilyViewModel(
         viewModelScope.launch {
             val isCreate = existingId == null
             val id = existingId ?: "member_${UUID.randomUUID().toString().replace("-", "").take(8)}"
-            val existing = members.value.find { it.id == id }
+            val existing = rawMembers.value.find { it.id == id }
             val member = FamilyMemberEntity(
                 id = id,
                 name = trimmedName,
@@ -807,10 +959,10 @@ class FamilyViewModel(
                 avatarColorHex = colorHex,
                 avatarEmoji = emoji,
                 isOnline = existing?.isOnline ?: false,
-                lastSeenText = existing?.lastSeenText ?: "En línea",
+                lastSeenText = existing?.lastSeenText ?: "No se ha conectado",
                 createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                 phoneNumber = phoneNumber.trim(),
-                liveStatus = existing?.liveStatus ?: PresenceStatus.ONLINE,
+                liveStatus = existing?.liveStatus ?: PresenceStatus.LAST_SEEN,
                 liveChatId = existing?.liveChatId,
                 liveStatusAt = existing?.liveStatusAt ?: 0L,
                 linkedAuthUid = existing?.linkedAuthUid ?: "",

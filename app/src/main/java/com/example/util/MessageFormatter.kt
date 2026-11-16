@@ -8,6 +8,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -75,12 +76,38 @@ object MessageFormatter {
 }
 
 object TimeFormatters {
-    private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-    private val dateTimeFormat = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault())
+    fun formatHourMinute(timestamp: Long): String =
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
 
-    fun formatHourMinute(timestamp: Long): String = timeFormat.format(Date(timestamp))
+    fun formatDateTime(timestamp: Long): String =
+        SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(timestamp))
 
-    fun formatDateTime(timestamp: Long): String = dateTimeFormat.format(Date(timestamp))
+    fun formatLastSeen(timestamp: Long, nowMs: Long = System.currentTimeMillis()): String {
+        if (timestamp <= 0L) return "No se ha conectado"
+        val diffMs = (nowMs - timestamp).coerceAtLeast(0L)
+        if (diffMs < 60_000L) {
+            return "Últ. vez hace un momento"
+        }
+        if (diffMs < 3_600_000L) {
+            val mins = (diffMs / 60_000L).coerceAtLeast(1L)
+            return "Últ. vez hace $mins min"
+        }
+        val calNow = Calendar.getInstance().apply { timeInMillis = nowMs }
+        val calThen = Calendar.getInstance().apply { timeInMillis = timestamp }
+        val sameDay = calNow.get(Calendar.YEAR) == calThen.get(Calendar.YEAR) &&
+            calNow.get(Calendar.DAY_OF_YEAR) == calThen.get(Calendar.DAY_OF_YEAR)
+        if (sameDay) {
+            return "Últ. vez hoy ${formatHourMinute(timestamp)}"
+        }
+        calNow.add(Calendar.DAY_OF_YEAR, -1)
+        val isYesterday = calNow.get(Calendar.YEAR) == calThen.get(Calendar.YEAR) &&
+            calNow.get(Calendar.DAY_OF_YEAR) == calThen.get(Calendar.DAY_OF_YEAR)
+        if (isYesterday) {
+            return "Últ. vez ayer ${formatHourMinute(timestamp)}"
+        }
+        val datePart = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(timestamp))
+        return "Últ. vez $datePart"
+    }
 
     fun formatDuration(seconds: Int): String {
         val mins = seconds / 60

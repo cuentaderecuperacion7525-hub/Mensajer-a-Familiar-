@@ -1,5 +1,5 @@
 {
-  "name": "NidoFamiliar",
+  "name": "FamiChat",
   "description": "Aplicación privada de mensajería familiar con perfiles, panel de administración con PIN maestro, multimedia y tablón compartido.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

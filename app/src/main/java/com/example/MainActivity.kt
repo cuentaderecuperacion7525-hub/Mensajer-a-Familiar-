@@ -15,6 +15,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -28,8 +29,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -52,7 +56,7 @@ import com.example.ui.screens.FamilySetupScreen
 import com.example.ui.screens.IncomingCallOverlay
 import com.example.ui.screens.MainHomeScreen
 import com.example.ui.screens.ProfileSelectorScreen
-import com.example.ui.theme.NidoFamiliarTheme
+import com.example.ui.theme.FamiChatTheme
 import com.example.ui.viewmodel.FamilyViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
@@ -92,7 +96,7 @@ class MainActivity : ComponentActivity() {
             val currentUser by remember { Firebase.auth.authStateFlow() }
                 .collectAsStateWithLifecycle(initialValue = Firebase.auth.currentUser)
 
-            NidoFamiliarTheme(
+            FamiChatTheme(
                 darkTheme = isDarkTheme,
                 onToggleTheme = {
                     scope.launch {
@@ -155,7 +159,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     )
-                    NidoFamiliarApp(
+                    FamiChatApp(
                         vm = vm,
                         userEmail = signedInUser.email.orEmpty(),
                         userName = signedInUser.displayName.orEmpty(),
@@ -175,13 +179,29 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun NidoFamiliarApp(
+fun FamiChatApp(
     vm: FamilyViewModel,
     userEmail: String,
     userName: String,
     isDarkTheme: Boolean,
     onSignOutGoogle: () -> Unit
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, vm) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> vm.setAppForeground(true)
+                Lifecycle.Event.ON_STOP -> vm.setAppForeground(false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            vm.setAppForeground(false)
+        }
+    }
+
     val isSessionReady by vm.isSessionReady.collectAsStateWithLifecycle()
     val myFamilies by vm.myFamilies.collectAsStateWithLifecycle()
     val activeFamily by vm.activeFamily.collectAsStateWithLifecycle()

@@ -83,15 +83,15 @@ jobs:
           VERSION_CODE=$(grep -oE 'versionCode\s*=\s*[0-9]+' app/build.gradle.kts | grep -oE '[0-9]+')
           SRC_APK=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
           mkdir -p dist-apk
-          cp "$SRC_APK" "dist-apk/NidoFamiliar-v${VERSION_NAME}-c${VERSION_CODE}-debug.apk"
-          echo "APK_PATH=dist-apk/NidoFamiliar-v${VERSION_NAME}-c${VERSION_CODE}-debug.apk" >> "$GITHUB_ENV"
+          cp "$SRC_APK" "dist-apk/FamiChat-v${VERSION_NAME}-c${VERSION_CODE}-debug.apk"
+          echo "APK_PATH=dist-apk/FamiChat-v${VERSION_NAME}-c${VERSION_CODE}-debug.apk" >> "$GITHUB_ENV"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
 
       - name: Subir APK compilado como Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NidoFamiliar-debug-apk
+          name: FamiChat-debug-apk
           path: dist-apk/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -107,7 +107,7 @@ jobs:
               gh release upload "$TAG" "$APK_PATH" --clobber
             else
               gh release create "$TAG" "$APK_PATH" \
-                --title "NidoFamiliar v${VERSION_NAME} (Build ${VERSION_CODE})" \
+                --title "FamiChat v${VERSION_NAME} (Build ${VERSION_CODE})" \
                 --notes "Versión ${VERSION_NAME} (compilación ${VERSION_CODE}) firmada de forma consistente para actualizar encima sin desinstalar."
             fi
           fi

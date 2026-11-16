@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "NidoFamiliar"
+rootProject.name = "FamiChat"
 
 include(":app")

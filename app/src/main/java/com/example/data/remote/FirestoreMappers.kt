@@ -39,8 +39,8 @@ internal object FirestoreMappers {
 
     fun toMember(doc: DocumentSnapshot): FamilyMemberEntity? {
         if (!doc.exists()) return null
-        val liveStr = doc.getString("liveStatus") ?: "ONLINE"
-        val liveStatus = runCatching { PresenceStatus.valueOf(liveStr) }.getOrDefault(PresenceStatus.ONLINE)
+        val liveStr = doc.getString("liveStatus") ?: "LAST_SEEN"
+        val liveStatus = runCatching { PresenceStatus.valueOf(liveStr) }.getOrDefault(PresenceStatus.LAST_SEEN)
         return FamilyMemberEntity(
             id = doc.id,
             name = doc.getString("name") ?: return null,

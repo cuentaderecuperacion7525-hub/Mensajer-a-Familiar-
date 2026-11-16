@@ -402,8 +402,8 @@ fun ChatRoomScreen(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         val isLiveStatus = chatUi.isOnline ||
-                                            chatUi.subtitleStatus.startsWith("Escribiendo") ||
-                                            chatUi.subtitleStatus.startsWith("Grabando")
+                                            chatUi.subtitleStatus.contains("escribiendo", ignoreCase = true) ||
+                                            chatUi.subtitleStatus.contains("grabando", ignoreCase = true)
                                         Text(
                                             text = chatUi.subtitleStatus,
                                             style = MaterialTheme.typography.labelSmall,

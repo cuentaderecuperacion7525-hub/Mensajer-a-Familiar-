@@ -12,6 +12,8 @@ import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.FamilySpace
 import com.example.data.model.JsonHelpers
+import com.example.data.model.PollOption
+import com.example.data.model.PresenceStatus
 import com.example.data.model.ShoppingItemEntity
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
@@ -169,6 +171,9 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                 isOnline = true,
                 lastSeenText = "En línea",
                 createdAt = now,
+                liveStatus = PresenceStatus.ONLINE,
+                liveChatId = null,
+                liveStatusAt = now,
                 linkedAuthUid = uid,
                 authorUid = uid
             )
@@ -387,6 +392,38 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.WRITE, docRef.path)
             Result.failure(e)
+        }
+    }
+
+    suspend fun updateMemberPresence(
+        familyId: String,
+        memberId: String,
+        isOnline: Boolean,
+        lastSeenText: String,
+        liveStatus: PresenceStatus,
+        liveChatId: String?,
+        liveStatusAt: Long,
+        linkedAuthUid: String? = null
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("members").document(memberId)
+        val payload = mutableMapOf<String, Any>(
+            "isOnline" to isOnline,
+            "lastSeenText" to lastSeenText.take(80),
+            "liveStatus" to liveStatus.name,
+            "liveChatId" to (liveChatId?.take(128) ?: FieldValue.delete()),
+            "liveStatusAt" to liveStatusAt,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        if (!linkedAuthUid.isNullOrBlank()) {
+            payload["linkedAuthUid"] = linkedAuthUid.take(128)
+        }
+        return try {
+            docRef.update(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            Result.success(Unit)
         }
     }
 

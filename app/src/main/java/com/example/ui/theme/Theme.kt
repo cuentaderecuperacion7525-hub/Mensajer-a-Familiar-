@@ -71,7 +71,7 @@ val AppShapes = Shapes(
 )
 
 @Composable
-fun NidoFamiliarTheme(
+fun FamiChatTheme(
     darkTheme: Boolean = false,
     onToggleTheme: () -> Unit = {},
     content: @Composable () -> Unit
