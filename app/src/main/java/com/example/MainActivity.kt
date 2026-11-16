@@ -6,10 +6,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -22,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -44,7 +49,6 @@ import com.example.ui.screens.AdminPanelScreen
 import com.example.ui.screens.CallOverlayScreen
 import com.example.ui.screens.ChatRoomScreen
 import com.example.ui.screens.FamilySetupScreen
-import com.example.ui.screens.GoogleSignInScreen
 import com.example.ui.screens.IncomingCallOverlay
 import com.example.ui.screens.MainHomeScreen
 import com.example.ui.screens.ProfileSelectorScreen
@@ -53,6 +57,7 @@ import com.example.ui.viewmodel.FamilyViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 object Routes {
     const val SELECTOR = "selector"
@@ -89,13 +94,41 @@ class MainActivity : ComponentActivity() {
             NidoFamiliarTheme(darkTheme = isDarkTheme) {
                 val signedInUser = currentUser
                 if (signedInUser == null) {
-                    GoogleSignInScreen(
-                        isDarkTheme = isDarkTheme,
-                        onToggleTheme = {
-                            scope.launch { prefs.setDarkTheme(!isDarkTheme) }
-                        },
-                        onSignedIn = {}
-                    )
+                    var authError by remember { mutableStateOf<String?>(null) }
+                    var retryTick by remember { mutableStateOf(0) }
+
+                    LaunchedEffect(retryTick) {
+                        authError = null
+                        try {
+                            Firebase.auth.signInAnonymously().await()
+                        } catch (e: Exception) {
+                            authError = e.localizedMessage ?: "No se pudo conectar"
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.background),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (authError == null) {
+                            CircularProgressIndicator()
+                        } else {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text(
+                                    text = authError ?: "Error de conexión",
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                Button(onClick = { retryTick++ }) {
+                                    Text("Reintentar")
+                                }
+                            }
+                        }
+                    }
                 } else {
                     val vm: FamilyViewModel = viewModel(
                         key = "family_vm_${signedInUser.uid}",
@@ -446,4 +479,3 @@ fun NidoFamiliarApp(
         }
     }
 }
-
