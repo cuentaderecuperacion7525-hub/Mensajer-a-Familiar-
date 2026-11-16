@@ -183,8 +183,10 @@ class FamilyViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val updateRepoSlug: StateFlow<String> = combine(activeFamily, prefs.updateRepoSlugFlow) { fam, localSlug ->
-        fam?.updateRepoSlug?.ifBlank { null } ?: localSlug
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+        localSlug.ifBlank { null }
+            ?: fam?.updateRepoSlug?.ifBlank { null }
+            ?: BuildConfig.GITHUB_REPO
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), BuildConfig.GITHUB_REPO)
 
     private val _updateState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
     val updateState: StateFlow<AppUpdateUiState> = _updateState.asStateFlow()
@@ -703,7 +705,9 @@ class FamilyViewModel(
         viewModelScope.launch {
             _updateState.value = AppUpdateUiState.Checking
             val savedSlug = prefs.updateRepoSlugFlow.first()
-            val effectiveSlug = updateRepoSlug.value.ifBlank { savedSlug }.ifBlank { BuildConfig.GITHUB_REPO }
+            val effectiveSlug = savedSlug
+                .ifBlank { activeFamily.value?.updateRepoSlug.orEmpty() }
+                .ifBlank { BuildConfig.GITHUB_REPO }
             _updateState.value = AppUpdateChecker.checkLatestRelease(
                 rawRepoSlug = effectiveSlug,
                 installedVersionName = BuildConfig.VERSION_NAME,

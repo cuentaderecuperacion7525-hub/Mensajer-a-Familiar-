@@ -48,4 +48,10 @@ class ExampleRobolectricTest {
       AppUpdateChecker.extractApkUrlFromHtml(sampleHtml, "miusuario/Mensajer-a-Familiar-")
     )
   }
+
+  @Test
+  fun `app update checker returns NotConfigured when repo slug is blank`() = kotlinx.coroutines.test.runTest {
+    val result = AppUpdateChecker.checkLatestRelease("", "2.0.5", 10)
+    assertTrue(result is com.example.util.AppUpdateUiState.NotConfigured)
+  }
 }

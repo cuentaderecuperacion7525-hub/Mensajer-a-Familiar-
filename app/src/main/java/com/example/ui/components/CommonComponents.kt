@@ -59,6 +59,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -638,18 +639,21 @@ fun AppUpdateDialog(
     val lifecycleOwner = LocalLifecycleOwner.current
     val hasUnifiedSigning = remember(context) { AppUpdateChecker.isConsistentDebugSigning(context) }
     var repoInput by remember(currentRepoSlug) { mutableStateOf(currentRepoSlug) }
+    var showRepoEditor by remember { mutableStateOf(false) }
     var canInstallPackages by remember { mutableStateOf(AppUpdateChecker.canRequestPackageInstalls(context)) }
     var waitingPermissionReturn by remember { mutableStateOf(false) }
     var installErrorMsg by remember { mutableStateOf<String?>(null) }
+    val latestUpdateState by rememberUpdatedState(updateState)
 
     DisposableEffect(lifecycleOwner, context) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 val allowed = AppUpdateChecker.canRequestPackageInstalls(context)
                 canInstallPackages = allowed
-                if (allowed && waitingPermissionReturn && updateState is AppUpdateUiState.ReadyToInstall) {
+                val currentState = latestUpdateState
+                if (allowed && waitingPermissionReturn && currentState is AppUpdateUiState.ReadyToInstall) {
                     waitingPermissionReturn = false
-                    AppUpdateChecker.launchApkInstaller(context, File(updateState.apkFilePath))
+                    AppUpdateChecker.launchApkInstaller(context, File(currentState.apkFilePath))
                         .onFailure { installErrorMsg = it.localizedMessage }
                 }
             }
@@ -804,6 +808,33 @@ fun AppUpdateDialog(
                             Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Buscar de nuevo")
+                        }
+                        if (isAdmin) {
+                            TextButton(
+                                onClick = { showRepoEditor = !showRepoEditor },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(if (showRepoEditor) "Ocultar repositorio" else "Cambiar repositorio")
+                            }
+                            if (showRepoEditor) {
+                                OutlinedTextField(
+                                    value = repoInput,
+                                    onValueChange = { repoInput = it },
+                                    label = { Text("Repositorio (usuario/repositorio)") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().testTag("update_repo_input")
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        showRepoEditor = false
+                                        onSaveRepoSlug(repoInput)
+                                    },
+                                    enabled = repoInput.isNotBlank(),
+                                    modifier = Modifier.fillMaxWidth().testTag("update_save_repo_button")
+                                ) {
+                                    Text("Guardar y buscar")
+                                }
+                            }
                         }
                     }
 
@@ -1024,6 +1055,33 @@ fun AppUpdateDialog(
                                 .testTag("update_retry_button")
                         ) {
                             Text("Reintentar")
+                        }
+                        if (isAdmin) {
+                            TextButton(
+                                onClick = { showRepoEditor = !showRepoEditor },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(if (showRepoEditor) "Ocultar repositorio" else "Cambiar repositorio")
+                            }
+                            if (showRepoEditor) {
+                                OutlinedTextField(
+                                    value = repoInput,
+                                    onValueChange = { repoInput = it },
+                                    label = { Text("Repositorio (usuario/repositorio)") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().testTag("update_repo_input")
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        showRepoEditor = false
+                                        onSaveRepoSlug(repoInput)
+                                    },
+                                    enabled = repoInput.isNotBlank(),
+                                    modifier = Modifier.fillMaxWidth().testTag("update_save_repo_button")
+                                ) {
+                                    Text("Guardar y buscar")
+                                }
+                            }
                         }
                     }
                 }

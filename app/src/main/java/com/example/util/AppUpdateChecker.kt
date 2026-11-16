@@ -186,7 +186,7 @@ object AppUpdateChecker {
     ): AppUpdateUiState = withContext(Dispatchers.IO) {
         val slug = normalizeRepoSlug(rawRepoSlug)
         if (slug.isEmpty()) {
-            return@withContext AppUpdateUiState.UpToDate(
+            return@withContext AppUpdateUiState.NotConfigured(
                 installedVersionName = installedVersionName,
                 installedVersionCode = installedVersionCode
             )
@@ -206,9 +206,8 @@ object AppUpdateChecker {
             client.newCall(apiRequest).execute().use { response ->
                 val code = response.code
                 if (code == HttpURLConnection.HTTP_NOT_FOUND) {
-                    return@withContext AppUpdateUiState.UpToDate(
-                        installedVersionName = installedVersionName,
-                        installedVersionCode = installedVersionCode
+                    return@withContext AppUpdateUiState.Error(
+                        message = "No se encontró un Release publicado en \"$slug\" o el repositorio es privado. Verifica que el repositorio sea público y tenga un Release con el archivo .apk."
                     )
                 }
                 if (code in 200..299) {
@@ -326,9 +325,8 @@ object AppUpdateChecker {
                         )
                     }
                 } else if (response.code == HttpURLConnection.HTTP_NOT_FOUND || location.endsWith("/releases")) {
-                    return@withContext AppUpdateUiState.UpToDate(
-                        installedVersionName = installedVersionName,
-                        installedVersionCode = installedVersionCode
+                    return@withContext AppUpdateUiState.Error(
+                        message = "No se encontró un Release publicado en \"$slug\" o el repositorio es privado. Verifica que el repositorio sea público y tenga un Release con el archivo .apk."
                     )
                 }
             }
