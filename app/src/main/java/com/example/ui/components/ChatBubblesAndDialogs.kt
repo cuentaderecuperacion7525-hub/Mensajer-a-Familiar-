@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Canvas
@@ -28,29 +29,41 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
+import android.widget.MediaController
+import android.widget.VideoView
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -59,8 +72,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -94,13 +110,22 @@ import com.example.data.model.MessageType
 import com.example.ui.theme.IncomingBubbleDark
 import com.example.ui.theme.IncomingBubbleLight
 import com.example.ui.theme.LocalDarkTheme
+import com.example.ui.theme.OnlineGreen
 import com.example.ui.theme.OutgoingBubbleDark
 import com.example.ui.theme.OutgoingBubbleLight
+import com.example.ui.theme.ReadBlue
+import com.example.util.DocumentMediaHelper
 import com.example.util.ImageCompressionHelper
+import com.example.util.ImageGalleryAndShareHelper
+import com.example.util.LinkPreviewData
+import com.example.util.LinkPreviewHelper
 import com.example.util.LocationHelper
 import com.example.util.MessageFormatter
 import com.example.util.TimeFormatters
+import com.example.util.VideoMediaHelper
 import com.example.util.parseHexColor
+import java.io.File
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 val QuickReactionEmojis = listOf("❤️", "😂", "👍", "😮", "🙏", "🎉")
@@ -133,7 +158,13 @@ fun ChatMessageBubble(
     onToggleVoicePlay: () -> Unit,
     onVotePoll: (String) -> Unit,
     onToggleReaction: (String) -> Unit,
-    onSwipeReply: (() -> Unit)? = null
+    onStopLiveLocation: ((String) -> Unit)? = null,
+    onSwipeReply: (() -> Unit)? = null,
+    voicePlaybackSpeed: Float = 1.0f,
+    onCycleVoiceSpeed: () -> Unit = {},
+    downloadProgress: Float? = null,
+    onVideoClick: (ChatMessageEntity) -> Unit = {},
+    onDocumentClick: ((ChatMessageEntity) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val dark = LocalDarkTheme.current
@@ -303,8 +334,10 @@ fun ChatMessageBubble(
                                 )
                                 val snippet = when (repliedMessage.type) {
                                     MessageType.IMAGE -> "📷 Foto"
+                                    MessageType.VIDEO -> "🎬 Video"
                                     MessageType.VOICE -> "🎤 Nota de voz"
                                     MessageType.LOCATION -> "📍 ${repliedMessage.locationName ?: "Ubicación"}"
+                                    MessageType.DOCUMENT -> "📄 ${repliedMessage.fileName ?: "Documento"}"
                                     MessageType.POLL -> "📊 ${repliedMessage.pollQuestion ?: "Encuesta"}"
                                     MessageType.DELETED -> "Mensaje eliminado"
                                     MessageType.TEXT -> MessageFormatter.stripMarkdownForPreview(repliedMessage.text)
@@ -330,11 +363,104 @@ fun ChatMessageBubble(
                         )
                     }
                     MessageType.TEXT -> {
+                        val detectedUrl = remember(message.text) {
+                            LinkPreviewHelper.extractFirstUrl(message.text)
+                        }
+                        var linkPreview by remember(detectedUrl) {
+                            mutableStateOf(detectedUrl?.let { LinkPreviewHelper.getCachedPreview(it) })
+                        }
+                        LaunchedEffect(detectedUrl) {
+                            if (detectedUrl != null && linkPreview == null) {
+                                linkPreview = LinkPreviewHelper.fetchPreview(detectedUrl)
+                            }
+                        }
                         Text(
                             text = MessageFormatter.formatRichText(message.text, searchQuery),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        if (detectedUrl != null) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            val preview = linkPreview ?: LinkPreviewData(
+                                url = detectedUrl,
+                                host = detectedUrl.removePrefix("https://").removePrefix("http://").substringBefore('/'),
+                                title = "Abrir enlace",
+                                description = detectedUrl
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        if (isMultiSelectMode) onToggleSelect()
+                                        else {
+                                            runCatching {
+                                                context.startActivity(
+                                                    Intent(Intent.ACTION_VIEW, Uri.parse(detectedUrl)).apply {
+                                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    .testTag("link_preview_${message.id}")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Link,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = preview.host,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = preview.title,
+                                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (preview.description.isNotBlank() && preview.description != preview.title) {
+                                            Text(
+                                                text = preview.description,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                        contentDescription = "Abrir enlace",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                     MessageType.IMAGE -> {
                         if (!message.mediaUri.isNullOrBlank()) {
@@ -361,10 +487,119 @@ fun ChatMessageBubble(
                             )
                         }
                     }
+                    MessageType.VIDEO -> {
+                        val sizeLabel = DocumentMediaHelper.formatFileSize(message.fileSizeBytes)
+                        val durLabel = TimeFormatters.formatDuration(message.voiceDurationSec.coerceAtLeast(1))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(185.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF0F172A))
+                                .clickable {
+                                    if (isMultiSelectMode) onToggleSelect()
+                                    else onVideoClick(message)
+                                }
+                                .testTag("video_card_${message.id}"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (!message.videoThumbnailData.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = ImageCompressionHelper.resolveCoilModel(message.videoThumbnailData),
+                                    contentDescription = "Vista previa de video",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.28f))
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.65f))
+                                    .border(1.5.dp, Color.White.copy(alpha = 0.85f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (downloadProgress != null) {
+                                    CircularProgressIndicator(
+                                        progress = { downloadProgress.coerceIn(0.05f, 1f) },
+                                        color = Color.White,
+                                        strokeWidth = 3.dp,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Filled.PlayArrow,
+                                        contentDescription = "Reproducir video",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(50.dp),
+                                color = Color.Black.copy(alpha = 0.65f),
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Videocam,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "$durLabel · $sizeLabel",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+                        }
+                        if (downloadProgress != null) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            LinearProgressIndicator(
+                                progress = { downloadProgress.coerceIn(0.05f, 1f) },
+                                modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(4.dp))
+                            )
+                            Text(
+                                text = "Descargando video ${(downloadProgress * 100).toInt()}%...",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        if (message.text.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = MessageFormatter.formatRichText(message.text, searchQuery),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
                     MessageType.VOICE -> {
                         val amps = remember(message.voiceWaveformJson) {
                             JsonHelpers.decodeFloatList(message.voiceWaveformJson)
                                 .ifEmpty { listOf(0.4f, 0.7f, 0.5f, 0.9f, 0.6f, 0.4f, 0.8f, 0.5f) }
+                        }
+                        val isVoicePlayed = remember(message.playedByMemberIdsJson, message.senderId) {
+                            JsonHelpers.decodeStringList(message.playedByMemberIdsJson)
+                                .any { it != message.senderId }
+                        }
+                        val speedLabel = when (voicePlaybackSpeed) {
+                            1.5f -> "1.5x"
+                            2.0f -> "2x"
+                            else -> "1x"
                         }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -377,13 +612,13 @@ fun ChatMessageBubble(
                                 modifier = Modifier
                                     .size(40.dp)
                                     .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary)
+                                    .background(if (isVoicePlayed) ReadBlue else MaterialTheme.colorScheme.primary)
                                     .testTag("play_voice_${message.id}")
                             ) {
                                 Icon(
                                     imageVector = if (isPlayingVoice) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                                     contentDescription = if (isPlayingVoice) "Pausar nota de voz" else "Reproducir nota de voz",
-                                    tint = MaterialTheme.colorScheme.onPrimary
+                                    tint = Color.White
                                 )
                             }
                             Spacer(modifier = Modifier.width(8.dp))
@@ -402,31 +637,164 @@ fun ChatMessageBubble(
                                                 .fillMaxHeight(amp.coerceIn(0.2f, 1f))
                                                 .clip(RoundedCornerShape(2.dp))
                                                 .background(
-                                                    if (active) MaterialTheme.colorScheme.primary
-                                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                                    when {
+                                                        active -> ReadBlue
+                                                        isVoicePlayed -> ReadBlue.copy(alpha = 0.65f)
+                                                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                                    }
                                                 )
                                         )
                                     }
                                 }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (isPlayingVoice) {
+                                            val elapsed = (message.voiceDurationSec * voicePlaybackProgress).toInt()
+                                            "${TimeFormatters.formatDuration(elapsed)} / ${TimeFormatters.formatDuration(message.voiceDurationSec)}"
+                                        } else {
+                                            TimeFormatters.formatDuration(message.voiceDurationSec)
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = if (isVoicePlayed) "● Escuchado" else "● Nota de voz",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 10.sp,
+                                            fontWeight = if (isVoicePlayed) FontWeight.Bold else FontWeight.Normal
+                                        ),
+                                        color = if (isVoicePlayed) ReadBlue else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(50.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50.dp))
+                                    .clickable { onCycleVoiceSpeed() }
+                                    .testTag("voice_speed_${message.id}")
+                            ) {
                                 Text(
-                                    text = if (isPlayingVoice) {
-                                        val elapsed = (message.voiceDurationSec * voicePlaybackProgress).toInt()
-                                        "${TimeFormatters.formatDuration(elapsed)} / ${TimeFormatters.formatDuration(message.voiceDurationSec)}"
-                                    } else {
-                                        TimeFormatters.formatDuration(message.voiceDurationSec)
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = speedLabel,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
                             }
                         }
                     }
-                    MessageType.LOCATION -> {
-                        val locTitle = message.locationName ?: "Ubicación"
-                        val locAddr = message.locationAddress.orEmpty()
+                    MessageType.DOCUMENT -> {
+                        val docName = message.fileName?.ifBlank { null }
+                            ?: message.text.ifBlank { "Documento adjunto" }
+                        val extLabel = docName.substringAfterLast('.', "")
+                            .uppercase(Locale.US)
+                            .take(4)
+                            .ifBlank { "DOC" }
+                        val sizeLabel = DocumentMediaHelper.formatFileSize(message.fileSizeBytes)
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    if (isMultiSelectMode) {
+                                        onToggleSelect()
+                                    } else if (onDocumentClick != null) {
+                                        onDocumentClick(message)
+                                    } else {
+                                        scope.launch {
+                                            DocumentMediaHelper.openDocumentExternally(
+                                                context = context,
+                                                messageId = message.id,
+                                                fileName = docName,
+                                                mimeType = message.fileMimeType,
+                                                mediaData = message.mediaUri
+                                            )
+                                        }
+                                    }
+                                }
+                                .testTag("document_card_${message.id}")
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(MaterialTheme.colorScheme.primary),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Description,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Text(
+                                                text = extLabel,
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                color = MaterialTheme.colorScheme.onPrimary
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = docName,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = if (downloadProgress != null) {
+                                                "Descargando ${(downloadProgress * 100).toInt()}% ($sizeLabel)"
+                                            } else {
+                                                "$sizeLabel · Toca para abrir"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                                if (downloadProgress != null) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    LinearProgressIndicator(
+                                        progress = { downloadProgress.coerceIn(0.05f, 1f) },
+                                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(4.dp))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    MessageType.LOCATION -> {
+                        val nowMs = System.currentTimeMillis()
+                        val liveUntil = message.locationLiveUntil ?: 0L
+                        val isLiveActive = liveUntil > nowMs
+                        val remainingMin = if (isLiveActive) {
+                            ((liveUntil - nowMs + 59_999L) / 60_000L).coerceAtLeast(1L)
+                        } else 0L
+                        val locTitle = message.locationName ?: "Ubicación"
+                        val locAddr = message.locationAddress.orEmpty()
+                        val coordText = if (message.locationLat != null && message.locationLng != null) {
+                            String.format(Locale.US, "%.5f, %.5f", message.locationLat, message.locationLng)
+                        } else null
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
@@ -445,30 +813,43 @@ fun ChatMessageBubble(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(86.dp)
-                                        .background(if (dark) Color(0xFF1E293B) else Color(0xFFE7EEF6)),
+                                        .height(98.dp)
+                                        .background(if (dark) Color(0xFF1E293B) else Color(0xFFE3EEF8)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     val gridColor = if (dark) Color.White.copy(alpha = 0.14f) else Color.White
+                                    val accentRoad = if (dark) Color(0xFF38BDF8).copy(alpha = 0.25f) else Color(0xFF93C5FD).copy(alpha = 0.5f)
                                     Canvas(modifier = Modifier.fillMaxSize()) {
                                         drawLine(
                                             color = gridColor,
-                                            start = Offset(0f, size.height * 0.35f),
-                                            end = Offset(size.width, size.height * 0.65f),
-                                            strokeWidth = 10f
+                                            start = Offset(0f, size.height * 0.30f),
+                                            end = Offset(size.width, size.height * 0.70f),
+                                            strokeWidth = 11f
                                         )
                                         drawLine(
                                             color = gridColor,
-                                            start = Offset(size.width * 0.3f, 0f),
-                                            end = Offset(size.width * 0.65f, size.height),
-                                            strokeWidth = 8f
+                                            start = Offset(size.width * 0.28f, 0f),
+                                            end = Offset(size.width * 0.68f, size.height),
+                                            strokeWidth = 9f
+                                        )
+                                        drawLine(
+                                            color = accentRoad,
+                                            start = Offset(0f, size.height * 0.78f),
+                                            end = Offset(size.width, size.height * 0.22f),
+                                            strokeWidth = 7f
+                                        )
+                                        drawCircle(
+                                            color = if (isLiveActive) Color(0xFF10B981).copy(alpha = 0.22f)
+                                            else Color(0xFF1A73E8).copy(alpha = 0.18f),
+                                            radius = size.minDimension * 0.34f,
+                                            center = center
                                         )
                                     }
                                     Box(
                                         modifier = Modifier
-                                            .size(38.dp)
+                                            .size(40.dp)
                                             .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.primary),
+                                            .background(if (isLiveActive) OnlineGreen else MaterialTheme.colorScheme.primary),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
@@ -476,6 +857,53 @@ fun ChatMessageBubble(
                                             contentDescription = "Ubicación",
                                             tint = Color.White
                                         )
+                                    }
+                                    if (isLiveActive) {
+                                        Surface(
+                                            shape = RoundedCornerShape(50.dp),
+                                            color = OnlineGreen,
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .padding(8.dp)
+                                        ) {
+                                            Text(
+                                                text = "● EN VIVO · ${remainingMin} min",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = Color.White,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    } else if (message.locationLiveUntil != null) {
+                                        Surface(
+                                            shape = RoundedCornerShape(50.dp),
+                                            color = Color.Black.copy(alpha = 0.55f),
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .padding(8.dp)
+                                        ) {
+                                            Text(
+                                                text = "Ubicación en vivo finalizada",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color.White,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+                                    if (coordText != null) {
+                                        Surface(
+                                            shape = RoundedCornerShape(50.dp),
+                                            color = Color.Black.copy(alpha = 0.55f),
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(6.dp)
+                                        ) {
+                                            Text(
+                                                text = coordText,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                                color = Color.White,
+                                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                            )
+                                        }
                                     }
                                 }
                                 Column(modifier = Modifier.padding(10.dp)) {
@@ -490,12 +918,46 @@ fun ChatMessageBubble(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = "Toca para abrir en el mapa",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Abrir en Google Maps",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        if (isMine && isLiveActive && onStopLiveLocation != null) {
+                                            Surface(
+                                                shape = RoundedCornerShape(50.dp),
+                                                color = MaterialTheme.colorScheme.errorContainer,
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(50.dp))
+                                                    .clickable { onStopLiveLocation(message.id) }
+                                                    .testTag("stop_live_location_${message.id}")
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.StopCircle,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "Detener",
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                        color = MaterialTheme.colorScheme.error
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -793,6 +1255,10 @@ fun FullScreenImageDialog(
     imageUri: String,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var feedbackBanner by remember { mutableStateOf<String?>(null) }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -801,22 +1267,254 @@ fun FullScreenImageDialog(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
-                .clickable(onClick = onDismiss)
         ) {
             AsyncImage(
                 model = ImageCompressionHelper.resolveCoilModel(imageUri),
                 contentDescription = "Imagen ampliada",
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().padding(16.dp)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(onClick = onDismiss)
+                    .padding(16.dp)
             )
             IconButton(
                 onClick = onDismiss,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(16.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                    .background(Color.Black.copy(alpha = 0.55f), CircleShape)
             ) {
                 Icon(Icons.Filled.Close, contentDescription = "Cerrar vista previa", tint = Color.White)
+            }
+
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (feedbackBanner != null) {
+                    Surface(
+                        shape = RoundedCornerShape(50.dp),
+                        color = Color.White.copy(alpha = 0.92f)
+                    ) {
+                        Text(
+                            text = feedbackBanner!!,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color(0xFF0F172A),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val res = ImageGalleryAndShareHelper.saveImageToGallery(context, imageUri)
+                                feedbackBanner = res.getOrElse {
+                                    it.localizedMessage ?: "No se pudo guardar la foto"
+                                }
+                            }
+                        },
+                        modifier = Modifier.testTag("save_image_gallery_button")
+                    ) {
+                        Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Guardar en galería")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                ImageGalleryAndShareHelper.shareImageExternally(context, imageUri)
+                            }
+                        },
+                        modifier = Modifier.testTag("share_image_external_button")
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Compartir", color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun VideoPreviewSendDialog(
+    videoUri: Uri,
+    onDismiss: () -> Unit,
+    onSend: (String) -> Unit
+) {
+    var caption by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Filled.Movie, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text("Enviar video al chat")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF0F172A)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Filled.Videocam,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Video listo para enviar (máx. 5 MB)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = caption,
+                    onValueChange = { caption = it },
+                    label = { Text("Añadir comentario al video (opcional)") },
+                    modifier = Modifier.fillMaxWidth().testTag("video_caption_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSend(caption) },
+                modifier = Modifier.testTag("send_video_confirm")
+            ) { Text("Enviar video") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar") }
+        }
+    )
+}
+
+@Composable
+fun FullScreenVideoDialog(
+    videoFile: File,
+    caption: String = "",
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var feedbackBanner by remember { mutableStateOf<String?>(null) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    VideoView(ctx).apply {
+                        val controller = MediaController(ctx)
+                        controller.setAnchorView(this)
+                        setMediaController(controller)
+                        setVideoPath(videoFile.absolutePath)
+                        setOnPreparedListener { mp ->
+                            mp.isLooping = true
+                            start()
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.Center)
+            )
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Cerrar reproductor de video", tint = Color.White)
+            }
+
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (caption.isNotBlank()) {
+                    Text(
+                        text = caption,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White
+                    )
+                }
+                if (feedbackBanner != null) {
+                    Surface(
+                        shape = RoundedCornerShape(50.dp),
+                        color = Color.White.copy(alpha = 0.92f)
+                    ) {
+                        Text(
+                            text = feedbackBanner!!,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color(0xFF0F172A),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val res = VideoMediaHelper.saveVideoToGallery(context, videoFile)
+                                feedbackBanner = res.getOrElse {
+                                    it.localizedMessage ?: "No se pudo guardar el video"
+                                }
+                            }
+                        },
+                        modifier = Modifier.testTag("save_video_gallery_button")
+                    ) {
+                        Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Guardar en galería")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                VideoMediaHelper.shareVideoExternally(context, videoFile, caption)
+                            }
+                        },
+                        modifier = Modifier.testTag("share_video_external_button")
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Compartir", color = Color.White)
+                    }
+                }
             }
         }
     }
@@ -825,7 +1523,7 @@ fun FullScreenImageDialog(
 @Composable
 fun LocationPickerDialog(
     onDismiss: () -> Unit,
-    onSendLocation: (name: String, address: String, lat: Double?, lng: Double?) -> Unit
+    onSendLocation: (name: String, address: String, lat: Double?, lng: Double?, liveDurationMinutes: Int) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -835,12 +1533,36 @@ fun LocationPickerDialog(
     var resolvedLng by remember { mutableStateOf<Double?>(null) }
     var isFetchingGps by remember { mutableStateOf(false) }
     var gpsError by remember { mutableStateOf<String?>(null) }
+    var liveDurationMinutes by remember { mutableIntStateOf(0) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Compartir ubicación") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Modo de ubicación:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        0 to "Actual",
+                        15 to "En vivo 15m",
+                        60 to "En vivo 1h"
+                    ).forEach { (mins, label) ->
+                        FilterChip(
+                            selected = liveDurationMinutes == mins,
+                            onClick = { liveDurationMinutes = mins },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                            modifier = Modifier.weight(1f).testTag("location_mode_$mins")
+                        )
+                    }
+                }
+
                 OutlinedButton(
                     onClick = {
                         scope.launch {
@@ -883,7 +1605,7 @@ fun LocationPickerDialog(
 
                 if (resolvedLat != null && resolvedLng != null) {
                     Text(
-                        text = String.format(java.util.Locale.US, "GPS listo: %.5f, %.5f", resolvedLat, resolvedLng),
+                        text = String.format(Locale.US, "GPS listo: %.5f, %.5f", resolvedLat, resolvedLng),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -907,10 +1629,12 @@ fun LocationPickerDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSendLocation(customName, customAddress, resolvedLat, resolvedLng) },
+                onClick = { onSendLocation(customName, customAddress, resolvedLat, resolvedLng, liveDurationMinutes) },
                 enabled = customName.isNotBlank() || resolvedLat != null,
                 modifier = Modifier.testTag("location_send_button")
-            ) { Text("Enviar ubicación") }
+            ) {
+                Text(if (liveDurationMinutes > 0) "Compartir en vivo" else "Enviar ubicación")
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancelar") }

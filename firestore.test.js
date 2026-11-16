@@ -446,3 +446,170 @@ test("Members support bounded fcmTokens array updates while blocking strangers",
     })
   );
 });
+
+test("Messages support DOCUMENT attachments and live location updates", async () => {
+  const aliceDb = await seedFamilyAsAlice();
+  const docMsgRef = aliceDb.collection("families").doc("fam_1").collection("messages").doc("msg_doc");
+  const now = Date.now();
+
+  await assertSucceeds(
+    docMsgRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      chatId: "chat_familia",
+      senderId: "member_papa",
+      text: "Receta médica",
+      type: "DOCUMENT",
+      status: "SENT",
+      timestamp: now,
+      isEdited: false,
+      mediaData: "data:application/pdf;base64,JVBERi0xLjQ=",
+      fileName: "receta.pdf",
+      fileMimeType: "application/pdf",
+      fileSizeBytes: 1200,
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  const locMsgRef = aliceDb.collection("families").doc("fam_1").collection("messages").doc("msg_live_loc");
+  await assertSucceeds(
+    locMsgRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      chatId: "chat_familia",
+      senderId: "member_papa",
+      text: "Ubicación en tiempo real",
+      type: "LOCATION",
+      status: "SENT",
+      timestamp: now,
+      isEdited: false,
+      locationName: "Ubicación en vivo",
+      locationAddress: "19.4326, -99.1332",
+      locationLat: 19.4326,
+      locationLng: -99.1332,
+      locationLiveUntil: now + 900000,
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  await assertSucceeds(
+    locMsgRef.update({
+      locationLat: 19.4330,
+      locationLng: -99.1340,
+      locationAddress: "Av. Reforma",
+      locationLiveUntil: 0,
+      updatedAt: serverTs(),
+    })
+  );
+});
+
+test("Calls support WebRTC offerSdp, answerSdp, and ICE candidates while blocking strangers", async () => {
+  const aliceDb = await seedFamilyAsAlice();
+  const callRef = aliceDb.collection("families").doc("fam_1").collection("calls").doc("call_rtc");
+
+  await assertSucceeds(
+    callRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      chatId: "chat_familia",
+      title: "Videollamada",
+      callerMemberId: "member_papa",
+      targetMemberIds: ["member_mama"],
+      avatarColorHex: "#1A73E8",
+      avatarEmoji: "📹",
+      callType: "VIDEO",
+      callStatus: "RINGING",
+      direction: "OUTGOING",
+      durationSec: 0,
+      offerSdp: "v=0\r\no=- 123 2 IN IP4 127.0.0.1\r\n",
+      timestamp: Date.now(),
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  await assertSucceeds(
+    callRef.update({
+      callStatus: "CONNECTED",
+      answerSdp: "v=0\r\no=- 456 2 IN IP4 127.0.0.1\r\n",
+      connectedAt: Date.now(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  const candRef = callRef.collection("candidates").doc("cand_1");
+  await assertSucceeds(
+    candRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      senderMemberId: "member_papa",
+      sdpMid: "0",
+      sdpMLineIndex: 0,
+      candidate: "candidate:1 1 UDP 2122252543 192.168.1.5 54321 typ host",
+      createdAtMs: Date.now(),
+      createdAt: serverTs(),
+    })
+  );
+
+  const eveDb = testEnv.authenticatedContext(EVE_UID).firestore();
+  await assertFails(eveDb.collection("families").doc("fam_1").collection("calls").doc("call_rtc").collection("candidates").doc("cand_1").get());
+});
+
+test("Messages support VIDEO type, chunkCount, playedByMemberIds, and media_chunks subcollection", async () => {
+  const aliceDb = await seedFamilyAsAlice();
+  const now = Date.now();
+  const videoMsgRef = aliceDb.collection("families").doc("fam_1").collection("messages").doc("msg_vid_1");
+
+  await assertSucceeds(
+    videoMsgRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      chatId: "chat_familia",
+      senderId: "member_papa",
+      text: "Video familiar",
+      type: "VIDEO",
+      status: "SENT",
+      timestamp: now,
+      isEdited: false,
+      videoThumbnailData: "data:image/jpeg;base64,/9j/4AAQ=",
+      fileName: "cumple.mp4",
+      fileMimeType: "video/mp4",
+      fileSizeBytes: 1850000,
+      chunkCount: 2,
+      voiceDurationSec: 8,
+      playedByMemberIds: [],
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Marking voice/video played and DELIVERED status succeeds
+  await assertSucceeds(
+    videoMsgRef.update({
+      status: "DELIVERED",
+      playedByMemberIds: arrayUnion("member_mama"),
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Creating media chunk succeeds for family member and fails for stranger
+  const chunkRef = aliceDb.collection("families").doc("fam_1").collection("media_chunks").doc("msg_vid_1_c0");
+  await assertSucceeds(
+    chunkRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      messageId: "msg_vid_1",
+      chunkIndex: 0,
+      totalChunks: 2,
+      data: "data:video/mp4;base64,AAAA",
+      createdAt: serverTs(),
+    })
+  );
+
+  const eveDb = testEnv.authenticatedContext(EVE_UID).firestore();
+  await assertFails(eveDb.collection("families").doc("fam_1").collection("media_chunks").doc("msg_vid_1_c0").get());
+});
+
+

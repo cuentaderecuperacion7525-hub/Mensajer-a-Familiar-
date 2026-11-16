@@ -1,11 +1,16 @@
 package com.example
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,6 +48,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.data.local.PreferencesManager
+import com.example.data.model.CallType
 import com.example.data.model.ChatType
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.PresenceStatus
@@ -286,10 +292,47 @@ fun FamiChatApp(
     val voiceRecording by vm.voiceRecording.collectAsStateWithLifecycle()
     val playingVoiceId by vm.playingVoiceMessageId.collectAsStateWithLifecycle()
     val playingVoiceProgress by vm.playingVoiceProgress.collectAsStateWithLifecycle()
+    val voicePlaybackSpeed by vm.voicePlaybackSpeed.collectAsStateWithLifecycle()
+    val mediaTransferProgress by vm.mediaTransferProgress.collectAsStateWithLifecycle()
+    val activeUploadLabel by vm.activeUploadLabel.collectAsStateWithLifecycle()
+    val activeUploadProgress by vm.activeUploadProgress.collectAsStateWithLifecycle()
+    val fcmToken by vm.fcmToken.collectAsStateWithLifecycle()
+    val turnUrl by vm.turnUrl.collectAsStateWithLifecycle()
+    val turnUsername by vm.turnUsername.collectAsStateWithLifecycle()
+    val turnCredential by vm.turnCredential.collectAsStateWithLifecycle()
     val snackbarMessage by vm.snackbarMessage.collectAsStateWithLifecycle()
 
     var pendingProtectedMember by remember { mutableStateOf<FamilyMemberEntity?>(null) }
     var showSwitchKeyDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    var pendingCallAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val callPermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { _ ->
+            pendingCallAction?.invoke()
+            pendingCallAction = null
+        }
+    )
+
+    fun runWithCallPermissions(callType: CallType, action: () -> Unit) {
+        val needed = buildList {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                add(Manifest.permission.RECORD_AUDIO)
+            }
+            if (callType == CallType.VIDEO &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.CAMERA)
+            }
+        }
+        if (needed.isEmpty()) {
+            action()
+        } else {
+            pendingCallAction = action
+            callPermissionsLauncher.launch(needed.toTypedArray())
+        }
+    }
 
     LaunchedEffect(pendingNotificationChatId, activeMember?.id, chatPreviews.size) {
         val targetChatId = pendingNotificationChatId ?: return@LaunchedEffect
@@ -379,6 +422,8 @@ fun FamiChatApp(
                             vm.openChat(chatId)
                             navController.navigate(Routes.chat(chatId))
                         },
+                        onTogglePinChat = vm::togglePinChat,
+                        onToggleMuteChat = vm::toggleMuteChat,
                         onStartDirectChat = { otherId ->
                             vm.createOrOpenDirectChat(otherId) { chatId ->
                                 navController.navigate(Routes.chat(chatId))
@@ -399,7 +444,11 @@ fun FamiChatApp(
                                 navController.navigate(Routes.ADMIN)
                             }
                         },
-                        onStartCall = vm::startCall,
+                        onStartCall = { chatId, title, emoji, colorHex, callType ->
+                            runWithCallPermissions(callType) {
+                                vm.startCall(chatId, title, emoji, colorHex, callType)
+                            }
+                        },
                         onAddShoppingItem = vm::addShoppingItem,
                         onToggleShoppingItem = vm::toggleShoppingItem,
                         onDeleteShoppingItem = vm::deleteShoppingItem,
@@ -407,7 +456,14 @@ fun FamiChatApp(
                         onAddEvent = vm::addFamilyEvent,
                         onDeleteEvent = vm::deleteFamilyEvent,
                         onSaveNote = vm::saveFamilyNote,
-                        onDeleteNote = vm::deleteFamilyNote
+                        onDeleteNote = vm::deleteFamilyNote,
+                        familyId = activeFamilyId.orEmpty(),
+                        fcmToken = fcmToken.orEmpty(),
+                        turnUrl = turnUrl,
+                        turnUsername = turnUsername,
+                        turnCredential = turnCredential,
+                        onSendTestPushNotification = vm::sendTestPushNotification,
+                        onSaveTurnConfig = vm::saveTurnConfig
                     )
                 }
             }
@@ -446,9 +502,19 @@ fun FamiChatApp(
                         },
                         onSendText = { text, replyId -> vm.sendTextMessage(chatId, text, replyId) },
                         onSendImage = { uri, caption, replyId -> vm.sendImageMessage(chatId, uri, caption, replyId) },
-                        onSendLocation = { name, addr, lat, lng, replyId ->
-                            vm.sendLocationMessage(chatId, name, addr, lat, lng, replyId)
+                        onSendLocation = { name, addr, lat, lng, replyId, liveMins ->
+                            vm.sendLocationMessage(chatId, name, addr, lat, lng, replyId, liveMins)
                         },
+                        onSendDocument = { uri, replyId -> vm.sendDocumentMessage(chatId, uri, replyId) },
+                        onSendVideo = { uri, caption, replyId -> vm.sendVideoMessage(chatId, uri, caption, replyId) },
+                        onOpenDocument = vm::openOrDownloadDocument,
+                        onOpenVideo = vm::openOrDownloadVideo,
+                        voicePlaybackSpeed = voicePlaybackSpeed,
+                        onCycleVoiceSpeed = vm::cycleVoicePlaybackSpeed,
+                        mediaTransferProgress = mediaTransferProgress,
+                        activeUploadLabel = activeUploadLabel,
+                        activeUploadProgress = activeUploadProgress,
+                        onStopLiveLocation = vm::stopLiveLocationSharing,
                         onSendPoll = { q, opts -> vm.sendPollMessage(chatId, q, opts) },
                         onVotePoll = vm::voteOnPoll,
                         onEditMessage = vm::editMessage,
@@ -456,6 +522,8 @@ fun FamiChatApp(
                         onSelectWallpaper = { key -> vm.setChatWallpaper(chatId, key) },
                         onToggleReaction = vm::toggleReaction,
                         onTogglePin = { msgId -> vm.togglePinMessage(chatId, msgId) },
+                        onTogglePinChat = { vm.togglePinChat(chatId) },
+                        onToggleMuteChat = { vm.toggleMuteChat(chatId) },
                         onDeleteForMe = vm::deleteMessagesForMe,
                         onDeleteForEveryone = vm::deleteMessagesForEveryone,
                         onStartVoiceRecording = { vm.startVoiceRecording(chatId) },
@@ -463,13 +531,15 @@ fun FamiChatApp(
                         onSendVoiceRecording = { replyId -> vm.finishAndSendVoiceRecording(chatId, replyId) },
                         onToggleVoicePlay = vm::toggleVoicePlayback,
                         onStartCall = { callType ->
-                            vm.startCall(
-                                chatId = chatId,
-                                title = chatUi.displayTitle,
-                                avatarEmoji = chatUi.displayEmoji,
-                                avatarColorHex = chatUi.displayColorHex,
-                                callType = callType
-                            )
+                            runWithCallPermissions(callType) {
+                                vm.startCall(
+                                    chatId = chatId,
+                                    title = chatUi.displayTitle,
+                                    avatarEmoji = chatUi.displayEmoji,
+                                    avatarColorHex = chatUi.displayColorHex,
+                                    callType = callType
+                                )
+                            }
                         },
                         onTypingChange = { isTyping ->
                             vm.updateLivePresence(
@@ -565,9 +635,11 @@ fun FamiChatApp(
         activeCall?.let { call ->
             CallOverlayScreen(
                 callState = call,
+                webRtcCallManager = vm.webRtcCallManager,
                 onToggleMute = vm::toggleCallMute,
                 onToggleSpeaker = vm::toggleCallSpeaker,
                 onToggleCamera = vm::toggleCallCamera,
+                onSwitchCamera = vm::switchCallCamera,
                 onEndCall = vm::endActiveCall
             )
         }
@@ -577,7 +649,11 @@ fun FamiChatApp(
             IncomingCallOverlay(
                 call = call,
                 callerMember = caller,
-                onAccept = { vm.acceptIncomingCall(call) },
+                onAccept = {
+                    runWithCallPermissions(call.callType) {
+                        vm.acceptIncomingCall(call)
+                    }
+                },
                 onDecline = { vm.declineIncomingCall(call) }
             )
         }

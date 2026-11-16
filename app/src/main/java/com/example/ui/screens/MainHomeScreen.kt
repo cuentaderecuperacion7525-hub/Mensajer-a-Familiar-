@@ -6,8 +6,10 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -47,7 +49,9 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -104,12 +108,14 @@ import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.ShoppingItemEntity
+import androidx.compose.material.icons.filled.NotificationsActive
 import com.example.ui.components.AppUpdateDialog
 import com.example.ui.components.CreateStatusDialog
 import com.example.ui.components.FamilyStatusStrip
 import com.example.ui.components.MemberAvatar
 import com.example.ui.components.MemberStatusGroup
 import com.example.ui.components.MessageStatusIcon
+import com.example.ui.components.PushAndCallDiagnosticsDialog
 import com.example.ui.components.StatusViewerDialog
 import com.example.ui.components.UserProfileOptionsDialog
 import com.example.ui.theme.OnlineGreen
@@ -155,6 +161,8 @@ fun MainHomeScreen(
     onSelectTab: (MainTab) -> Unit,
     onSearchChange: (String) -> Unit,
     onOpenChat: (String) -> Unit,
+    onTogglePinChat: (String) -> Unit = {},
+    onToggleMuteChat: (String) -> Unit = {},
     onStartDirectChat: (String) -> Unit,
     onSwitchProfile: () -> Unit,
     onOpenAdminPanel: () -> Unit,
@@ -166,7 +174,14 @@ fun MainHomeScreen(
     onAddEvent: (String, String, String, String, String, String) -> Unit,
     onDeleteEvent: (String) -> Unit,
     onSaveNote: (String?, String, String, String, Boolean) -> Unit,
-    onDeleteNote: (String) -> Unit
+    onDeleteNote: (String) -> Unit,
+    familyId: String = "",
+    fcmToken: String = "",
+    turnUrl: String = "",
+    turnUsername: String = "",
+    turnCredential: String = "",
+    onSendTestPushNotification: () -> Unit = {},
+    onSaveTurnConfig: (url: String, username: String, credential: String) -> Unit = { _, _, _ -> }
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -174,6 +189,7 @@ fun MainHomeScreen(
     var showProfileOptionsDialog by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
+    var showDiagnosticsDialog by rememberSaveable { mutableStateOf(false) }
     var showCreateStatusDialog by remember { mutableStateOf(false) }
     var viewingStatusMemberId by remember { mutableStateOf<String?>(null) }
 
@@ -302,6 +318,17 @@ fun MainHomeScreen(
                                             onToggleTheme()
                                         },
                                         modifier = Modifier.testTag("menu_toggle_theme")
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Diagnóstico Push y Llamadas") },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.NotificationsActive, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            showDiagnosticsDialog = true
+                                        },
+                                        modifier = Modifier.testTag("menu_push_diagnostics")
                                     )
                                     DropdownMenuItem(
                                         text = { Text("Actualizar aplicación") },
@@ -450,6 +477,8 @@ fun MainHomeScreen(
                                     searchQuery = searchQuery,
                                     onSearchChange = onSearchChange,
                                     onOpenChat = onOpenChat,
+                                    onTogglePinChat = onTogglePinChat,
+                                    onToggleMuteChat = onToggleMuteChat,
                                     emptyTip = "No hay chats que coincidan con tu búsqueda."
                                 )
                             }
@@ -458,6 +487,8 @@ fun MainHomeScreen(
                                 searchQuery = searchQuery,
                                 onSearchChange = onSearchChange,
                                 onOpenChat = onOpenChat,
+                                onTogglePinChat = onTogglePinChat,
+                                onToggleMuteChat = onToggleMuteChat,
                                 emptyTip = if (activeMember.isAdmin) {
                                     "No hay grupos. Toca el ícono de escudo arriba para crear uno."
                                 } else {
@@ -608,6 +639,21 @@ fun MainHomeScreen(
             }
         )
     }
+
+    if (showDiagnosticsDialog) {
+        PushAndCallDiagnosticsDialog(
+            familyId = familyId,
+            memberName = activeMember.name,
+            notificationsEnabled = notificationsEnabled,
+            fcmToken = fcmToken,
+            turnUrl = turnUrl,
+            turnUsername = turnUsername,
+            turnCredential = turnCredential,
+            onSendTestNotification = onSendTestPushNotification,
+            onSaveTurnConfig = onSaveTurnConfig,
+            onDismiss = { showDiagnosticsDialog = false }
+        )
+    }
 }
 
 @Composable
@@ -706,6 +752,8 @@ private fun ChatsListSection(
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     onOpenChat: (String) -> Unit,
+    onTogglePinChat: (String) -> Unit = {},
+    onToggleMuteChat: (String) -> Unit = {},
     emptyTip: String
 ) {
     val filtered = remember(chats, searchQuery) {
@@ -797,7 +845,12 @@ private fun ChatsListSection(
                 contentPadding = PaddingValues(bottom = 88.dp)
             ) {
                 items(filtered, key = { it.chat.id }) { item ->
-                    ChatRowItem(item = item, onClick = { onOpenChat(item.chat.id) })
+                    ChatRowItem(
+                        item = item,
+                        onClick = { onOpenChat(item.chat.id) },
+                        onTogglePin = { onTogglePinChat(item.chat.id) },
+                        onToggleMute = { onToggleMuteChat(item.chat.id) }
+                    )
                     HorizontalDivider(
                         modifier = Modifier.padding(start = 82.dp, end = 16.dp),
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
@@ -808,94 +861,165 @@ private fun ChatsListSection(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatRowItem(
     item: ChatThreadUi,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit = {},
+    onToggleMute: () -> Unit = {}
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .testTag("chat_item_${item.chat.id}"),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        MemberAvatar(
-            emoji = item.displayEmoji,
-            colorHex = item.displayColorHex,
-            photoData = item.displayPhotoData,
-            size = 54.dp,
-            isOnline = item.isOnline,
-            showOnlineDot = true
-        )
-        Spacer(modifier = Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = item.displayTitle,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
+    var showContextMenu by remember { mutableStateOf(false) }
+
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = { showContextMenu = true }
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = item.lastMessageTime,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (item.unreadCount > 0) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant
+                .background(
+                    if (item.isPinned) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.16f)
+                    else Color.Transparent
                 )
-            }
-            Spacer(modifier = Modifier.height(2.dp))
-            val isLiveSubtitle = item.isOnline ||
-                item.subtitleStatus.contains("escribiendo", ignoreCase = true) ||
-                item.subtitleStatus.contains("grabando", ignoreCase = true)
-            Text(
-                text = item.subtitleStatus,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (isLiveSubtitle) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .testTag("chat_item_${item.chat.id}"),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MemberAvatar(
+                emoji = item.displayEmoji,
+                colorHex = item.displayColorHex,
+                photoData = item.displayPhotoData,
+                size = 54.dp,
+                isOnline = item.isOnline,
+                showOnlineDot = true
             )
-            Spacer(modifier = Modifier.height(3.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (item.isLastMessageFromMe && item.lastMessageStatus != null) {
-                    MessageStatusIcon(status = item.lastMessageStatus)
-                    Spacer(modifier = Modifier.width(4.dp))
-                }
-                Text(
-                    text = item.lastMessagePreview,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                if (item.unreadCount > 0) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(22.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
-                        contentAlignment = Alignment.Center
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = item.unreadCount.toString(),
+                            text = item.displayTitle,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (item.isMuted) {
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Icon(
+                                imageVector = Icons.Filled.NotificationsOff,
+                                contentDescription = "Chat silenciado",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (item.isPinned) {
+                            Icon(
+                                imageVector = Icons.Filled.PushPin,
+                                contentDescription = "Chat fijado",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                        Text(
+                            text = item.lastMessageTime,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimary
+                            color = if (item.unreadCount > 0) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
+                Spacer(modifier = Modifier.height(2.dp))
+                val isLiveSubtitle = item.isOnline ||
+                    item.subtitleStatus.contains("escribiendo", ignoreCase = true) ||
+                    item.subtitleStatus.contains("grabando", ignoreCase = true)
+                Text(
+                    text = item.subtitleStatus,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isLiveSubtitle) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(3.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (item.isLastMessageFromMe && item.lastMessageStatus != null) {
+                        MessageStatusIcon(status = item.lastMessageStatus)
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    Text(
+                        text = item.lastMessagePreview,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (item.unreadCount > 0) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (item.isMuted) MaterialTheme.colorScheme.outline
+                                    else MaterialTheme.colorScheme.primary
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = item.unreadCount.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
+                }
             }
+        }
+
+        DropdownMenu(
+            expanded = showContextMenu,
+            onDismissRequest = { showContextMenu = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text(if (item.isPinned) "Desfijar chat" else "Fijar chat arriba") },
+                leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                onClick = {
+                    showContextMenu = false
+                    onTogglePin()
+                },
+                modifier = Modifier.testTag("context_pin_chat_${item.chat.id}")
+            )
+            DropdownMenuItem(
+                text = { Text(if (item.isMuted) "Activar notificaciones" else "Silenciar notificaciones") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = if (item.isMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                        contentDescription = null
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    onToggleMute()
+                },
+                modifier = Modifier.testTag("context_mute_chat_${item.chat.id}")
+            )
         }
     }
 }

@@ -296,6 +296,208 @@ class FamilyCloudRepositoryRuleTest : FirestoreEmulatorTestBase() {
     assertTrue("unregisterMemberFcmToken failed: ${unregRes.exceptionOrNull()}", unregRes.isSuccess)
   }
 
+  @Test
+  fun documentMessages_liveLocations_andWebRtcSignaling_persistCorrectly() = runBlocking {
+    val aliceUid = signInTestUser(ALICE_EMAIL)
+    val repo = FamilyCloudRepository(firestore)
+
+    val (familyId, adminMemberId) = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.createFamily(uid = aliceUid, familyName = "Casa RTC", adminName = "Papá").getOrThrow()
+    }
+    val chats = withTimeout(FLOW_TIMEOUT_MS) {
+      repo.observeChats(familyId, aliceUid).first { it.isNotEmpty() }
+    }
+    val chatId = chats.first().id
+    val now = System.currentTimeMillis()
+
+    // Document message
+    val docMsgId = "msg_doc_${UUID.randomUUID().toString().replace("-", "").take(8)}"
+    val docRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.createMessage(
+        familyId = familyId,
+        message = ChatMessageEntity(
+          id = docMsgId,
+          chatId = chatId,
+          senderId = adminMemberId,
+          text = "Boleta",
+          type = MessageType.DOCUMENT,
+          mediaUri = "data:application/pdf;base64,JVBERi0xLjQ=",
+          fileName = "boleta.pdf",
+          fileMimeType = "application/pdf",
+          fileSizeBytes = 1024L,
+          timestamp = now
+        ),
+        memberUids = listOf(aliceUid),
+        callerUid = aliceUid
+      )
+    }
+    assertTrue("Document createMessage failed: ${docRes.exceptionOrNull()}", docRes.isSuccess)
+
+    // Live location update
+    val locMsgId = "msg_loc_${UUID.randomUUID().toString().replace("-", "").take(8)}"
+    val locCreateRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.createMessage(
+        familyId = familyId,
+        message = ChatMessageEntity(
+          id = locMsgId,
+          chatId = chatId,
+          senderId = adminMemberId,
+          text = "En camino",
+          type = MessageType.LOCATION,
+          locationName = "Ubicación en vivo",
+          locationAddress = "19.43, -99.13",
+          locationLat = 19.43,
+          locationLng = -99.13,
+          locationLiveUntil = now + 900_000L,
+          timestamp = now
+        ),
+        memberUids = listOf(aliceUid),
+        callerUid = aliceUid
+      )
+    }
+    assertTrue("Live location create failed: ${locCreateRes.exceptionOrNull()}", locCreateRes.isSuccess)
+
+    val locUpdateRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.updateMessageFields(
+        familyId = familyId,
+        messageId = locMsgId,
+        fields = mapOf(
+          "locationLat" to 19.44,
+          "locationLng" to -99.14,
+          "locationLiveUntil" to 0L
+        )
+      )
+    }
+    assertTrue("Live location update failed: ${locUpdateRes.exceptionOrNull()}", locUpdateRes.isSuccess)
+
+    // WebRTC call SDP + ICE candidate
+    val callId = "call_${UUID.randomUUID().toString().replace("-", "").take(8)}"
+    val callCreateRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.createCall(
+        familyId = familyId,
+        call = com.example.data.model.CallRecordEntity(
+          id = callId,
+          chatId = chatId,
+          title = "Casa RTC",
+          callerId = adminMemberId,
+          avatarColorHex = "#1A73E8",
+          avatarEmoji = "🏡",
+          callType = com.example.data.model.CallType.VIDEO,
+          direction = com.example.data.model.CallDirection.OUTGOING,
+          durationSec = 0,
+          timestamp = now,
+          callStatus = com.example.data.model.CallSignalStatus.RINGING,
+          targetMemberIdsJson = com.example.data.model.JsonHelpers.encodeStringList(listOf("member_mama")),
+          offerSdp = "v=0\r\no=- 100 2 IN IP4 127.0.0.1\r\n",
+          authorUid = aliceUid
+        ),
+        memberUids = listOf(aliceUid),
+        callerUid = aliceUid
+      )
+    }
+    assertTrue("WebRTC createCall failed: ${callCreateRes.exceptionOrNull()}", callCreateRes.isSuccess)
+
+    val ansRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.updateCallSdpAnswer(familyId, callId, "v=0\r\no=- 200 2 IN IP4 127.0.0.1\r\n")
+    }
+    assertTrue("updateCallSdpAnswer failed: ${ansRes.exceptionOrNull()}", ansRes.isSuccess)
+
+    val candRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.addCallIceCandidate(
+        familyId = familyId,
+        callId = callId,
+        candidate = com.example.data.model.CallIceCandidateEntity(
+          id = "cand_1",
+          senderMemberId = adminMemberId,
+          sdpMid = "0",
+          sdpMLineIndex = 0,
+          candidate = "candidate:1 1 UDP 2122252543 192.168.1.5 54321 typ host",
+          createdAtMs = now,
+          authorUid = aliceUid
+        ),
+        memberUids = listOf(aliceUid),
+        callerUid = aliceUid
+      )
+    }
+    assertTrue("addCallIceCandidate failed: ${candRes.exceptionOrNull()}", candRes.isSuccess)
+
+    val candidates = withTimeout(FLOW_TIMEOUT_MS) {
+      repo.observeCallIceCandidates(familyId, callId, aliceUid).first { it.isNotEmpty() }
+    }
+    assertEquals("0", candidates.first().sdpMid)
+
+    // Video message with media_chunks + voice playedByMemberIds + delivered receipt
+    val vidMsgId = "msg_vid_${UUID.randomUUID().toString().replace("-", "").take(8)}"
+    val chunkRes0 = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.uploadMediaChunk(
+        familyId = familyId,
+        chunk = com.example.data.model.MediaChunkEntity(
+          id = "${vidMsgId}_c0",
+          messageId = vidMsgId,
+          chunkIndex = 0,
+          totalChunks = 2,
+          data = "data:video/mp4;base64,AAAA"
+        ),
+        memberUids = listOf(aliceUid),
+        callerUid = aliceUid
+      )
+    }
+    assertTrue("uploadMediaChunk 0 failed: ${chunkRes0.exceptionOrNull()}", chunkRes0.isSuccess)
+    val chunkRes1 = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.uploadMediaChunk(
+        familyId = familyId,
+        chunk = com.example.data.model.MediaChunkEntity(
+          id = "${vidMsgId}_c1",
+          messageId = vidMsgId,
+          chunkIndex = 1,
+          totalChunks = 2,
+          data = "BBBB"
+        ),
+        memberUids = listOf(aliceUid),
+        callerUid = aliceUid
+      )
+    }
+    assertTrue("uploadMediaChunk 1 failed: ${chunkRes1.exceptionOrNull()}", chunkRes1.isSuccess)
+
+    val vidMsgRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.createMessage(
+        familyId = familyId,
+        message = ChatMessageEntity(
+          id = vidMsgId,
+          chatId = chatId,
+          senderId = adminMemberId,
+          text = "Video corto",
+          type = MessageType.VIDEO,
+          videoThumbnailData = "data:image/jpeg;base64,/9j/4AAQ=",
+          fileName = "saludo.mp4",
+          fileMimeType = "video/mp4",
+          fileSizeBytes = 204800L,
+          chunkCount = 2,
+          voiceDurationSec = 6,
+          timestamp = now
+        ),
+        memberUids = listOf(aliceUid),
+        callerUid = aliceUid
+      )
+    }
+    assertTrue("Video createMessage failed: ${vidMsgRes.exceptionOrNull()}", vidMsgRes.isSuccess)
+
+    val reassembled = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.fetchMediaChunks(familyId, vidMsgId, 2)
+    }
+    assertEquals("data:video/mp4;base64,AAAABBBB", reassembled.getOrNull())
+
+    val delivRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.markMessageDeliveredToRecipient(familyId, vidMsgId)
+    }
+    assertTrue("markMessageDeliveredToRecipient failed", delivRes.isSuccess)
+
+    val playedRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.markMessageVoicePlayedByMember(familyId, vidMsgId, "member_mama")
+    }
+    assertTrue("markMessageVoicePlayedByMember failed", playedRes.isSuccess)
+  }
+
   private companion object {
     const val ALICE_EMAIL = "alice@test.com"
     const val BOB_EMAIL = "bob@test.com"

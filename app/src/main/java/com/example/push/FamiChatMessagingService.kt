@@ -43,10 +43,11 @@ class FamiChatMessagingService : FirebaseMessagingService() {
         val appContext = applicationContext
         val prefs = PreferencesManager(appContext)
 
-        val (notifEnabled, activeMemberId) = runBlocking {
+        val (notifEnabled, activeMemberId, mutedChatIds) = runBlocking {
             val enabled = prefs.notificationsEnabledFlow.first()
             val memberId = prefs.activeMemberIdFlow.first()
-            enabled to memberId
+            val muted = prefs.mutedChatIdsFlow.first()
+            Triple(enabled, memberId, muted)
         }
         if (!notifEnabled) return
 
@@ -88,6 +89,7 @@ class FamiChatMessagingService : FirebaseMessagingService() {
             return
         }
 
+        val messageId = data["messageId"].orEmpty()
         val chatId = data["chatId"].orEmpty().ifBlank { "general" }
         val senderName = data["senderName"].orEmpty()
             .ifBlank { message.notification?.title ?: "FamiChat" }
@@ -99,7 +101,14 @@ class FamiChatMessagingService : FirebaseMessagingService() {
 
         runBlocking {
             prefs.updateLastNotifiedTimestampIfNewer(msgTimestamp)
+            val famId = prefs.activeFamilyIdFlow.first()
+            if (!famId.isNullOrBlank() && messageId.isNotBlank()) {
+                val repo = FamilyCloudRepository(appContext)
+                repo.markMessageDeliveredToRecipient(famId, messageId)
+            }
         }
+
+        if (mutedChatIds.contains(chatId)) return
 
         FamiChatNotificationHelper.notifyNewMessage(
             context = appContext,

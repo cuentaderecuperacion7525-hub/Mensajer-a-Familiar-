@@ -17,8 +17,8 @@ android {
     applicationId = "com.aistudio.nidofamiliar.mrxqkp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 15
-    versionName = "2.3.0"
+    versionCode = 17
+    versionName = "2.5.0"
 
     val githubRepo = (System.getenv("GITHUB_REPOSITORY") ?: "").trim().replace("\"", "")
     buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
@@ -127,6 +127,7 @@ dependencies {
   // implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   implementation(libs.play.services.location)
+  implementation(libs.stream.webrtc)
   // implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)

@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import com.example.data.model.CallDirection
+import com.example.data.model.CallIceCandidateEntity
 import com.example.data.model.CallRecordEntity
 import com.example.data.model.CallSignalStatus
 import com.example.data.model.CallType
@@ -13,6 +14,7 @@ import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.FamilySpace
 import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.JsonHelpers
+import com.example.data.model.MediaChunkEntity
 import com.example.data.model.MessageStatus
 import com.example.data.model.MessageType
 import com.example.data.model.PollOption
@@ -150,6 +152,7 @@ internal object FirestoreMappers {
             ?.toMap() ?: emptyMap()
         val hiddenIds = (doc.get("hiddenForMemberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
         val readByIds = (doc.get("readByMemberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+        val playedByIds = (doc.get("playedByMemberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
         val waveform = (doc.get("voiceWaveform") as? List<*>)?.mapNotNull { (it as? Number)?.toFloat() } ?: emptyList()
         val rawPollOpts = (doc.get("pollOptions") as? List<*>)?.mapNotNull { raw ->
             val m = raw as? Map<*, *> ?: return@mapNotNull null
@@ -172,14 +175,21 @@ internal object FirestoreMappers {
             reactionsJson = JsonHelpers.encodeReactions(rawReactions),
             hiddenForMemberIdsJson = JsonHelpers.encodeStringList(hiddenIds),
             readByMemberIdsJson = JsonHelpers.encodeStringList(readByIds),
+            playedByMemberIdsJson = JsonHelpers.encodeStringList(playedByIds),
             forwardedFromName = doc.getString("forwardedFromName"),
             mediaUri = doc.getString("mediaData"),
+            videoThumbnailData = doc.getString("videoThumbnailData"),
+            fileName = doc.getString("fileName"),
+            fileMimeType = doc.getString("fileMimeType"),
+            fileSizeBytes = doc.getLong("fileSizeBytes") ?: 0L,
+            chunkCount = (doc.getLong("chunkCount") ?: 0L).toInt(),
             voiceDurationSec = (doc.getLong("voiceDurationSec") ?: 0L).toInt(),
             voiceWaveformJson = JsonHelpers.encodeFloatList(waveform),
             locationName = doc.getString("locationName"),
             locationAddress = doc.getString("locationAddress"),
             locationLat = doc.getDouble("locationLat"),
             locationLng = doc.getDouble("locationLng"),
+            locationLiveUntil = doc.getLong("locationLiveUntil"),
             pollQuestion = doc.getString("pollQuestion"),
             pollOptionsJson = JsonHelpers.encodePollOptions(rawPollOpts),
             authorUid = doc.getString("authorUid") ?: ""
@@ -195,6 +205,7 @@ internal object FirestoreMappers {
         val reactions = JsonHelpers.decodeReactions(msg.reactionsJson)
         val hidden = JsonHelpers.decodeStringList(msg.hiddenForMemberIdsJson).take(25)
         val readBy = JsonHelpers.decodeStringList(msg.readByMemberIdsJson).take(25)
+        val playedBy = JsonHelpers.decodeStringList(msg.playedByMemberIdsJson).take(25)
         val waveform = JsonHelpers.decodeFloatList(msg.voiceWaveformJson).take(60)
         val pollOpts = JsonHelpers.decodePollOptions(msg.pollOptionsJson).take(10).map { opt ->
             mapOf("id" to opt.id, "text" to opt.text, "voterIds" to opt.voterIds)
@@ -213,14 +224,21 @@ internal object FirestoreMappers {
             "reactions" to reactions,
             "hiddenForMemberIds" to hidden,
             "readByMemberIds" to readBy,
+            "playedByMemberIds" to playedBy,
             "forwardedFromName" to msg.forwardedFromName?.take(60),
             "mediaData" to msg.mediaUri?.take(750_000),
+            "videoThumbnailData" to msg.videoThumbnailData?.take(150_000),
+            "fileName" to msg.fileName?.take(160),
+            "fileMimeType" to msg.fileMimeType?.take(120),
+            "fileSizeBytes" to if (msg.fileSizeBytes > 0L) msg.fileSizeBytes else null,
+            "chunkCount" to if (msg.chunkCount > 0) msg.chunkCount else null,
             "voiceDurationSec" to msg.voiceDurationSec,
             "voiceWaveform" to waveform,
             "locationName" to msg.locationName?.take(120),
             "locationAddress" to msg.locationAddress?.take(240),
             "locationLat" to msg.locationLat,
             "locationLng" to msg.locationLng,
+            "locationLiveUntil" to msg.locationLiveUntil,
             "pollQuestion" to msg.pollQuestion?.take(200),
             "pollOptions" to pollOpts,
             "updatedAt" to FieldValue.serverTimestamp()
@@ -228,6 +246,35 @@ internal object FirestoreMappers {
         if (isCreate) map["createdAt"] = FieldValue.serverTimestamp()
         @Suppress("UNCHECKED_CAST")
         return map.filterValues { it != null } as Map<String, Any>
+    }
+
+    fun toMediaChunk(doc: DocumentSnapshot): MediaChunkEntity? {
+        if (!doc.exists()) return null
+        val data = doc.getString("data") ?: return null
+        return MediaChunkEntity(
+            id = doc.id,
+            messageId = doc.getString("messageId") ?: return null,
+            chunkIndex = (doc.getLong("chunkIndex") ?: 0L).toInt(),
+            totalChunks = (doc.getLong("totalChunks") ?: 1L).toInt(),
+            data = data,
+            authorUid = doc.getString("authorUid") ?: ""
+        )
+    }
+
+    fun mediaChunkToMap(
+        chunk: MediaChunkEntity,
+        memberUids: List<String>,
+        authorUid: String
+    ): Map<String, Any> {
+        return mapOf(
+            "memberUids" to memberUids,
+            "authorUid" to authorUid,
+            "messageId" to chunk.messageId,
+            "chunkIndex" to chunk.chunkIndex.coerceIn(0, 25),
+            "totalChunks" to chunk.totalChunks.coerceIn(1, 25),
+            "data" to chunk.data.take(700_000),
+            "createdAt" to FieldValue.serverTimestamp()
+        )
     }
 
     fun toCallRecord(doc: DocumentSnapshot): CallRecordEntity? {
@@ -250,6 +297,8 @@ internal object FirestoreMappers {
             callStatus = signal,
             targetMemberIdsJson = JsonHelpers.encodeStringList(targets),
             connectedAt = doc.getLong("connectedAt") ?: 0L,
+            offerSdp = doc.getString("offerSdp"),
+            answerSdp = doc.getString("answerSdp"),
             authorUid = doc.getString("authorUid") ?: ""
         )
     }
@@ -275,12 +324,45 @@ internal object FirestoreMappers {
             "direction" to call.direction.name,
             "durationSec" to call.durationSec,
             "connectedAt" to call.connectedAt,
+            "offerSdp" to call.offerSdp?.take(32_000),
+            "answerSdp" to call.answerSdp?.take(32_000),
             "timestamp" to call.timestamp,
             "updatedAt" to FieldValue.serverTimestamp()
         )
         if (isCreate) map["createdAt"] = FieldValue.serverTimestamp()
         @Suppress("UNCHECKED_CAST")
         return map.filterValues { it != null } as Map<String, Any>
+    }
+
+    fun toIceCandidate(doc: DocumentSnapshot): CallIceCandidateEntity? {
+        if (!doc.exists()) return null
+        val candidate = doc.getString("candidate") ?: return null
+        return CallIceCandidateEntity(
+            id = doc.id,
+            senderMemberId = doc.getString("senderMemberId") ?: "",
+            sdpMid = doc.getString("sdpMid") ?: "",
+            sdpMLineIndex = (doc.getLong("sdpMLineIndex") ?: 0L).toInt(),
+            candidate = candidate,
+            createdAtMs = doc.getLong("createdAtMs") ?: 0L,
+            authorUid = doc.getString("authorUid") ?: ""
+        )
+    }
+
+    fun iceCandidateToMap(
+        cand: CallIceCandidateEntity,
+        memberUids: List<String>,
+        authorUid: String
+    ): Map<String, Any> {
+        return mapOf(
+            "memberUids" to memberUids,
+            "authorUid" to authorUid,
+            "senderMemberId" to cand.senderMemberId,
+            "sdpMid" to cand.sdpMid.take(64),
+            "sdpMLineIndex" to cand.sdpMLineIndex.coerceIn(0, 32),
+            "candidate" to cand.candidate.take(2048),
+            "createdAtMs" to cand.createdAtMs,
+            "createdAt" to FieldValue.serverTimestamp()
+        )
     }
 
     fun toShoppingItem(doc: DocumentSnapshot): ShoppingItemEntity? {

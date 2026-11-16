@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 enum class ChatType { DIRECT, GROUP }
 
-enum class MessageType { TEXT, IMAGE, VOICE, LOCATION, POLL, DELETED }
+enum class MessageType { TEXT, IMAGE, VIDEO, VOICE, LOCATION, DOCUMENT, POLL, DELETED }
 
 enum class MessageStatus { SENDING, SENT, DELIVERED, READ }
 
@@ -80,16 +80,32 @@ data class ChatMessageEntity(
     val reactionsJson: String = "{}",
     val hiddenForMemberIdsJson: String = "[]",
     val readByMemberIdsJson: String = "[]",
+    val playedByMemberIdsJson: String = "[]",
     val forwardedFromName: String? = null,
     val mediaUri: String? = null,
+    val videoThumbnailData: String? = null,
+    val fileName: String? = null,
+    val fileMimeType: String? = null,
+    val fileSizeBytes: Long = 0L,
+    val chunkCount: Int = 0,
     val voiceDurationSec: Int = 0,
     val voiceWaveformJson: String = "[]",
     val locationName: String? = null,
     val locationAddress: String? = null,
     val locationLat: Double? = null,
     val locationLng: Double? = null,
+    val locationLiveUntil: Long? = null,
     val pollQuestion: String? = null,
     val pollOptionsJson: String = "[]",
+    val authorUid: String = ""
+)
+
+data class MediaChunkEntity(
+    val id: String,
+    val messageId: String,
+    val chunkIndex: Int,
+    val totalChunks: Int,
+    val data: String,
     val authorUid: String = ""
 )
 
@@ -107,6 +123,18 @@ data class CallRecordEntity(
     val callStatus: CallSignalStatus = CallSignalStatus.ENDED,
     val targetMemberIdsJson: String = "[]",
     val connectedAt: Long = 0L,
+    val offerSdp: String? = null,
+    val answerSdp: String? = null,
+    val authorUid: String = ""
+)
+
+data class CallIceCandidateEntity(
+    val id: String,
+    val senderMemberId: String,
+    val sdpMid: String,
+    val sdpMLineIndex: Int,
+    val candidate: String,
+    val createdAtMs: Long = System.currentTimeMillis(),
     val authorUid: String = ""
 )
 

@@ -219,4 +219,62 @@ class ExampleRobolectricTest {
     )
     assertEquals(2, member.fcmTokens.size)
   }
+
+  @Test
+  fun `link preview helper extracts urls and document media helper formats file sizes`() {
+    val url = com.example.util.LinkPreviewHelper.extractFirstUrl("Mira esta receta https://cocina.ejemplo.com/receta?id=42!).")
+    assertEquals("https://cocina.ejemplo.com/receta?id=42", url)
+    org.junit.Assert.assertNull(com.example.util.LinkPreviewHelper.extractFirstUrl("Mensaje sin enlace web"))
+
+    assertEquals("512 B", com.example.util.DocumentMediaHelper.formatFileSize(512L))
+    assertEquals("2.0 KB", com.example.util.DocumentMediaHelper.formatFileSize(2048L))
+
+    val candidate = com.example.data.model.CallIceCandidateEntity(
+      id = "cand_1",
+      senderMemberId = "m_papa",
+      sdpMid = "0",
+      sdpMLineIndex = 0,
+      candidate = "candidate:1 1 UDP 2122252543 192.168.1.10 54321 typ host"
+    )
+    assertEquals("m_papa", candidate.senderMemberId)
+  }
+
+  @Test
+  fun `chunked media splitting video message and voice played status work correctly`() {
+    val samplePayload = "A".repeat(400_000) + "B".repeat(120_000)
+    val chunks = com.example.util.DocumentMediaHelper.splitIntoChunks(samplePayload)
+    assertEquals(2, chunks.size)
+    assertEquals(380_000, chunks[0].length)
+    assertEquals(140_000, chunks[1].length)
+    assertEquals(samplePayload, chunks.joinToString(""))
+
+    val videoMsg = com.example.data.model.ChatMessageEntity(
+      id = "msg_vid_1",
+      chatId = "group_main",
+      senderId = "m_papa",
+      text = "Video familiar",
+      type = com.example.data.model.MessageType.VIDEO,
+      status = com.example.data.model.MessageStatus.DELIVERED,
+      timestamp = 1_700_000_000_000L,
+      voiceDurationSec = 12,
+      videoThumbnailData = "data:image/jpeg;base64,thumb",
+      chunkCount = 2,
+      playedByMemberIdsJson = com.example.data.model.JsonHelpers.encodeStringList(listOf("m_mama"))
+    )
+    assertEquals(com.example.data.model.MessageType.VIDEO, videoMsg.type)
+    assertEquals(2, videoMsg.chunkCount)
+    assertTrue(com.example.data.model.JsonHelpers.decodeStringList(videoMsg.playedByMemberIdsJson).contains("m_mama"))
+
+    val chunkEntity = com.example.data.model.MediaChunkEntity(
+      id = "msg_vid_1_0",
+      messageId = "msg_vid_1",
+      chunkIndex = 0,
+      totalChunks = 2,
+      data = "chunk_payload",
+      authorUid = "uid_1"
+    )
+    assertEquals(0, chunkEntity.chunkIndex)
+    assertTrue(com.example.data.local.PreferencesManager.DEFAULT_TURN_URL.contains("turn:openrelay.metered.ca"))
+  }
 }
+

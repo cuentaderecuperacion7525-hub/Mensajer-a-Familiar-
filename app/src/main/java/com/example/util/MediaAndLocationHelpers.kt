@@ -1,6 +1,7 @@
 package com.example.util
 
 import android.annotation.SuppressLint
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -8,13 +9,18 @@ import android.graphics.BitmapFactory
 import android.location.Address
 import android.location.Geocoder
 import android.media.AudioManager
+import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.util.Base64
+import androidx.core.content.FileProvider
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
@@ -110,6 +116,20 @@ class VoiceAudioHelper(private val context: Context) {
 
     private var player: MediaPlayer? = null
     private var activeRingtone: Ringtone? = null
+    private var currentSpeed: Float = 1.0f
+
+    fun setPlaybackSpeed(speed: Float) {
+        currentSpeed = speed.coerceIn(0.75f, 2.0f)
+        val mp = player ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                if (mp.isPlaying) {
+                    mp.playbackParams = mp.playbackParams.setSpeed(currentSpeed)
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
 
     fun startRecording(): Boolean {
         stopRecordingCleanup()
@@ -240,6 +260,12 @@ class VoiceAudioHelper(private val context: Context) {
                     true
                 }
                 prepare()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && currentSpeed != 1.0f) {
+                    try {
+                        playbackParams = playbackParams.setSpeed(currentSpeed)
+                    } catch (_: Exception) {
+                    }
+                }
                 start()
             }
             player = mp
@@ -386,3 +412,457 @@ object LocationHelper {
         }
     }
 }
+
+object CameraCaptureHelper {
+    fun createTempPhotoUri(context: Context): Uri? {
+        return try {
+            val dir = File(context.cacheDir, "camera_photos").apply { mkdirs() }
+            val file = File(dir, "cam_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.jpg")
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        } catch (_: Exception) {
+            null
+        }
+    }
+}
+
+data class EncodedDocumentPayload(
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val dataUri: String
+)
+
+object DocumentMediaHelper {
+    const val MAX_DOCUMENT_BYTES = 5 * 1024 * 1024 // Up to 5 MB with chunked cloud transfer
+    const val INLINE_MAX_CHARS = 420_000
+    const val CHUNK_SIZE_CHARS = 380_000
+
+    fun splitIntoChunks(dataUri: String): List<String> = dataUri.chunked(CHUNK_SIZE_CHARS)
+
+    fun getCachedDocumentFile(context: Context, messageId: String, fileName: String?): File {
+        val cleanName = (fileName ?: "documento_$messageId")
+            .replace(Regex("[^a-zA-Z0-9._\\-]"), "_")
+            .ifBlank { "documento_$messageId.bin" }
+        val dir = File(context.cacheDir, "docs_cache").apply { mkdirs() }
+        return File(dir, "${messageId.takeLast(6)}_$cleanName")
+    }
+
+    suspend fun readAndEncodeDocument(context: Context, uri: Uri): Result<EncodedDocumentPayload> =
+        withContext(Dispatchers.IO) {
+            try {
+                val resolver = context.contentResolver
+                val mimeType = resolver.getType(uri)?.ifBlank { null } ?: "application/octet-stream"
+                var displayName = "documento_${System.currentTimeMillis()}"
+                var reportedSize = -1L
+
+                resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+                    ?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (nameIdx >= 0 && !cursor.isNull(nameIdx)) {
+                                displayName = cursor.getString(nameIdx).ifBlank { displayName }
+                            }
+                            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                            if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) {
+                                reportedSize = cursor.getLong(sizeIdx)
+                            }
+                        }
+                    }
+
+                if (reportedSize > MAX_DOCUMENT_BYTES) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("El archivo supera el límite de 5 MB (${formatFileSize(reportedSize)}).")
+                    )
+                }
+
+                val bytes = resolver.openInputStream(uri)?.use { input ->
+                    val buffer = ByteArrayOutputStream()
+                    val chunk = ByteArray(16384)
+                    var total = 0
+                    while (true) {
+                        val read = input.read(chunk)
+                        if (read == -1) break
+                        total += read
+                        if (total > MAX_DOCUMENT_BYTES) {
+                            return@withContext Result.failure(
+                                IllegalArgumentException("El archivo supera el límite de 5 MB.")
+                            )
+                        }
+                        buffer.write(chunk, 0, read)
+                    }
+                    buffer.toByteArray()
+                } ?: return@withContext Result.failure(IllegalStateException("No se pudo leer el archivo seleccionado."))
+
+                if (bytes.isEmpty()) {
+                    return@withContext Result.failure(IllegalArgumentException("El archivo seleccionado está vacío."))
+                }
+
+                val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val dataUri = "data:$mimeType;base64,$encoded"
+                Result.success(
+                    EncodedDocumentPayload(
+                        fileName = displayName.take(160),
+                        mimeType = mimeType.take(120),
+                        sizeBytes = bytes.size.toLong(),
+                        dataUri = dataUri
+                    )
+                )
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    suspend fun openDocumentExternally(
+        context: Context,
+        messageId: String,
+        fileName: String?,
+        mimeType: String?,
+        mediaData: String?
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val outFile = getCachedDocumentFile(context, messageId, fileName)
+            if (!outFile.exists() || outFile.length() == 0L) {
+                if (mediaData.isNullOrBlank()) {
+                    return@withContext Result.failure(IllegalStateException("Archivo no disponible."))
+                }
+                val commaIdx = mediaData.indexOf(',')
+                val b64 = if (commaIdx > 0) mediaData.substring(commaIdx + 1) else mediaData
+                val bytes = Base64.decode(b64, Base64.DEFAULT)
+                outFile.writeBytes(bytes)
+            }
+            launchDocumentFileViewer(context, outFile, mimeType)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun launchDocumentFileViewer(context: Context, outFile: File, mimeType: String?) {
+        val contentUri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            outFile
+        )
+        val resolvedMime = mimeType?.ifBlank { null } ?: "*/*"
+        withContext(Dispatchers.Main) {
+            val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(contentUri, resolvedMime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                context.startActivity(viewIntent)
+            } catch (_: Exception) {
+                val shareFallback = Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = resolvedMime
+                        putExtra(Intent.EXTRA_STREAM, contentUri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    },
+                    outFile.name
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(shareFallback)
+            }
+        }
+    }
+
+    fun formatFileSize(bytes: Long): String {
+        if (bytes <= 0L) return "Archivo"
+        return when {
+            bytes < 1024L -> "$bytes B"
+            bytes < 1024L * 1024L -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+            else -> String.format(Locale.US, "%.2f MB", bytes / (1024.0 * 1024.0))
+        }
+    }
+}
+
+data class EncodedVideoPayload(
+    val fileName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val durationSec: Int,
+    val thumbnailDataUri: String?,
+    val dataUri: String,
+    val chunks: List<String>
+)
+
+object VideoMediaHelper {
+    const val MAX_VIDEO_BYTES = 5 * 1024 * 1024 // Up to 5 MB for short chat videos
+
+    fun getCachedVideoFile(context: Context, messageId: String, fileName: String?): File {
+        val cleanName = (fileName ?: "video_$messageId.mp4")
+            .replace(Regex("[^a-zA-Z0-9._\\-]"), "_")
+            .let { if (it.contains('.')) it else "$it.mp4" }
+        val dir = File(context.cacheDir, "videos_cache").apply { mkdirs() }
+        return File(dir, "${messageId.takeLast(6)}_$cleanName")
+    }
+
+    suspend fun readAndEncodeVideo(context: Context, uri: Uri): Result<EncodedVideoPayload> =
+        withContext(Dispatchers.IO) {
+            try {
+                val resolver = context.contentResolver
+                val mimeType = resolver.getType(uri)?.ifBlank { null } ?: "video/mp4"
+                var displayName = "video_${System.currentTimeMillis()}.mp4"
+                var reportedSize = -1L
+
+                resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+                    ?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (nameIdx >= 0 && !cursor.isNull(nameIdx)) {
+                                displayName = cursor.getString(nameIdx).ifBlank { displayName }
+                            }
+                            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                            if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) {
+                                reportedSize = cursor.getLong(sizeIdx)
+                            }
+                        }
+                    }
+
+                if (reportedSize > MAX_VIDEO_BYTES) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("El video supera el límite de 5 MB para envío por chat (${DocumentMediaHelper.formatFileSize(reportedSize)}). Elige un video más corto.")
+                    )
+                }
+
+                val bytes = resolver.openInputStream(uri)?.use { input ->
+                    val buffer = ByteArrayOutputStream()
+                    val chunk = ByteArray(16384)
+                    var total = 0
+                    while (true) {
+                        val read = input.read(chunk)
+                        if (read == -1) break
+                        total += read
+                        if (total > MAX_VIDEO_BYTES) {
+                            return@withContext Result.failure(
+                                IllegalArgumentException("El video supera el límite de 5 MB para envío por chat.")
+                            )
+                        }
+                        buffer.write(chunk, 0, read)
+                    }
+                    buffer.toByteArray()
+                } ?: return@withContext Result.failure(IllegalStateException("No se pudo leer el video seleccionado."))
+
+                if (bytes.isEmpty()) {
+                    return@withContext Result.failure(IllegalArgumentException("El video seleccionado está vacío."))
+                }
+
+                var durationSec = 1
+                var thumbnailDataUri: String? = null
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(context, uri)
+                    val durMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 1000L
+                    durationSec = (durMs / 1000L).toInt().coerceAtLeast(1)
+                    val frame = retriever.getFrameAtTime(200_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        ?: retriever.getFrameAtTime()
+                    if (frame != null) {
+                        val maxSide = max(frame.width, frame.height).coerceAtLeast(1)
+                        val scale = (320f / maxSide).coerceAtMost(1f)
+                        val scaled = if (scale < 1f) {
+                            Bitmap.createScaledBitmap(
+                                frame,
+                                (frame.width * scale).toInt().coerceAtLeast(1),
+                                (frame.height * scale).toInt().coerceAtLeast(1),
+                                true
+                            )
+                        } else frame
+                        val baos = ByteArrayOutputStream()
+                        scaled.compress(Bitmap.CompressFormat.JPEG, 70, baos)
+                        if (scaled != frame) scaled.recycle()
+                        frame.recycle()
+                        val b64Thumb = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+                        thumbnailDataUri = "data:image/jpeg;base64,$b64Thumb"
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    try {
+                        retriever.release()
+                    } catch (_: Exception) {
+                    }
+                }
+
+                val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val dataUri = "data:$mimeType;base64,$encoded"
+                val chunks = if (dataUri.length > DocumentMediaHelper.INLINE_MAX_CHARS) {
+                    DocumentMediaHelper.splitIntoChunks(dataUri)
+                } else {
+                    emptyList()
+                }
+                Result.success(
+                    EncodedVideoPayload(
+                        fileName = displayName.take(160),
+                        mimeType = mimeType.take(120),
+                        sizeBytes = bytes.size.toLong(),
+                        durationSec = durationSec,
+                        thumbnailDataUri = thumbnailDataUri,
+                        dataUri = dataUri,
+                        chunks = chunks
+                    )
+                )
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    suspend fun writeAssembledVideoToCache(
+        context: Context,
+        messageId: String,
+        fileName: String?,
+        fullDataUri: String
+    ): Result<File> = withContext(Dispatchers.IO) {
+        try {
+            val outFile = getCachedVideoFile(context, messageId, fileName)
+            val commaIdx = fullDataUri.indexOf(',')
+            val b64 = if (commaIdx > 0) fullDataUri.substring(commaIdx + 1) else fullDataUri
+            val bytes = Base64.decode(b64, Base64.DEFAULT)
+            outFile.writeBytes(bytes)
+            Result.success(outFile)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveVideoToGallery(context: Context, videoFile: File): Result<String> =
+        withContext(Dispatchers.IO) {
+            if (!videoFile.exists()) {
+                return@withContext Result.failure(IllegalStateException("El archivo de video no está disponible."))
+            }
+            try {
+                val fileName = "FamiChat_${System.currentTimeMillis()}.mp4"
+                val resolver = context.contentResolver
+                val values = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/FamiChat")
+                        put(MediaStore.Video.Media.IS_PENDING, 1)
+                    }
+                }
+                val itemUri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                    ?: return@withContext Result.failure(IllegalStateException("No se pudo guardar el video en la galería."))
+                resolver.openOutputStream(itemUri)?.use { out ->
+                    videoFile.inputStream().use { input ->
+                        input.copyTo(out)
+                    }
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val doneValues = ContentValues().apply {
+                        put(MediaStore.Video.Media.IS_PENDING, 0)
+                    }
+                    resolver.update(itemUri, doneValues, null, null)
+                }
+                Result.success("Video guardado en Galería (Movies/FamiChat)")
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    suspend fun shareVideoExternally(context: Context, videoFile: File, caption: String = ""): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            if (!videoFile.exists()) {
+                return@withContext Result.failure(IllegalStateException("El archivo de video no está disponible."))
+            }
+            try {
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    videoFile
+                )
+                withContext(Dispatchers.Main) {
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "video/mp4"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        if (caption.isNotBlank()) {
+                            putExtra(Intent.EXTRA_TEXT, caption)
+                        }
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    val chooser = Intent.createChooser(shareIntent, "Compartir video familiar")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(chooser)
+                }
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+}
+
+object ImageGalleryAndShareHelper {
+    private fun decodeBytes(mediaData: String): ByteArray? {
+        return try {
+            val commaIdx = mediaData.indexOf(',')
+            val b64 = if (commaIdx > 0) mediaData.substring(commaIdx + 1) else mediaData
+            Base64.decode(b64, Base64.DEFAULT)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun saveImageToGallery(context: Context, mediaData: String): Result<String> =
+        withContext(Dispatchers.IO) {
+            val bytes = decodeBytes(mediaData)
+                ?: return@withContext Result.failure(IllegalArgumentException("No se pudo decodificar la imagen."))
+            try {
+                val fileName = "FamiChat_${System.currentTimeMillis()}.jpg"
+                val resolver = context.contentResolver
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/FamiChat")
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                }
+                val itemUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    ?: return@withContext Result.failure(IllegalStateException("No se pudo guardar en la galería."))
+
+                resolver.openOutputStream(itemUri)?.use { out ->
+                    out.write(bytes)
+                    out.flush()
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val doneValues = ContentValues().apply {
+                        put(MediaStore.Images.Media.IS_PENDING, 0)
+                    }
+                    resolver.update(itemUri, doneValues, null, null)
+                }
+                Result.success("Foto guardada en Galería (FamiChat)")
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    suspend fun shareImageExternally(context: Context, mediaData: String, caption: String = ""): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val bytes = decodeBytes(mediaData)
+                ?: return@withContext Result.failure(IllegalArgumentException("No se pudo preparar la imagen."))
+            try {
+                val dir = File(context.cacheDir, "shared_media").apply { mkdirs() }
+                val file = File(dir, "compartir_${System.currentTimeMillis()}.jpg")
+                file.writeBytes(bytes)
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
+                withContext(Dispatchers.Main) {
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "image/jpeg"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        if (caption.isNotBlank()) {
+                            putExtra(Intent.EXTRA_TEXT, caption)
+                        }
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    val chooser = Intent.createChooser(shareIntent, "Compartir foto familiar")
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(chooser)
+                }
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+}
+

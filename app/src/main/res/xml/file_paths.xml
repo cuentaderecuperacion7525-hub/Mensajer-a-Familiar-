@@ -6,4 +6,16 @@
     <cache-path
         name="apk_updates"
         path="updates/" />
+    <cache-path
+        name="camera_photos"
+        path="camera_photos/" />
+    <cache-path
+        name="shared_media"
+        path="shared_media/" />
+    <cache-path
+        name="docs_cache"
+        path="docs_cache/" />
+    <cache-path
+        name="videos_cache"
+        path="videos_cache/" />
 </paths>

@@ -1,9 +1,12 @@
 package com.example.ui.components
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -62,6 +66,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -74,6 +79,7 @@ import coil.compose.AsyncImage
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.JsonHelpers
+import com.example.util.CameraCaptureHelper
 import com.example.util.ImageCompressionHelper
 import com.example.util.TimeFormatters
 import com.example.util.parseHexColor
@@ -248,16 +254,54 @@ fun CreateStatusDialog(
     onPublishText: (text: String, backgroundHex: String) -> Unit,
     onPublishPhoto: (imageUri: Uri, caption: String) -> Unit
 ) {
+    val context = LocalContext.current
     var modeTab by remember { mutableIntStateOf(0) } // 0 = Text, 1 = Photo
     var text by remember { mutableStateOf("") }
     var selectedHex by remember { mutableStateOf(StatusBackgroundColors.first()) }
     var pickedPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var caption by remember { mutableStateOf("") }
 
     val pickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
         onResult = { uri -> if (uri != null) pickedPhotoUri = uri }
     )
+
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+        onResult = { success ->
+            if (success && pendingCameraUri != null) {
+                pickedPhotoUri = pendingCameraUri
+            }
+        }
+    )
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted ->
+            if (granted) {
+                val uri = CameraCaptureHelper.createTempPhotoUri(context)
+                if (uri != null) {
+                    pendingCameraUri = uri
+                    takePictureLauncher.launch(uri)
+                }
+            }
+        }
+    )
+
+    fun launchCameraForStatus() {
+        val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        if (hasPerm) {
+            val uri = CameraCaptureHelper.createTempPhotoUri(context)
+            if (uri != null) {
+                pendingCameraUri = uri
+                takePictureLauncher.launch(uri)
+            }
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -380,17 +424,34 @@ fun CreateStatusDialog(
                         }
                     }
 
-                    OutlinedButton(
-                        onClick = {
-                            pickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (pickedPhotoUri == null) "Seleccionar foto" else "Cambiar foto")
+                        OutlinedButton(
+                            onClick = { launchCameraForStatus() },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("status_take_photo_button")
+                        ) {
+                            Icon(Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Cámara")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                pickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("status_pick_gallery_button")
+                        ) {
+                            Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Galería")
+                        }
                     }
 
                     OutlinedTextField(

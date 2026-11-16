@@ -40,6 +40,7 @@ class FamiChatBackgroundSyncWorker(
 
         val now = System.currentTimeMillis()
         val savedLastTs = prefs.lastNotifiedTimestampFlow.first()
+        val mutedChatIds = prefs.mutedChatIdsFlow.first()
         val cutoffTs = if (savedLastTs > 0L) savedLastTs else (now - 120_000L)
 
         val members = repo.fetchMembersOnce(famId, uid)
@@ -50,7 +51,21 @@ class FamiChatBackgroundSyncWorker(
         val memberMap = members.associateBy { it.id }
         val chatMap = chats.associateBy { it.id }
 
+        // Automatically mark incoming SENT messages as DELIVERED (double gray check ✓✓) in background
+        messages.forEach { msg ->
+            val chat = chatMap[msg.chatId] ?: return@forEach
+            val participants = JsonHelpers.decodeStringList(chat.participantIdsJson)
+            if (participants.contains(meId) &&
+                msg.senderId != meId &&
+                msg.type != MessageType.DELETED &&
+                msg.status == MessageStatus.SENT
+            ) {
+                repo.markMessageDeliveredToRecipient(famId, msg.id)
+            }
+        }
+
         val unreadNewMessages = messages.filter { msg ->
+            if (mutedChatIds.contains(msg.chatId)) return@filter false
             val chat = chatMap[msg.chatId] ?: return@filter false
             val participants = JsonHelpers.decodeStringList(chat.participantIdsJson)
             participants.contains(meId) &&
@@ -71,8 +86,10 @@ class FamiChatBackgroundSyncWorker(
                 val chatTitle = if (chat.type == ChatType.GROUP) chat.title else senderName
                 val baseBody = when (latest.type) {
                     MessageType.IMAGE -> if (latest.text.isNotBlank()) "📷 ${latest.text}" else "📷 Foto"
+                    MessageType.VIDEO -> if (latest.text.isNotBlank()) "🎬 ${latest.text}" else "🎬 Video"
                     MessageType.VOICE -> "🎤 Nota de voz (${TimeFormatters.formatDuration(latest.voiceDurationSec)})"
                     MessageType.LOCATION -> "📍 ${latest.locationName ?: "Ubicación"}"
+                    MessageType.DOCUMENT -> "📄 ${latest.fileName ?: "Documento"}"
                     MessageType.POLL -> "📊 ${latest.pollQuestion ?: "Encuesta"}"
                     MessageType.TEXT -> MessageFormatter.stripMarkdownForPreview(latest.text)
                     MessageType.DELETED -> ""

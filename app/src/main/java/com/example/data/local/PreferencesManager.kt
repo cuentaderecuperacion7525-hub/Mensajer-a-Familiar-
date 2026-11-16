@@ -25,8 +25,16 @@ class PreferencesManager(private val context: Context) {
         private val KEY_CHAT_WALLPAPERS_JSON = stringPreferencesKey("chat_wallpapers_json")
         private val KEY_FCM_TOKEN = stringPreferencesKey("fcm_token")
         private val KEY_LAST_NOTIFIED_MSG_TS = longPreferencesKey("last_notified_msg_ts")
+        private val KEY_PINNED_CHAT_IDS_JSON = stringPreferencesKey("pinned_chat_ids_json")
+        private val KEY_MUTED_CHAT_IDS_JSON = stringPreferencesKey("muted_chat_ids_json")
+        private val KEY_TURN_URL = stringPreferencesKey("turn_server_url")
+        private val KEY_TURN_USERNAME = stringPreferencesKey("turn_server_username")
+        private val KEY_TURN_CREDENTIAL = stringPreferencesKey("turn_server_credential")
         const val DEFAULT_PIN = "7525"
         const val DEFAULT_SWITCH_PIN = "2580"
+        const val DEFAULT_TURN_URL = "turn:openrelay.metered.ca:80"
+        const val DEFAULT_TURN_USERNAME = "openrelayproject"
+        const val DEFAULT_TURN_CREDENTIAL = "openrelayproject"
     }
 
     val masterPinFlow: Flow<String> = context.dataStore.data.map { prefs ->
@@ -70,6 +78,28 @@ class PreferencesManager(private val context: Context) {
 
     val lastNotifiedTimestampFlow: Flow<Long> = context.dataStore.data.map { prefs ->
         prefs[KEY_LAST_NOTIFIED_MSG_TS] ?: 0L
+    }
+
+    val pinnedChatIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
+        val raw = prefs[KEY_PINNED_CHAT_IDS_JSON] ?: "[]"
+        com.example.data.model.JsonHelpers.decodeStringList(raw).toSet()
+    }
+
+    val mutedChatIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
+        val raw = prefs[KEY_MUTED_CHAT_IDS_JSON] ?: "[]"
+        com.example.data.model.JsonHelpers.decodeStringList(raw).toSet()
+    }
+
+    val turnUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_TURN_URL]?.ifBlank { DEFAULT_TURN_URL } ?: DEFAULT_TURN_URL
+    }
+
+    val turnUsernameFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_TURN_USERNAME]?.ifBlank { DEFAULT_TURN_USERNAME } ?: DEFAULT_TURN_USERNAME
+    }
+
+    val turnCredentialFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_TURN_CREDENTIAL]?.ifBlank { DEFAULT_TURN_CREDENTIAL } ?: DEFAULT_TURN_CREDENTIAL
     }
 
     suspend fun updateMasterPin(newPin: String) {
@@ -153,6 +183,50 @@ class PreferencesManager(private val context: Context) {
             if (ts > current) {
                 prefs[KEY_LAST_NOTIFIED_MSG_TS] = ts
             }
+        }
+    }
+
+    suspend fun togglePinnedChat(chatId: String): Boolean {
+        var nowPinned = false
+        context.dataStore.edit { prefs ->
+            val current = com.example.data.model.JsonHelpers.decodeStringList(
+                prefs[KEY_PINNED_CHAT_IDS_JSON] ?: "[]"
+            ).toMutableList()
+            if (current.contains(chatId)) {
+                current.remove(chatId)
+                nowPinned = false
+            } else {
+                current.add(chatId)
+                nowPinned = true
+            }
+            prefs[KEY_PINNED_CHAT_IDS_JSON] = com.example.data.model.JsonHelpers.encodeStringList(current)
+        }
+        return nowPinned
+    }
+
+    suspend fun toggleMutedChat(chatId: String): Boolean {
+        var nowMuted = false
+        context.dataStore.edit { prefs ->
+            val current = com.example.data.model.JsonHelpers.decodeStringList(
+                prefs[KEY_MUTED_CHAT_IDS_JSON] ?: "[]"
+            ).toMutableList()
+            if (current.contains(chatId)) {
+                current.remove(chatId)
+                nowMuted = false
+            } else {
+                current.add(chatId)
+                nowMuted = true
+            }
+            prefs[KEY_MUTED_CHAT_IDS_JSON] = com.example.data.model.JsonHelpers.encodeStringList(current)
+        }
+        return nowMuted
+    }
+
+    suspend fun saveTurnConfig(url: String, username: String, credential: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_TURN_URL] = url.trim().ifBlank { DEFAULT_TURN_URL }
+            prefs[KEY_TURN_USERNAME] = username.trim().ifBlank { DEFAULT_TURN_USERNAME }
+            prefs[KEY_TURN_CREDENTIAL] = credential.trim().ifBlank { DEFAULT_TURN_CREDENTIAL }
         }
     }
 }

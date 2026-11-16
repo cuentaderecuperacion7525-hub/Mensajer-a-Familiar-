@@ -5,8 +5,10 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
+import com.example.calls.WebRtcCallManager
 import com.example.data.local.PreferencesManager
 import com.example.data.model.CallDirection
+import com.example.data.model.CallIceCandidateEntity
 import com.example.data.model.CallRecordEntity
 import com.example.data.model.CallSignalStatus
 import com.example.data.model.CallType
@@ -19,6 +21,7 @@ import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.FamilySpace
 import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.JsonHelpers
+import com.example.data.model.MediaChunkEntity
 import com.example.data.model.MessageStatus
 import com.example.data.model.MessageType
 import com.example.data.model.PollOption
@@ -30,12 +33,16 @@ import com.example.push.PushRegistrationManager
 import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateChecker
 import com.example.util.AppUpdateUiState
+import com.example.util.DocumentMediaHelper
 import com.example.util.FamiChatNotificationHelper
 import com.example.util.ImageCompressionHelper
+import com.example.util.LocationHelper
 import com.example.util.MessageFormatter
 import com.example.util.PresenceResolver
 import com.example.util.TimeFormatters
+import com.example.util.VideoMediaHelper
 import com.example.util.VoiceAudioHelper
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -73,7 +80,9 @@ data class ChatThreadUi(
     val unreadCount: Int,
     val lastMessageStatus: MessageStatus?,
     val isLastMessageFromMe: Boolean,
-    val participants: List<FamilyMemberEntity>
+    val participants: List<FamilyMemberEntity>,
+    val isPinned: Boolean = false,
+    val isMuted: Boolean = false
 )
 
 data class ActiveCallUiState(
@@ -107,6 +116,8 @@ class FamilyViewModel(
 ) : ViewModel() {
 
     private val voiceAudio = VoiceAudioHelper(appContext)
+    val webRtcCallManager = WebRtcCallManager(appContext)
+    private val liveLocationJobs = mutableMapOf<String, Job>()
 
     private fun <T> Flow<T>.safeFirestoreFlow(fallback: T): Flow<T> = catch { err ->
         val fsErr = err.unwrapFirestoreException()
@@ -244,6 +255,24 @@ class FamilyViewModel(
     val chatWallpapers: StateFlow<Map<String, String>> = prefs.chatWallpapersFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
+    val pinnedChatIds: StateFlow<Set<String>> = prefs.pinnedChatIdsFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    val mutedChatIds: StateFlow<Set<String>> = prefs.mutedChatIdsFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    val fcmToken: StateFlow<String?> = prefs.fcmTokenFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val turnUrl: StateFlow<String> = prefs.turnUrlFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, PreferencesManager.DEFAULT_TURN_URL)
+
+    val turnUsername: StateFlow<String> = prefs.turnUsernameFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, PreferencesManager.DEFAULT_TURN_USERNAME)
+
+    val turnCredential: StateFlow<String> = prefs.turnCredentialFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, PreferencesManager.DEFAULT_TURN_CREDENTIAL)
+
     private val _pendingNotificationChatId = MutableStateFlow<String?>(null)
     val pendingNotificationChatId: StateFlow<String?> = _pendingNotificationChatId.asStateFlow()
 
@@ -301,6 +330,18 @@ class FamilyViewModel(
     private val _playingVoiceProgress = MutableStateFlow(0f)
     val playingVoiceProgress: StateFlow<Float> = _playingVoiceProgress.asStateFlow()
 
+    private val _voicePlaybackSpeed = MutableStateFlow(1.0f)
+    val voicePlaybackSpeed: StateFlow<Float> = _voicePlaybackSpeed.asStateFlow()
+
+    private val _mediaTransferProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val mediaTransferProgress: StateFlow<Map<String, Float>> = _mediaTransferProgress.asStateFlow()
+
+    private val _activeUploadLabel = MutableStateFlow<String?>(null)
+    val activeUploadLabel: StateFlow<String?> = _activeUploadLabel.asStateFlow()
+
+    private val _activeUploadProgress = MutableStateFlow<Float?>(null)
+    val activeUploadProgress: StateFlow<Float?> = _activeUploadProgress.asStateFlow()
+
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
 
@@ -313,7 +354,7 @@ class FamilyViewModel(
     private var lastSentPresenceAt: Long = 0L
     private var lastSyncedMemberUids: Set<String> = emptySet()
 
-    val chatPreviews: StateFlow<List<ChatThreadUi>> = combine(
+    private val baseChatPreviews: Flow<List<ChatThreadUi>> = combine(
         rawChats,
         allMessages,
         members,
@@ -408,6 +449,22 @@ class FamilyViewModel(
                 participants = participants
             )
         }
+    }
+
+    val chatPreviews: StateFlow<List<ChatThreadUi>> = combine(
+        baseChatPreviews,
+        pinnedChatIds,
+        mutedChatIds
+    ) { list, pinned, muted ->
+        list.map { item ->
+            item.copy(
+                isPinned = pinned.contains(item.chat.id),
+                isMuted = muted.contains(item.chat.id)
+            )
+        }.sortedWith(
+            compareByDescending<ChatThreadUi> { it.isPinned }
+                .thenByDescending { it.chat.updatedAt }
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
@@ -463,7 +520,16 @@ class FamilyViewModel(
             }
         }
 
-        // Real-time Android notifications for incoming messages
+        // Keep WebRTC TURN relay credentials synced with local preferences
+        viewModelScope.launch {
+            combine(turnUrl, turnUsername, turnCredential) { url, user, cred ->
+                Triple(url, user, cred)
+            }.collect { (url, user, cred) ->
+                webRtcCallManager.setCustomTurnConfig(url, user, cred)
+            }
+        }
+
+        // Real-time Android notifications & automatic DELIVERED receipt for incoming messages
         viewModelScope.launch {
             val sessionStartedAt = System.currentTimeMillis()
             val seenMessageIds = mutableSetOf<String>()
@@ -482,19 +548,36 @@ class FamilyViewModel(
                     seenMessageIds.clear()
                     return@collect
                 }
+                val chatMap = chats.associateBy { it.id }
+                val famId = _activeFamilyId.value
+                if (!famId.isNullOrBlank()) {
+                    msgs.forEach { msg ->
+                        val chat = chatMap[msg.chatId] ?: return@forEach
+                        val participants = JsonHelpers.decodeStringList(chat.participantIdsJson)
+                        if (participants.contains(meId) &&
+                            msg.senderId != meId &&
+                            msg.type != MessageType.DELETED &&
+                            msg.status == MessageStatus.SENT
+                        ) {
+                            viewModelScope.launch {
+                                cloudRepo.markMessageDeliveredToRecipient(famId, msg.id)
+                            }
+                        }
+                    }
+                }
                 if (seededForMemberId != meId) {
                     seededForMemberId = meId
                     seenMessageIds.clear()
                     msgs.forEach { seenMessageIds.add(it.id) }
                     return@collect
                 }
-                val chatMap = chats.associateBy { it.id }
                 val memberMap = membersList.associateBy { it.id }
                 msgs.forEach { msg ->
                     if (seenMessageIds.add(msg.id)) {
                         val chat = chatMap[msg.chatId] ?: return@forEach
                         val participants = JsonHelpers.decodeStringList(chat.participantIdsJson)
                         if (notifEnabled &&
+                            !mutedChatIds.value.contains(msg.chatId) &&
                             participants.contains(meId) &&
                             msg.senderId != meId &&
                             msg.type != MessageType.DELETED &&
@@ -505,8 +588,10 @@ class FamilyViewModel(
                             val chatTitle = if (chat.type == ChatType.GROUP) chat.title else senderName
                             val body = when (msg.type) {
                                 MessageType.IMAGE -> if (msg.text.isNotBlank()) "📷 ${msg.text}" else "📷 Foto"
+                                MessageType.VIDEO -> if (msg.text.isNotBlank()) "🎬 ${msg.text}" else "🎬 Video"
                                 MessageType.VOICE -> "🎤 Nota de voz (${TimeFormatters.formatDuration(msg.voiceDurationSec)})"
                                 MessageType.LOCATION -> "📍 ${msg.locationName ?: "Ubicación"}"
+                                MessageType.DOCUMENT -> "📄 ${msg.fileName ?: "Documento"}"
                                 MessageType.POLL -> "📊 ${msg.pollQuestion ?: "Encuesta"}"
                                 MessageType.TEXT -> MessageFormatter.stripMarkdownForPreview(msg.text)
                                 MessageType.DELETED -> ""
@@ -578,8 +663,13 @@ class FamilyViewModel(
         val body = when (msg.type) {
             MessageType.DELETED -> "🚫 Mensaje eliminado"
             MessageType.IMAGE -> if (msg.text.isNotBlank()) "📷 ${MessageFormatter.stripMarkdownForPreview(msg.text)}" else "📷 Foto"
+            MessageType.VIDEO -> if (msg.text.isNotBlank()) "🎬 ${MessageFormatter.stripMarkdownForPreview(msg.text)}" else "🎬 Video"
             MessageType.VOICE -> "🎤 Nota de voz (${TimeFormatters.formatDuration(msg.voiceDurationSec)})"
-            MessageType.LOCATION -> "📍 ${msg.locationName ?: "Ubicación compartida"}"
+            MessageType.LOCATION -> {
+                val isLive = msg.locationLiveUntil != null && msg.locationLiveUntil > System.currentTimeMillis()
+                if (isLive) "📍 Ubicación en tiempo real" else "📍 ${msg.locationName ?: "Ubicación compartida"}"
+            }
+            MessageType.DOCUMENT -> "📄 ${msg.fileName ?: "Documento"}"
             MessageType.POLL -> "📊 Encuesta: ${msg.pollQuestion.orEmpty()}"
             MessageType.TEXT -> MessageFormatter.stripMarkdownForPreview(msg.text)
         }
@@ -869,6 +959,20 @@ class FamilyViewModel(
     fun setChatWallpaper(chatId: String, wallpaperKey: String) {
         viewModelScope.launch {
             prefs.setChatWallpaper(chatId, wallpaperKey)
+        }
+    }
+
+    fun togglePinChat(chatId: String) {
+        viewModelScope.launch {
+            val nowPinned = prefs.togglePinnedChat(chatId)
+            showMessage(if (nowPinned) "Chat fijado en la parte superior" else "Chat desfijado")
+        }
+    }
+
+    fun toggleMuteChat(chatId: String) {
+        viewModelScope.launch {
+            val nowMuted = prefs.toggleMutedChat(chatId)
+            showMessage(if (nowMuted) "Notificaciones silenciadas en este chat" else "Notificaciones activadas en este chat")
         }
     }
 
@@ -1340,6 +1444,22 @@ class FamilyViewModel(
 
     // --- Real Cloud Messaging Actions ---
 
+    private suspend fun markDeliveredIfRecipientOnline(
+        famId: String,
+        chatId: String,
+        msgId: String,
+        senderId: String
+    ) {
+        val chat = rawChats.value.find { it.id == chatId }
+        val participants = chat?.let { JsonHelpers.decodeStringList(it.participantIdsJson) }.orEmpty()
+        val anyOtherOnline = members.value.any { m ->
+            m.id != senderId && participants.contains(m.id) && m.isOnline
+        }
+        if (anyOtherOnline) {
+            cloudRepo.markMessageDeliveredToRecipient(famId, msgId)
+        }
+    }
+
     fun sendTextMessage(chatId: String, text: String, replyToId: String? = null) {
         val famId = _activeFamilyId.value ?: return
         val currentId = _activeMemberId.value ?: return
@@ -1360,7 +1480,7 @@ class FamilyViewModel(
         viewModelScope.launch {
             val res = cloudRepo.createMessage(famId, msg, currentMemberUids(), currentUserId)
             if (res.isSuccess) {
-                cloudRepo.updateMessageFields(famId, msgId, mapOf("status" to MessageStatus.DELIVERED.name))
+                markDeliveredIfRecipientOnline(famId, chatId, msgId, currentId)
             }
             updateLivePresence(chatId, PresenceStatus.ONLINE, forceClear = true)
         }
@@ -1390,10 +1510,275 @@ class FamilyViewModel(
             )
             val res = cloudRepo.createMessage(famId, msg, currentMemberUids(), currentUserId)
             if (res.isSuccess) {
-                cloudRepo.updateMessageFields(famId, msgId, mapOf("status" to MessageStatus.DELIVERED.name))
+                markDeliveredIfRecipientOnline(famId, chatId, msgId, currentId)
             } else {
                 showMessage("La imagen no se pudo subir a la nube")
             }
+        }
+    }
+
+    fun sendDocumentMessage(chatId: String, documentUri: Uri, replyToId: String? = null) {
+        val famId = _activeFamilyId.value ?: return
+        val currentId = _activeMemberId.value ?: return
+        viewModelScope.launch {
+            _activeUploadLabel.value = "Preparando archivo..."
+            _activeUploadProgress.value = 0.05f
+            val encodedRes = DocumentMediaHelper.readAndEncodeDocument(appContext, documentUri)
+            encodedRes.fold(
+                onSuccess = { payload ->
+                    val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(10)}"
+                    val uids = currentMemberUids()
+                    val isChunked = payload.dataUri.length > DocumentMediaHelper.INLINE_MAX_CHARS
+                    val chunks = if (isChunked) DocumentMediaHelper.splitIntoChunks(payload.dataUri) else emptyList()
+
+                    if (isChunked) {
+                        _activeUploadLabel.value = "Subiendo ${payload.fileName} (${DocumentMediaHelper.formatFileSize(payload.sizeBytes)})..."
+                        for ((idx, chunkStr) in chunks.withIndex()) {
+                            val chunkEntity = MediaChunkEntity(
+                                id = "${msgId}_$idx",
+                                messageId = msgId,
+                                chunkIndex = idx,
+                                totalChunks = chunks.size,
+                                data = chunkStr,
+                                authorUid = currentUserId
+                            )
+                            val chunkRes = cloudRepo.uploadMediaChunk(famId, chunkEntity, uids, currentUserId)
+                            if (chunkRes.isFailure) {
+                                _activeUploadLabel.value = null
+                                _activeUploadProgress.value = null
+                                showMessage("Error al subir fragmento ${idx + 1}/${chunks.size} del archivo")
+                                return@fold
+                            }
+                            _activeUploadProgress.value = ((idx + 1).toFloat() / chunks.size.toFloat()).coerceIn(0.05f, 0.98f)
+                        }
+                        // Cache locally so sender can open immediately
+                        runCatching {
+                            val commaIdx = payload.dataUri.indexOf(',')
+                            val b64 = if (commaIdx > 0) payload.dataUri.substring(commaIdx + 1) else payload.dataUri
+                            val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                            DocumentMediaHelper.getCachedDocumentFile(appContext, msgId, payload.fileName).writeBytes(bytes)
+                        }
+                    }
+
+                    val msg = ChatMessageEntity(
+                        id = msgId,
+                        chatId = chatId,
+                        senderId = currentId,
+                        text = payload.fileName,
+                        type = MessageType.DOCUMENT,
+                        status = MessageStatus.SENT,
+                        timestamp = System.currentTimeMillis(),
+                        replyToMessageId = replyToId,
+                        mediaUri = if (isChunked) null else payload.dataUri,
+                        fileName = payload.fileName,
+                        fileMimeType = payload.mimeType,
+                        fileSizeBytes = payload.sizeBytes,
+                        chunkCount = chunks.size,
+                        authorUid = currentUserId
+                    )
+                    val res = cloudRepo.createMessage(famId, msg, uids, currentUserId)
+                    _activeUploadLabel.value = null
+                    _activeUploadProgress.value = null
+                    if (res.isSuccess) {
+                        markDeliveredIfRecipientOnline(famId, chatId, msgId, currentId)
+                        showMessage("Documento enviado: ${payload.fileName}")
+                    } else {
+                        showMessage("No se pudo enviar el documento")
+                    }
+                },
+                onFailure = { err ->
+                    _activeUploadLabel.value = null
+                    _activeUploadProgress.value = null
+                    showMessage(err.localizedMessage ?: "No se pudo adjuntar el documento")
+                }
+            )
+        }
+    }
+
+    fun sendVideoMessage(chatId: String, videoUri: Uri, caption: String, replyToId: String? = null) {
+        val famId = _activeFamilyId.value ?: return
+        val currentId = _activeMemberId.value ?: return
+        viewModelScope.launch {
+            _activeUploadLabel.value = "Procesando video..."
+            _activeUploadProgress.value = 0.05f
+            val encodedRes = VideoMediaHelper.readAndEncodeVideo(appContext, videoUri)
+            encodedRes.fold(
+                onSuccess = { payload ->
+                    val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(10)}"
+                    val uids = currentMemberUids()
+                    val chunks = payload.chunks
+                    if (chunks.isNotEmpty()) {
+                        _activeUploadLabel.value = "Subiendo video (${DocumentMediaHelper.formatFileSize(payload.sizeBytes)})..."
+                        for ((idx, chunkStr) in chunks.withIndex()) {
+                            val chunkEntity = MediaChunkEntity(
+                                id = "${msgId}_$idx",
+                                messageId = msgId,
+                                chunkIndex = idx,
+                                totalChunks = chunks.size,
+                                data = chunkStr,
+                                authorUid = currentUserId
+                            )
+                            val chunkRes = cloudRepo.uploadMediaChunk(famId, chunkEntity, uids, currentUserId)
+                            if (chunkRes.isFailure) {
+                                _activeUploadLabel.value = null
+                                _activeUploadProgress.value = null
+                                showMessage("No se pudo subir el video (${idx + 1}/${chunks.size})")
+                                return@fold
+                            }
+                            _activeUploadProgress.value = ((idx + 1).toFloat() / chunks.size.toFloat()).coerceIn(0.05f, 0.98f)
+                        }
+                    }
+                    // Write assembled video to local cache so sender plays it immediately
+                    VideoMediaHelper.writeAssembledVideoToCache(
+                        context = appContext,
+                        messageId = msgId,
+                        fileName = payload.fileName,
+                        fullDataUri = payload.dataUri
+                    )
+                    val msg = ChatMessageEntity(
+                        id = msgId,
+                        chatId = chatId,
+                        senderId = currentId,
+                        text = caption.trim(),
+                        type = MessageType.VIDEO,
+                        status = MessageStatus.SENT,
+                        timestamp = System.currentTimeMillis(),
+                        replyToMessageId = replyToId,
+                        mediaUri = if (chunks.isEmpty()) payload.dataUri else null,
+                        fileName = payload.fileName,
+                        fileMimeType = payload.mimeType,
+                        fileSizeBytes = payload.sizeBytes,
+                        voiceDurationSec = payload.durationSec,
+                        videoThumbnailData = payload.thumbnailDataUri,
+                        chunkCount = chunks.size,
+                        authorUid = currentUserId
+                    )
+                    val res = cloudRepo.createMessage(famId, msg, uids, currentUserId)
+                    _activeUploadLabel.value = null
+                    _activeUploadProgress.value = null
+                    if (res.isSuccess) {
+                        markDeliveredIfRecipientOnline(famId, chatId, msgId, currentId)
+                        showMessage("Video enviado")
+                    } else {
+                        showMessage("No se pudo enviar el video")
+                    }
+                },
+                onFailure = { err ->
+                    _activeUploadLabel.value = null
+                    _activeUploadProgress.value = null
+                    showMessage(err.localizedMessage ?: "No se pudo procesar el video")
+                }
+            )
+        }
+    }
+
+    fun openOrDownloadDocument(message: ChatMessageEntity) {
+        val famId = _activeFamilyId.value ?: return
+        viewModelScope.launch {
+            val cached = DocumentMediaHelper.getCachedDocumentFile(appContext, message.id, message.fileName)
+            if (cached.exists() && cached.length() > 0L) {
+                DocumentMediaHelper.launchDocumentFileViewer(appContext, cached, message.fileMimeType)
+                return@launch
+            }
+            if (!message.mediaUri.isNullOrBlank()) {
+                val res = DocumentMediaHelper.openDocumentExternally(
+                    context = appContext,
+                    messageId = message.id,
+                    fileName = message.fileName,
+                    mimeType = message.fileMimeType,
+                    mediaData = message.mediaUri
+                )
+                if (res.isFailure) {
+                    showMessage("No se pudo abrir el archivo")
+                }
+                return@launch
+            }
+            if (message.chunkCount <= 0) {
+                showMessage("El archivo no está disponible")
+                return@launch
+            }
+            if (_mediaTransferProgress.value.containsKey(message.id)) return@launch
+            _mediaTransferProgress.value = _mediaTransferProgress.value + (message.id to 0.05f)
+            val fetched = cloudRepo.fetchMediaChunks(
+                familyId = famId,
+                messageId = message.id,
+                totalChunks = message.chunkCount,
+                onProgress = { prog ->
+                    _mediaTransferProgress.value = _mediaTransferProgress.value + (message.id to prog)
+                }
+            )
+            _mediaTransferProgress.value = _mediaTransferProgress.value - message.id
+            fetched.fold(
+                onSuccess = { fullDataUri ->
+                    val res = DocumentMediaHelper.openDocumentExternally(
+                        context = appContext,
+                        messageId = message.id,
+                        fileName = message.fileName,
+                        mimeType = message.fileMimeType,
+                        mediaData = fullDataUri
+                    )
+                    if (res.isFailure) {
+                        showMessage("No se pudo abrir el documento descargado")
+                    }
+                },
+                onFailure = { err ->
+                    showMessage(err.localizedMessage ?: "No se pudo descargar el documento")
+                }
+            )
+        }
+    }
+
+    fun openOrDownloadVideo(message: ChatMessageEntity, onReady: (File) -> Unit) {
+        val famId = _activeFamilyId.value ?: return
+        viewModelScope.launch {
+            val cached = VideoMediaHelper.getCachedVideoFile(appContext, message.id, message.fileName)
+            if (cached.exists() && cached.length() > 0L) {
+                onReady(cached)
+                return@launch
+            }
+            if (!message.mediaUri.isNullOrBlank()) {
+                val res = VideoMediaHelper.writeAssembledVideoToCache(
+                    context = appContext,
+                    messageId = message.id,
+                    fileName = message.fileName,
+                    fullDataUri = message.mediaUri
+                )
+                res.onSuccess(onReady).onFailure {
+                    showMessage("No se pudo preparar el video")
+                }
+                return@launch
+            }
+            if (message.chunkCount <= 0) {
+                showMessage("El video no está disponible")
+                return@launch
+            }
+            if (_mediaTransferProgress.value.containsKey(message.id)) return@launch
+            _mediaTransferProgress.value = _mediaTransferProgress.value + (message.id to 0.05f)
+            val fetched = cloudRepo.fetchMediaChunks(
+                familyId = famId,
+                messageId = message.id,
+                totalChunks = message.chunkCount,
+                onProgress = { prog ->
+                    _mediaTransferProgress.value = _mediaTransferProgress.value + (message.id to prog)
+                }
+            )
+            _mediaTransferProgress.value = _mediaTransferProgress.value - message.id
+            fetched.fold(
+                onSuccess = { fullDataUri ->
+                    val res = VideoMediaHelper.writeAssembledVideoToCache(
+                        context = appContext,
+                        messageId = message.id,
+                        fileName = message.fileName,
+                        fullDataUri = fullDataUri
+                    )
+                    res.onSuccess(onReady).onFailure {
+                        showMessage("Error al reconstruir el video")
+                    }
+                },
+                onFailure = { err ->
+                    showMessage(err.localizedMessage ?: "No se pudo descargar el video")
+                }
+            )
         }
     }
 
@@ -1403,10 +1788,13 @@ class FamilyViewModel(
         address: String,
         latitude: Double? = null,
         longitude: Double? = null,
-        replyToId: String? = null
+        replyToId: String? = null,
+        liveDurationMinutes: Int = 0
     ) {
         val famId = _activeFamilyId.value ?: return
         val currentId = _activeMemberId.value ?: return
+        val now = System.currentTimeMillis()
+        val liveUntil = if (liveDurationMinutes > 0) now + liveDurationMinutes * 60_000L else null
         val msgId = "msg_${UUID.randomUUID().toString().replace("-", "").take(10)}"
         val msg = ChatMessageEntity(
             id = msgId,
@@ -1415,19 +1803,57 @@ class FamilyViewModel(
             text = "",
             type = MessageType.LOCATION,
             status = MessageStatus.SENT,
-            timestamp = System.currentTimeMillis(),
+            timestamp = now,
             replyToMessageId = replyToId,
-            locationName = name.trim().ifEmpty { "Ubicación GPS" },
+            locationName = if (liveDurationMinutes > 0) "Ubicación en tiempo real" else name.trim().ifEmpty { "Ubicación GPS" },
             locationAddress = address.trim(),
             locationLat = latitude,
             locationLng = longitude,
+            locationLiveUntil = liveUntil,
             authorUid = currentUserId
         )
         viewModelScope.launch {
             val res = cloudRepo.createMessage(famId, msg, currentMemberUids(), currentUserId)
             if (res.isSuccess) {
                 cloudRepo.updateMessageFields(famId, msgId, mapOf("status" to MessageStatus.DELIVERED.name))
+                if (liveUntil != null) {
+                    startLiveLocationTracker(famId, msgId, liveUntil)
+                }
             }
+        }
+    }
+
+    private fun startLiveLocationTracker(familyId: String, messageId: String, liveUntilMs: Long) {
+        liveLocationJobs[messageId]?.cancel()
+        liveLocationJobs[messageId] = viewModelScope.launch {
+            while (System.currentTimeMillis() < liveUntilMs) {
+                delay(20_000L)
+                if (System.currentTimeMillis() >= liveUntilMs) break
+                val gps = LocationHelper.fetchCurrentGpsLocation(appContext).getOrNull() ?: continue
+                cloudRepo.updateMessageFields(
+                    familyId = familyId,
+                    messageId = messageId,
+                    fields = mapOf(
+                        "locationLat" to gps.latitude,
+                        "locationLng" to gps.longitude,
+                        "locationAddress" to gps.address.take(240)
+                    )
+                )
+            }
+            liveLocationJobs.remove(messageId)
+        }
+    }
+
+    fun stopLiveLocationSharing(messageId: String) {
+        liveLocationJobs.remove(messageId)?.cancel()
+        val famId = _activeFamilyId.value ?: return
+        viewModelScope.launch {
+            cloudRepo.updateMessageFields(
+                familyId = famId,
+                messageId = messageId,
+                fields = mapOf("locationLiveUntil" to 0L)
+            )
+            showMessage("Ubicación en tiempo real detenida")
         }
     }
 
@@ -1637,9 +2063,19 @@ class FamilyViewModel(
             )
             val res = cloudRepo.createMessage(famId, msg, currentMemberUids(), currentUserId)
             if (res.isSuccess) {
-                cloudRepo.updateMessageFields(famId, msgId, mapOf("status" to MessageStatus.DELIVERED.name))
+                markDeliveredIfRecipientOnline(famId, chatId, msgId, currentId)
             }
         }
+    }
+
+    fun cycleVoicePlaybackSpeed() {
+        val next = when (_voicePlaybackSpeed.value) {
+            1.0f -> 1.5f
+            1.5f -> 2.0f
+            else -> 1.0f
+        }
+        _voicePlaybackSpeed.value = next
+        voiceAudio.setPlaybackSpeed(next)
     }
 
     fun toggleVoicePlayback(messageId: String) {
@@ -1656,7 +2092,19 @@ class FamilyViewModel(
         stopPlayback()
         _playingVoiceMessageId.value = messageId
         _playingVoiceProgress.value = 0f
+
+        val famId = _activeFamilyId.value
+        val currentId = _activeMemberId.value
+        if (famId != null && currentId != null && msg.senderId != currentId &&
+            !JsonHelpers.decodeStringList(msg.playedByMemberIdsJson).contains(currentId)
+        ) {
+            viewModelScope.launch {
+                cloudRepo.markMessageVoicePlayedByMember(famId, messageId, currentId)
+            }
+        }
+
         playbackJob = viewModelScope.launch {
+            voiceAudio.setPlaybackSpeed(_voicePlaybackSpeed.value)
             val started = voiceAudio.prepareAndStartPlayback(
                 messageId = messageId,
                 mediaData = mediaData,
@@ -1685,6 +2133,31 @@ class FamilyViewModel(
         voiceAudio.stopPlayback()
         _playingVoiceMessageId.value = null
         _playingVoiceProgress.value = 0f
+    }
+
+    fun saveTurnConfig(url: String, username: String, credential: String) {
+        viewModelScope.launch {
+            prefs.saveTurnConfig(url, username, credential)
+            webRtcCallManager.setCustomTurnConfig(url, username, credential)
+            showMessage("Servidores TURN para datos móviles actualizados")
+        }
+    }
+
+    fun sendTestPushNotification() {
+        val famId = _activeFamilyId.value
+        val memberId = _activeMemberId.value
+        if (famId != null && memberId != null) {
+            syncPushAndBackgroundWork(famId, memberId)
+        }
+        FamiChatNotificationHelper.notifyNewMessage(
+            context = appContext,
+            chatId = _activeChatId.value ?: "group_main",
+            chatTitle = "Diagnóstico FamiChat",
+            senderName = activeMember.value?.name ?: "FamiChat",
+            body = "✅ Las alertas en tiempo real y en segundo plano están funcionando correctamente.",
+            isGroup = false
+        )
+        showMessage("Notificación de prueba enviada al sistema")
     }
 
     // --- Real Multi-Device Calls (Firestore Signaling + Ringtone + AudioManager) ---
@@ -1736,6 +2209,7 @@ class FamilyViewModel(
             isOutgoing = true,
             isConnected = false,
             durationSec = 0,
+            isSpeakerOn = callType == CallType.VIDEO,
             isCameraOn = callType == CallType.VIDEO,
             targetPhoneNumber = otherPhone
         )
@@ -1744,12 +2218,40 @@ class FamilyViewModel(
 
         viewModelScope.launch {
             cloudRepo.createCall(famId, record, currentMemberUids(), currentUserId)
+            webRtcCallManager.startCallerSession(
+                isVideoCall = callType == CallType.VIDEO,
+                onOfferCreated = { offerSdp ->
+                    viewModelScope.launch {
+                        cloudRepo.updateCallSdpOffer(famId, callId, offerSdp)
+                    }
+                },
+                onLocalIceCandidate = { cand ->
+                    viewModelScope.launch {
+                        cloudRepo.addCallIceCandidate(
+                            familyId = famId,
+                            callId = callId,
+                            candidate = CallIceCandidateEntity(
+                                id = "cand_${UUID.randomUUID().toString().replace("-", "").take(10)}",
+                                senderMemberId = meId,
+                                sdpMid = cand.sdpMid ?: "0",
+                                sdpMLineIndex = cand.sdpMLineIndex,
+                                candidate = cand.sdp,
+                                createdAtMs = System.currentTimeMillis(),
+                                authorUid = currentUserId
+                            ),
+                            memberUids = currentMemberUids(),
+                            callerUid = currentUserId
+                        )
+                    }
+                }
+            )
             monitorCallLifecycle(famId, callId, isOutgoing = true)
         }
     }
 
     fun acceptIncomingCall(call: CallRecordEntity) {
         val famId = _activeFamilyId.value ?: return
+        val meId = _activeMemberId.value ?: return
         voiceAudio.stopRingtone()
         val caller = members.value.find { it.id == call.callerId }
         callMonitorJob?.cancel()
@@ -1763,6 +2265,7 @@ class FamilyViewModel(
             isOutgoing = false,
             isConnected = true,
             durationSec = 0,
+            isSpeakerOn = call.callType == CallType.VIDEO,
             isCameraOn = call.callType == CallType.VIDEO,
             targetPhoneNumber = caller?.phoneNumber ?: ""
         )
@@ -1775,13 +2278,48 @@ class FamilyViewModel(
                 connectedAt = System.currentTimeMillis(),
                 directionName = CallDirection.INCOMING.name
             )
-            monitorCallLifecycle(famId, call.id, isOutgoing = false)
+            var answeredOffer = false
+            fun tryAnswerOffer(offerSdp: String?) {
+                if (answeredOffer || offerSdp.isNullOrBlank()) return
+                answeredOffer = true
+                webRtcCallManager.startCalleeSession(
+                    isVideoCall = call.callType == CallType.VIDEO,
+                    offerSdp = offerSdp,
+                    onAnswerCreated = { answerSdp ->
+                        viewModelScope.launch {
+                            cloudRepo.updateCallSdpAnswer(famId, call.id, answerSdp)
+                        }
+                    },
+                    onLocalIceCandidate = { cand ->
+                        viewModelScope.launch {
+                            cloudRepo.addCallIceCandidate(
+                                familyId = famId,
+                                callId = call.id,
+                                candidate = CallIceCandidateEntity(
+                                    id = "cand_${UUID.randomUUID().toString().replace("-", "").take(10)}",
+                                    senderMemberId = meId,
+                                    sdpMid = cand.sdpMid ?: "0",
+                                    sdpMLineIndex = cand.sdpMLineIndex,
+                                    candidate = cand.sdp,
+                                    createdAtMs = System.currentTimeMillis(),
+                                    authorUid = currentUserId
+                                ),
+                                memberUids = currentMemberUids(),
+                                callerUid = currentUserId
+                            )
+                        }
+                    }
+                )
+            }
+            tryAnswerOffer(call.offerSdp)
+            monitorCallLifecycle(famId, call.id, isOutgoing = false, onLateOffer = ::tryAnswerOffer)
         }
     }
 
     fun declineIncomingCall(call: CallRecordEntity) {
         val famId = _activeFamilyId.value ?: return
         voiceAudio.stopRingtone()
+        webRtcCallManager.closeSession()
         viewModelScope.launch {
             cloudRepo.updateCallStatus(
                 familyId = famId,
@@ -1792,13 +2330,42 @@ class FamilyViewModel(
         }
     }
 
-    private fun monitorCallLifecycle(famId: String, callId: String, isOutgoing: Boolean) {
+    private fun monitorCallLifecycle(
+        famId: String,
+        callId: String,
+        isOutgoing: Boolean,
+        onLateOffer: (String?) -> Unit = {}
+    ) {
+        val meId = _activeMemberId.value.orEmpty()
         callMonitorJob = viewModelScope.launch {
-            // Observe remote state transitions
+            val seenCandidateIds = mutableSetOf<String>()
+            val candidateWatcher = launch {
+                cloudRepo.observeCallIceCandidates(famId, callId, currentUserId)
+                    .safeFirestoreFlow(emptyList())
+                    .collect { candidates ->
+                        candidates.forEach { cand ->
+                            if (cand.senderMemberId != meId && seenCandidateIds.add(cand.id)) {
+                                webRtcCallManager.addRemoteIceCandidate(
+                                    sdpMid = cand.sdpMid,
+                                    sdpMLineIndex = cand.sdpMLineIndex,
+                                    candidateSdp = cand.candidate
+                                )
+                            }
+                        }
+                    }
+            }
+
+            // Observe remote state transitions & SDP offer/answer
             val watcher = launch {
                 calls.collect { list ->
                     val remote = list.find { it.id == callId } ?: return@collect
                     val local = _activeCall.value ?: return@collect
+                    if (!isOutgoing && !remote.offerSdp.isNullOrBlank()) {
+                        onLateOffer(remote.offerSdp)
+                    }
+                    if (isOutgoing && !remote.answerSdp.isNullOrBlank()) {
+                        webRtcCallManager.applyRemoteAnswerIfNeeded(remote.answerSdp)
+                    }
                     when (remote.callStatus) {
                         CallSignalStatus.CONNECTED -> {
                             if (!local.isConnected) {
@@ -1807,15 +2374,19 @@ class FamilyViewModel(
                             }
                         }
                         CallSignalStatus.DECLINED -> {
+                            candidateWatcher.cancel()
                             voiceAudio.stopRingtone()
                             voiceAudio.applyAudioCallHardware(isMuted = false, isSpeakerOn = false)
+                            webRtcCallManager.closeSession()
                             _activeCall.value = null
                             showMessage("Llamada rechazada")
                             callMonitorJob?.cancel()
                         }
                         CallSignalStatus.ENDED, CallSignalStatus.MISSED -> {
+                            candidateWatcher.cancel()
                             voiceAudio.stopRingtone()
                             voiceAudio.applyAudioCallHardware(isMuted = false, isSpeakerOn = false)
+                            webRtcCallManager.closeSession()
                             _activeCall.value = null
                             callMonitorJob?.cancel()
                         }
@@ -1835,8 +2406,10 @@ class FamilyViewModel(
                     ringElapsed++
                     if (ringElapsed >= 45) {
                         watcher.cancel()
+                        candidateWatcher.cancel()
                         voiceAudio.stopRingtone()
                         voiceAudio.applyAudioCallHardware(isMuted = false, isSpeakerOn = false)
+                        webRtcCallManager.closeSession()
                         _activeCall.value = null
                         cloudRepo.updateCallStatus(
                             familyId = famId,
@@ -1857,22 +2430,31 @@ class FamilyViewModel(
         val next = _activeCall.value?.let { it.copy(isMuted = !it.isMuted) } ?: return
         _activeCall.value = next
         voiceAudio.applyAudioCallHardware(isMuted = next.isMuted, isSpeakerOn = next.isSpeakerOn)
+        webRtcCallManager.setMuted(next.isMuted)
     }
 
     fun toggleCallSpeaker() {
         val next = _activeCall.value?.let { it.copy(isSpeakerOn = !it.isSpeakerOn) } ?: return
         _activeCall.value = next
         voiceAudio.applyAudioCallHardware(isMuted = next.isMuted, isSpeakerOn = next.isSpeakerOn)
+        webRtcCallManager.setSpeakerphone(next.isSpeakerOn)
     }
 
     fun toggleCallCamera() {
-        _activeCall.value = _activeCall.value?.let { it.copy(isCameraOn = !it.isCameraOn) }
+        val next = _activeCall.value?.let { it.copy(isCameraOn = !it.isCameraOn) } ?: return
+        _activeCall.value = next
+        webRtcCallManager.setCameraEnabled(next.isCameraOn)
+    }
+
+    fun switchCallCamera() {
+        webRtcCallManager.switchCamera()
     }
 
     fun endActiveCall() {
         callMonitorJob?.cancel()
         voiceAudio.stopRingtone()
         voiceAudio.applyAudioCallHardware(isMuted = false, isSpeakerOn = false)
+        webRtcCallManager.closeSession()
         val callState = _activeCall.value ?: return
         _activeCall.value = null
         val famId = _activeFamilyId.value ?: return
@@ -2123,8 +2705,13 @@ class FamilyViewModel(
             timestamp = System.currentTimeMillis(),
             forwardedFromName = source.forwardedFromName?.ifBlank { originalSender } ?: originalSender,
             mediaUri = source.mediaUri,
+            fileName = source.fileName,
+            fileMimeType = source.fileMimeType,
+            fileSizeBytes = source.fileSizeBytes,
             voiceDurationSec = source.voiceDurationSec,
             voiceWaveformJson = source.voiceWaveformJson,
+            videoThumbnailData = source.videoThumbnailData,
+            chunkCount = source.chunkCount,
             locationName = source.locationName,
             locationAddress = source.locationAddress,
             locationLat = source.locationLat,
@@ -2134,9 +2721,31 @@ class FamilyViewModel(
             authorUid = currentUserId
         )
         viewModelScope.launch {
+            if (source.chunkCount > 0) {
+                val chunksRes = cloudRepo.fetchMediaChunks(famId, source.id, source.chunkCount)
+                chunksRes.onSuccess { fullData ->
+                    val newChunks = DocumentMediaHelper.splitIntoChunks(fullData)
+                    val uids = currentMemberUids()
+                    newChunks.forEachIndexed { idx, chunkStr ->
+                        cloudRepo.uploadMediaChunk(
+                            familyId = famId,
+                            chunk = MediaChunkEntity(
+                                id = "${msgId}_$idx",
+                                messageId = msgId,
+                                chunkIndex = idx,
+                                totalChunks = newChunks.size,
+                                data = chunkStr,
+                                authorUid = currentUserId
+                            ),
+                            memberUids = uids,
+                            callerUid = currentUserId
+                        )
+                    }
+                }
+            }
             val res = cloudRepo.createMessage(famId, forwarded, currentMemberUids(), currentUserId)
             if (res.isSuccess) {
-                cloudRepo.updateMessageFields(famId, msgId, mapOf("status" to MessageStatus.DELIVERED.name))
+                markDeliveredIfRecipientOnline(famId, targetChatId, msgId, currentId)
                 showMessage("Mensaje reenviado")
             } else {
                 showMessage("No se pudo reenviar el mensaje")
@@ -2148,6 +2757,9 @@ class FamilyViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        liveLocationJobs.values.forEach { it.cancel() }
+        liveLocationJobs.clear()
+        webRtcCallManager.closeSession()
         voiceAudio.releaseAll()
     }
 }

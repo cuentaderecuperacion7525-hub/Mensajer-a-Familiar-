@@ -102,7 +102,7 @@
         "chatId": { "type": "string", "description": "Parent ChatThread document ID." },
         "senderId": { "type": "string", "description": "Sender FamilyMember ID." },
         "text": { "type": "string", "description": "Message body or caption." },
-        "type": { "type": "string", "enum": ["TEXT", "IMAGE", "VOICE", "LOCATION", "POLL", "DELETED"], "description": "Message type." },
+        "type": { "type": "string", "enum": ["TEXT", "IMAGE", "VIDEO", "VOICE", "LOCATION", "DOCUMENT", "POLL", "DELETED"], "description": "Message type." },
         "status": { "type": "string", "enum": ["SENDING", "SENT", "DELIVERED", "READ"], "description": "Delivery state." },
         "timestamp": { "type": "integer", "description": "Epoch millis timestamp." },
         "replyToMessageId": { "type": "string", "description": "Optional replied message ID." },
@@ -110,20 +110,42 @@
         "reactions": { "type": "object", "description": "Map of memberId to emoji." },
         "hiddenForMemberIds": { "type": "array", "description": "Member IDs who deleted this message for themselves." },
         "readByMemberIds": { "type": "array", "description": "Member IDs who have read this message." },
+        "playedByMemberIds": { "type": "array", "description": "Member IDs who have listened to this voice note." },
         "forwardedFromName": { "type": "string", "description": "Optional original sender name if message was forwarded." },
-        "mediaData": { "type": "string", "description": "Base64 data URI for compressed photo or AAC voice note." },
-        "voiceDurationSec": { "type": "integer", "description": "Duration in seconds for voice notes." },
+        "mediaData": { "type": "string", "description": "Base64 data URI for compressed photo, AAC voice note, or inline document." },
+        "videoThumbnailData": { "type": "string", "description": "Optional compact Base64 JPEG preview thumbnail for video messages." },
+        "fileName": { "type": "string", "description": "Original filename for document or video messages." },
+        "fileMimeType": { "type": "string", "description": "MIME type for document or video messages." },
+        "fileSizeBytes": { "type": "integer", "description": "File size in bytes for document or video messages." },
+        "chunkCount": { "type": "integer", "description": "Number of media_chunks documents storing large video/document payloads." },
+        "voiceDurationSec": { "type": "integer", "description": "Duration in seconds for voice notes or videos." },
         "voiceWaveform": { "type": "array", "description": "Normalized amplitude floats." },
         "locationName": { "type": "string", "description": "Location title." },
         "locationAddress": { "type": "string", "description": "Resolved street address." },
         "locationLat": { "type": "number", "description": "GPS latitude." },
         "locationLng": { "type": "number", "description": "GPS longitude." },
+        "locationLiveUntil": { "type": "integer", "description": "Optional expiration epoch millis for live shared locations." },
         "pollQuestion": { "type": "string", "description": "Poll question text." },
         "pollOptions": { "type": "array", "description": "List of poll option maps with id, text, voterIds." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
       },
       "required": ["memberUids", "authorUid", "chatId", "senderId", "text", "type", "status", "timestamp", "isEdited", "createdAt", "updatedAt"]
+    },
+    "MediaChunk": {
+      "title": "MediaChunk",
+      "description": "Ordered Base64 payload chunk for large documents and short videos (>450 KB).",
+      "type": "object",
+      "properties": {
+        "memberUids": { "type": "array", "description": "Authorized family Firebase Auth UIDs." },
+        "authorUid": { "type": "string", "description": "Sender Firebase Auth UID." },
+        "messageId": { "type": "string", "description": "Parent ChatMessage document ID." },
+        "chunkIndex": { "type": "integer", "description": "Zero-based index of this chunk." },
+        "totalChunks": { "type": "integer", "description": "Total number of chunks for the message." },
+        "data": { "type": "string", "description": "Base64 slice payload." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." }
+      },
+      "required": ["memberUids", "authorUid", "messageId", "chunkIndex", "totalChunks", "data", "createdAt"]
     },
     "CallRecord": {
       "title": "CallRecord",
@@ -143,11 +165,29 @@
         "direction": { "type": "string", "enum": ["OUTGOING", "INCOMING", "MISSED"], "description": "Call direction." },
         "durationSec": { "type": "integer", "description": "Call duration in seconds." },
         "connectedAt": { "type": "integer", "description": "Epoch millis when answered." },
+        "offerSdp": { "type": "string", "description": "WebRTC SDP offer from caller." },
+        "answerSdp": { "type": "string", "description": "WebRTC SDP answer from callee." },
         "timestamp": { "type": "integer", "description": "Epoch millis when initiated." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
       },
       "required": ["memberUids", "authorUid", "chatId", "title", "callerMemberId", "targetMemberIds", "avatarColorHex", "avatarEmoji", "callType", "callStatus", "direction", "durationSec", "timestamp", "createdAt", "updatedAt"]
+    },
+    "CallIceCandidate": {
+      "title": "CallIceCandidate",
+      "description": "WebRTC ICE candidate exchanged between family members for peer-to-peer media connectivity.",
+      "type": "object",
+      "properties": {
+        "memberUids": { "type": "array", "description": "Authorized family Firebase Auth UIDs." },
+        "authorUid": { "type": "string", "description": "Sender Firebase Auth UID." },
+        "senderMemberId": { "type": "string", "description": "Sender FamilyMember ID." },
+        "sdpMid": { "type": "string", "description": "WebRTC SDP media ID." },
+        "sdpMLineIndex": { "type": "integer", "description": "WebRTC SDP m-line index." },
+        "candidate": { "type": "string", "description": "ICE candidate string." },
+        "createdAtMs": { "type": "integer", "description": "Creation epoch millis." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." }
+      },
+      "required": ["memberUids", "authorUid", "senderMemberId", "sdpMid", "sdpMLineIndex", "candidate", "createdAtMs", "createdAt"]
     },
     "ShoppingItem": {
       "title": "ShoppingItem",
@@ -249,9 +289,17 @@
       "schema": { "$ref": "#/entities/ChatMessage" },
       "description": "Synced chat messages including media, GPS locations, and polls."
     },
+    "/families/{familyId}/media_chunks/{chunkId}": {
+      "schema": { "$ref": "#/entities/MediaChunk" },
+      "description": "Ordered Base64 chunks for large documents and short videos."
+    },
     "/families/{familyId}/calls/{callId}": {
       "schema": { "$ref": "#/entities/CallRecord" },
       "description": "Real-time call signaling and call history logs."
+    },
+    "/families/{familyId}/calls/{callId}/candidates/{candidateId}": {
+      "schema": { "$ref": "#/entities/CallIceCandidate" },
+      "description": "WebRTC ICE candidates for real-time audio/video calls."
     },
     "/families/{familyId}/shoppingItems/{itemId}": {
       "schema": { "$ref": "#/entities/ShoppingItem" },

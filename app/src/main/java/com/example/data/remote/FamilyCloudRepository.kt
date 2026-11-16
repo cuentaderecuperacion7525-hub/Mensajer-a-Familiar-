@@ -2,6 +2,7 @@ package com.example.data.remote
 
 import android.content.Context
 import com.example.R
+import com.example.data.model.CallIceCandidateEntity
 import com.example.data.model.CallRecordEntity
 import com.example.data.model.CallSignalStatus
 import com.example.data.model.ChatMessageEntity
@@ -13,6 +14,7 @@ import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.FamilySpace
 import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.JsonHelpers
+import com.example.data.model.MediaChunkEntity
 import com.example.data.model.MessageStatus
 import com.example.data.model.PollOption
 import com.example.data.model.PresenceStatus
@@ -329,7 +331,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
     suspend fun syncMemberUidsAcrossExistingDocs(familyId: String, allFamilyUids: List<String>, myUid: String) {
         if (allFamilyUids.isEmpty()) return
         val fRef = familyRef(familyId)
-        val collections = listOf("members", "chats", "messages", "calls", "statuses", "shoppingItems", "events", "notes")
+        val collections = listOf("members", "chats", "messages", "media_chunks", "calls", "statuses", "shoppingItems", "events", "notes")
         collections.forEach { colName ->
             try {
                 val docs = fRef.collection(colName).whereArrayContains("memberUids", myUid).get().await()
@@ -723,6 +725,92 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         }
     }
 
+    suspend fun markMessageDeliveredToRecipient(
+        familyId: String,
+        messageId: String
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("messages").document(messageId)
+        return try {
+            docRef.update(
+                mapOf(
+                    "status" to MessageStatus.DELIVERED.name,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            Result.success(Unit)
+        }
+    }
+
+    suspend fun markMessageVoicePlayedByMember(
+        familyId: String,
+        messageId: String,
+        memberId: String
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("messages").document(messageId)
+        return try {
+            docRef.update(
+                mapOf(
+                    "playedByMemberIds" to FieldValue.arrayUnion(memberId),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun uploadMediaChunk(
+        familyId: String,
+        chunk: MediaChunkEntity,
+        memberUids: List<String>,
+        callerUid: String
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("media_chunks").document(chunk.id)
+        return try {
+            docRef.set(FirestoreMappers.mediaChunkToMap(chunk, memberUids, callerUid)).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchMediaChunks(
+        familyId: String,
+        messageId: String,
+        totalChunks: Int,
+        onProgress: (Float) -> Unit = {}
+    ): Result<String> {
+        return try {
+            val sb = StringBuilder()
+            val safeTotal = totalChunks.coerceIn(1, 25)
+            for (idx in 0 until safeTotal) {
+                val chunkId = "${messageId}_c$idx"
+                val docRef = familyRef(familyId).collection("media_chunks").document(chunkId)
+                val snap = docRef.get().await()
+                val chunk = FirestoreMappers.toMediaChunk(snap)
+                    ?: return Result.failure(IllegalStateException("Fragmento #$idx no encontrado en la nube."))
+                sb.append(chunk.data)
+                onProgress((idx + 1).toFloat() / safeTotal.toFloat())
+            }
+            Result.success(sb.toString())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // --- Calls ---
 
     suspend fun createCall(
@@ -769,6 +857,83 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             Result.failure(e)
         }
     }
+
+    suspend fun updateCallSdpOffer(
+        familyId: String,
+        callId: String,
+        offerSdp: String
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("calls").document(callId)
+        return try {
+            docRef.update(
+                mapOf(
+                    "offerSdp" to offerSdp.take(32_000),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateCallSdpAnswer(
+        familyId: String,
+        callId: String,
+        answerSdp: String
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("calls").document(callId)
+        return try {
+            docRef.update(
+                mapOf(
+                    "answerSdp" to answerSdp.take(32_000),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun addCallIceCandidate(
+        familyId: String,
+        callId: String,
+        candidate: CallIceCandidateEntity,
+        memberUids: List<String>,
+        callerUid: String
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("calls").document(callId)
+            .collection("candidates").document(candidate.id)
+        return try {
+            docRef.set(FirestoreMappers.iceCandidateToMap(candidate, memberUids, callerUid)).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    fun observeCallIceCandidates(
+        familyId: String,
+        callId: String,
+        uid: String
+    ): Flow<List<CallIceCandidateEntity>> =
+        familyRef(familyId).collection("calls").document(callId)
+            .collection("candidates")
+            .whereArrayContains("memberUids", uid)
+            .snapshots()
+            .map { snap ->
+                snap.documents.mapNotNull(FirestoreMappers::toIceCandidate).sortedBy { it.createdAtMs }
+            }
 
     suspend fun deleteCall(familyId: String, callId: String): Result<Unit> {
         val docRef = familyRef(familyId).collection("calls").document(callId)

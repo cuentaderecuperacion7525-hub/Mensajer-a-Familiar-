@@ -142,7 +142,7 @@ service cloud.firestore {
              isValidId(data.chatId) &&
              isValidId(data.senderId) &&
              data.text is string && data.text.size() <= 4000 &&
-             data.type in ['TEXT', 'IMAGE', 'VOICE', 'LOCATION', 'POLL', 'DELETED'] &&
+             data.type in ['TEXT', 'IMAGE', 'VIDEO', 'VOICE', 'LOCATION', 'DOCUMENT', 'POLL', 'DELETED'] &&
              data.status in ['SENDING', 'SENT', 'DELIVERED', 'READ'] &&
              data.timestamp is int && data.timestamp > 0 &&
              (!('replyToMessageId' in data) || data.replyToMessageId == null || isValidId(data.replyToMessageId)) &&
@@ -150,18 +150,35 @@ service cloud.firestore {
              (!('reactions' in data) || data.reactions == null || (data.reactions is map && data.reactions.size() <= 30)) &&
              (!('hiddenForMemberIds' in data) || data.hiddenForMemberIds == null || isValidStringList(data.hiddenForMemberIds, 25)) &&
              (!('readByMemberIds' in data) || data.readByMemberIds == null || isValidStringList(data.readByMemberIds, 25)) &&
+             (!('playedByMemberIds' in data) || data.playedByMemberIds == null || isValidStringList(data.playedByMemberIds, 25)) &&
              (!('forwardedFromName' in data) || data.forwardedFromName == null || (data.forwardedFromName is string && data.forwardedFromName.size() <= 60)) &&
              (!('mediaData' in data) || data.mediaData == null || (data.mediaData is string && data.mediaData.size() <= 750000)) &&
+             (!('videoThumbnailData' in data) || data.videoThumbnailData == null || (data.videoThumbnailData is string && data.videoThumbnailData.size() <= 150000)) &&
+             (!('fileName' in data) || data.fileName == null || (data.fileName is string && data.fileName.size() <= 160)) &&
+             (!('fileMimeType' in data) || data.fileMimeType == null || (data.fileMimeType is string && data.fileMimeType.size() <= 120)) &&
+             (!('fileSizeBytes' in data) || data.fileSizeBytes == null || (data.fileSizeBytes is int && data.fileSizeBytes >= 0 && data.fileSizeBytes <= 10485760)) &&
+             (!('chunkCount' in data) || data.chunkCount == null || (data.chunkCount is int && data.chunkCount >= 0 && data.chunkCount <= 25)) &&
              (!('voiceDurationSec' in data) || data.voiceDurationSec == null || (data.voiceDurationSec is int && data.voiceDurationSec >= 0 && data.voiceDurationSec <= 600)) &&
              (!('voiceWaveform' in data) || data.voiceWaveform == null || (data.voiceWaveform is list && data.voiceWaveform.size() <= 60)) &&
              (!('locationName' in data) || data.locationName == null || (data.locationName is string && data.locationName.size() <= 120)) &&
              (!('locationAddress' in data) || data.locationAddress == null || (data.locationAddress is string && data.locationAddress.size() <= 240)) &&
              (!('locationLat' in data) || data.locationLat == null || data.locationLat is number) &&
              (!('locationLng' in data) || data.locationLng == null || data.locationLng is number) &&
+             (!('locationLiveUntil' in data) || data.locationLiveUntil == null || (data.locationLiveUntil is int && data.locationLiveUntil >= 0)) &&
              (!('pollQuestion' in data) || data.pollQuestion == null || (data.pollQuestion is string && data.pollQuestion.size() <= 200)) &&
              (!('pollOptions' in data) || data.pollOptions == null || (data.pollOptions is list && data.pollOptions.size() <= 10)) &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidMediaChunk(data) {
+      return isValidUidList(data.memberUids) &&
+             data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 &&
+             isValidId(data.messageId) &&
+             data.chunkIndex is int && data.chunkIndex >= 0 && data.chunkIndex <= 25 &&
+             data.totalChunks is int && data.totalChunks >= 1 && data.totalChunks <= 25 &&
+             data.data is string && data.data.size() >= 1 && data.data.size() <= 700000 &&
+             isValidTimestamp(data.createdAt);
     }
 
     function isValidCallRecord(data) {
@@ -178,9 +195,22 @@ service cloud.firestore {
              data.direction in ['OUTGOING', 'INCOMING', 'MISSED'] &&
              data.durationSec is int && data.durationSec >= 0 && data.durationSec <= 86400 &&
              (!('connectedAt' in data) || data.connectedAt == null || (data.connectedAt is int && data.connectedAt >= 0)) &&
+             (!('offerSdp' in data) || data.offerSdp == null || (data.offerSdp is string && data.offerSdp.size() <= 32000)) &&
+             (!('answerSdp' in data) || data.answerSdp == null || (data.answerSdp is string && data.answerSdp.size() <= 32000)) &&
              data.timestamp is int && data.timestamp > 0 &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidIceCandidate(data) {
+      return isValidUidList(data.memberUids) &&
+             data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 &&
+             isValidId(data.senderMemberId) &&
+             data.sdpMid is string && data.sdpMid.size() <= 64 &&
+             data.sdpMLineIndex is int && data.sdpMLineIndex >= 0 && data.sdpMLineIndex <= 32 &&
+             data.candidate is string && data.candidate.size() >= 1 && data.candidate.size() <= 2048 &&
+             data.createdAtMs is int && data.createdAtMs > 0 &&
+             isValidTimestamp(data.createdAt);
     }
 
     function isValidShoppingItem(data) {
@@ -366,7 +396,7 @@ service cloud.firestore {
                          incoming().authorUid == request.auth.uid &&
                          request.auth.uid in incoming().memberUids &&
                          incoming().keys().hasAll(['memberUids', 'authorUid', 'chatId', 'senderId', 'text', 'type', 'status', 'timestamp', 'isEdited', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['memberUids', 'authorUid', 'chatId', 'senderId', 'text', 'type', 'status', 'timestamp', 'replyToMessageId', 'isEdited', 'reactions', 'hiddenForMemberIds', 'readByMemberIds', 'forwardedFromName', 'mediaData', 'voiceDurationSec', 'voiceWaveform', 'locationName', 'locationAddress', 'locationLat', 'locationLng', 'pollQuestion', 'pollOptions', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['memberUids', 'authorUid', 'chatId', 'senderId', 'text', 'type', 'status', 'timestamp', 'replyToMessageId', 'isEdited', 'reactions', 'hiddenForMemberIds', 'readByMemberIds', 'playedByMemberIds', 'forwardedFromName', 'mediaData', 'videoThumbnailData', 'fileName', 'fileMimeType', 'fileSizeBytes', 'chunkCount', 'voiceDurationSec', 'voiceWaveform', 'locationName', 'locationAddress', 'locationLat', 'locationLng', 'locationLiveUntil', 'pollQuestion', 'pollOptions', 'createdAt', 'updatedAt']) &&
                          isValidMessage(incoming()) &&
                          isFamilyMemberByDoc(familyId) &&
                          exists(/databases/$(database)/documents/families/$(familyId)/chats/$(incoming().chatId));
@@ -379,9 +409,24 @@ service cloud.firestore {
                          incoming().createdAt == existing().createdAt && (
                            isJoiningMemberSync(familyId) ||
                            (request.auth.uid in existing().memberUids &&
-                            incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'text', 'type', 'status', 'isEdited', 'reactions', 'hiddenForMemberIds', 'readByMemberIds', 'mediaData', 'pollQuestion', 'pollOptions', 'updatedAt']))
+                            incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'text', 'type', 'status', 'isEdited', 'reactions', 'hiddenForMemberIds', 'readByMemberIds', 'playedByMemberIds', 'mediaData', 'locationAddress', 'locationLat', 'locationLng', 'locationLiveUntil', 'pollQuestion', 'pollOptions', 'updatedAt']))
                          );
         allow delete: if isSignedIn() && isValidId(messageId) && request.auth.uid in existing().memberUids;
+      }
+
+      match /media_chunks/{chunkId} {
+        allow get: if isSignedIn() && isValidId(chunkId) && (request.auth.uid in existing().memberUids || isFamilyMemberByDoc(familyId));
+        allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+        allow create: if isSignedIn() &&
+                         isValidId(chunkId) &&
+                         incoming().authorUid == request.auth.uid &&
+                         request.auth.uid in incoming().memberUids &&
+                         incoming().keys().hasAll(['memberUids', 'authorUid', 'messageId', 'chunkIndex', 'totalChunks', 'data', 'createdAt']) &&
+                         incoming().keys().hasOnly(['memberUids', 'authorUid', 'messageId', 'chunkIndex', 'totalChunks', 'data', 'createdAt']) &&
+                         isValidMediaChunk(incoming()) &&
+                         isFamilyMemberByDoc(familyId);
+        allow update: if isJoiningMemberSync(familyId);
+        allow delete: if isSignedIn() && isValidId(chunkId) && request.auth.uid in existing().memberUids;
       }
 
       match /calls/{callId} {
@@ -392,7 +437,7 @@ service cloud.firestore {
                          incoming().authorUid == request.auth.uid &&
                          request.auth.uid in incoming().memberUids &&
                          incoming().keys().hasAll(['memberUids', 'authorUid', 'chatId', 'title', 'callerMemberId', 'targetMemberIds', 'avatarColorHex', 'avatarEmoji', 'callType', 'callStatus', 'direction', 'durationSec', 'timestamp', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['memberUids', 'authorUid', 'chatId', 'title', 'callerMemberId', 'targetMemberIds', 'avatarColorHex', 'avatarEmoji', 'callType', 'callStatus', 'direction', 'durationSec', 'connectedAt', 'timestamp', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['memberUids', 'authorUid', 'chatId', 'title', 'callerMemberId', 'targetMemberIds', 'avatarColorHex', 'avatarEmoji', 'callType', 'callStatus', 'direction', 'durationSec', 'connectedAt', 'offerSdp', 'answerSdp', 'timestamp', 'createdAt', 'updatedAt']) &&
                          isValidCallRecord(incoming()) &&
                          isFamilyMemberByDoc(familyId);
         allow update: if isSignedIn() &&
@@ -406,9 +451,24 @@ service cloud.firestore {
                            // Signaling state transition only allowed while call is NOT in a terminal state
                            (request.auth.uid in existing().memberUids &&
                             !(existing().callStatus in ['ENDED', 'DECLINED', 'MISSED']) &&
-                            incoming().diff(existing()).affectedKeys().hasOnly(['callStatus', 'direction', 'durationSec', 'connectedAt', 'updatedAt']))
+                            incoming().diff(existing()).affectedKeys().hasOnly(['callStatus', 'direction', 'durationSec', 'connectedAt', 'offerSdp', 'answerSdp', 'updatedAt']))
                          );
         allow delete: if isSignedIn() && isValidId(callId) && request.auth.uid in existing().memberUids;
+
+        match /candidates/{candidateId} {
+          allow get: if isSignedIn() && isValidId(candidateId) && (request.auth.uid in existing().memberUids || isFamilyMemberByDoc(familyId));
+          allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+          allow create: if isSignedIn() &&
+                           isValidId(candidateId) &&
+                           incoming().authorUid == request.auth.uid &&
+                           request.auth.uid in incoming().memberUids &&
+                           incoming().keys().hasAll(['memberUids', 'authorUid', 'senderMemberId', 'sdpMid', 'sdpMLineIndex', 'candidate', 'createdAtMs', 'createdAt']) &&
+                           incoming().keys().hasOnly(['memberUids', 'authorUid', 'senderMemberId', 'sdpMid', 'sdpMLineIndex', 'candidate', 'createdAtMs', 'createdAt']) &&
+                           isValidIceCandidate(incoming()) &&
+                           isFamilyMemberByDoc(familyId);
+          allow update: if false;
+          allow delete: if isSignedIn() && isValidId(candidateId) && request.auth.uid in existing().memberUids;
+        }
       }
 
       match /shoppingItems/{itemId} {

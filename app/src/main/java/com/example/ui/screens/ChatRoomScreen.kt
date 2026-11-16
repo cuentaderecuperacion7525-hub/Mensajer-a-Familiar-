@@ -59,10 +59,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
@@ -73,10 +75,15 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.SentimentSatisfied
 import androidx.compose.material3.AlertDialog
@@ -87,6 +94,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -99,6 +107,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -147,6 +156,7 @@ import com.example.ui.components.ChatMessageBubble
 import com.example.ui.components.ChatWallpaperPalette
 import com.example.ui.components.ForwardMessageDialog
 import com.example.ui.components.FullScreenImageDialog
+import com.example.ui.components.FullScreenVideoDialog
 import com.example.ui.components.ImagePreviewSendDialog
 import com.example.ui.components.LocationPickerDialog
 import com.example.ui.components.MemberAvatar
@@ -154,13 +164,16 @@ import com.example.ui.components.MessageActionsBottomSheet
 import com.example.ui.components.MessageInfoDialog
 import com.example.ui.components.PickerEmojis
 import com.example.ui.components.PollCreatorDialog
+import com.example.ui.components.VideoPreviewSendDialog
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.LocalDarkTheme
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.viewmodel.ChatThreadUi
 import com.example.ui.viewmodel.VoiceRecordingState
+import com.example.util.CameraCaptureHelper
 import com.example.util.MessageFormatter
 import com.example.util.TimeFormatters
+import java.io.File
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -180,7 +193,17 @@ fun ChatRoomScreen(
     onBack: () -> Unit,
     onSendText: (text: String, replyToId: String?) -> Unit,
     onSendImage: (uri: Uri, caption: String, replyToId: String?) -> Unit,
-    onSendLocation: (name: String, address: String, lat: Double?, lng: Double?, replyToId: String?) -> Unit,
+    onSendLocation: (name: String, address: String, lat: Double?, lng: Double?, replyToId: String?, liveDurationMinutes: Int) -> Unit,
+    onSendDocument: (uri: Uri, replyToId: String?) -> Unit = { _, _ -> },
+    onSendVideo: (uri: Uri, caption: String, replyToId: String?) -> Unit = { _, _, _ -> },
+    onOpenDocument: (ChatMessageEntity) -> Unit = {},
+    onOpenVideo: (ChatMessageEntity, (File) -> Unit) -> Unit = { _, _ -> },
+    voicePlaybackSpeed: Float = 1.0f,
+    onCycleVoiceSpeed: () -> Unit = {},
+    mediaTransferProgress: Map<String, Float> = emptyMap(),
+    activeUploadLabel: String? = null,
+    activeUploadProgress: Float? = null,
+    onStopLiveLocation: (messageId: String) -> Unit = {},
     onSendPoll: (question: String, options: List<String>) -> Unit,
     onVotePoll: (messageId: String, optionId: String) -> Unit,
     onEditMessage: (messageId: String, newText: String) -> Unit,
@@ -188,6 +211,8 @@ fun ChatRoomScreen(
     onSelectWallpaper: (String) -> Unit = {},
     onToggleReaction: (messageId: String, emoji: String) -> Unit,
     onTogglePin: (messageId: String) -> Unit,
+    onTogglePinChat: () -> Unit = {},
+    onToggleMuteChat: () -> Unit = {},
     onDeleteForMe: (List<String>) -> Unit,
     onDeleteForEveryone: (List<String>) -> Unit,
     onStartVoiceRecording: () -> Unit,
@@ -236,11 +261,70 @@ fun ChatRoomScreen(
     var showLocationDialog by remember { mutableStateOf(false) }
     var showPollDialog by remember { mutableStateOf(false) }
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingVideoUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var viewerImageUri by remember { mutableStateOf<String?>(null) }
+    var viewerVideoFile by remember { mutableStateOf<File?>(null) }
+    var viewerVideoCaption by remember { mutableStateOf("") }
+
+    // Capture initial unread incoming messages snapshot upon opening this chat (before they are marked read)
+    var initialUnreadMessageId by remember(chatUi.chat.id) { mutableStateOf<String?>(null) }
+    var initialUnreadCount by remember(chatUi.chat.id) { mutableIntStateOf(0) }
+    var unreadSnapshotCaptured by remember(chatUi.chat.id) { mutableStateOf(false) }
+
+    LaunchedEffect(chatUi.chat.id, visibleMessages.isNotEmpty()) {
+        if (!unreadSnapshotCaptured && visibleMessages.isNotEmpty()) {
+            unreadSnapshotCaptured = true
+            val unreadList = visibleMessages.filter { msg ->
+                msg.senderId != activeMember.id &&
+                    msg.type != MessageType.DELETED &&
+                    !JsonHelpers.decodeStringList(msg.readByMemberIdsJson).contains(activeMember.id)
+            }
+            if (unreadList.isNotEmpty()) {
+                initialUnreadMessageId = unreadList.first().id
+                initialUnreadCount = unreadList.size
+            }
+        }
+    }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
         onResult = { uri -> if (uri != null) pendingImageUri = uri }
+    )
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri -> if (uri != null) pendingVideoUri = uri }
+    )
+    val cameraCaptureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+        onResult = { success ->
+            if (success && pendingCameraUri != null) {
+                pendingImageUri = pendingCameraUri
+            }
+        }
+    )
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted ->
+            if (granted) {
+                val uri = CameraCaptureHelper.createTempPhotoUri(context)
+                if (uri != null) {
+                    pendingCameraUri = uri
+                    cameraCaptureLauncher.launch(uri)
+                }
+            } else {
+                scope.launch { snackbarHostState.showSnackbar("Permiso de cámara necesario para tomar foto") }
+            }
+        }
+    )
+    val documentPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            if (uri != null) {
+                onSendDocument(uri, replyingTo?.id)
+                replyingTo = null
+            }
+        }
     )
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -286,7 +370,15 @@ fun ChatRoomScreen(
 
     LaunchedEffect(visibleMessages.size) {
         if (visibleMessages.isNotEmpty() && !isSearchOpen) {
-            if (lastObservedMsgCount == 0 || isNearBottom) {
+            if (lastObservedMsgCount == 0) {
+                val unreadTargetId = initialUnreadMessageId
+                val unreadIdx = if (unreadTargetId != null) {
+                    visibleMessages.indexOfFirst { it.id == unreadTargetId }
+                } else -1
+                val targetIndex = if (unreadIdx >= 0) unreadIdx else visibleMessages.lastIndex
+                listState.scrollToItem(targetIndex)
+                unseenWhileScrolledUp = 0
+            } else if (isNearBottom) {
                 listState.animateScrollToItem(visibleMessages.lastIndex)
                 unseenWhileScrolledUp = 0
             } else if (visibleMessages.size > lastObservedMsgCount) {
@@ -463,12 +555,32 @@ fun ChatRoomScreen(
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column {
-                                        Text(
-                                            text = chatUi.displayTitle,
-                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = chatUi.displayTitle,
+                                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (chatUi.isMuted) {
+                                                Spacer(modifier = Modifier.width(5.dp))
+                                                Icon(
+                                                    imageVector = Icons.Filled.NotificationsOff,
+                                                    contentDescription = "Notificaciones silenciadas",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                            }
+                                            if (chatUi.isPinned) {
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Icon(
+                                                    imageVector = Icons.Filled.PushPin,
+                                                    contentDescription = "Chat fijado",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
                                         val isLiveStatus = chatUi.isOnline ||
                                             chatUi.subtitleStatus.contains("escribiendo", ignoreCase = true) ||
                                             chatUi.subtitleStatus.contains("grabando", ignoreCase = true)
@@ -587,6 +699,32 @@ fun ChatRoomScreen(
                                             },
                                             modifier = Modifier.testTag("chat_menu_video_call")
                                         )
+                                        HorizontalDivider()
+                                        DropdownMenuItem(
+                                            text = { Text(if (chatUi.isPinned) "Desfijar este chat" else "Fijar este chat arriba") },
+                                            leadingIcon = {
+                                                Icon(Icons.Filled.PushPin, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                showHeaderMenu = false
+                                                onTogglePinChat()
+                                            },
+                                            modifier = Modifier.testTag("chat_menu_toggle_pin_chat")
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(if (chatUi.isMuted) "Activar notificaciones" else "Silenciar notificaciones") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = if (chatUi.isMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                                                    contentDescription = null
+                                                )
+                                            },
+                                            onClick = {
+                                                showHeaderMenu = false
+                                                onToggleMuteChat()
+                                            },
+                                            modifier = Modifier.testTag("chat_menu_toggle_mute_chat")
+                                        )
                                     }
                                 }
                             },
@@ -666,6 +804,29 @@ fun ChatRoomScreen(
                         contentPadding = PaddingValues(vertical = 10.dp)
                     ) {
                         items(visibleMessages, key = { it.id }) { msg ->
+                            if (initialUnreadMessageId == msg.id && initialUnreadCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(16.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shadowElevation = 2.dp,
+                                        modifier = Modifier.testTag("unread_messages_divider")
+                                    ) {
+                                        Text(
+                                            text = if (initialUnreadCount == 1) "1 mensaje sin leer"
+                                            else "$initialUnreadCount mensajes sin leer",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                                        )
+                                    }
+                                }
+                            }
                             val sender = membersMap[msg.senderId]
                             val repliedMsg = msg.replyToMessageId?.let { messageMap[it] }
                             val repliedSenderName = repliedMsg?.senderId?.let { membersMap[it]?.name }
@@ -698,7 +859,18 @@ fun ChatRoomScreen(
                                 onSwipeReply = {
                                     editingMessage = null
                                     replyingTo = msg
-                                }
+                                },
+                                onStopLiveLocation = { onStopLiveLocation(msg.id) },
+                                voicePlaybackSpeed = voicePlaybackSpeed,
+                                onCycleVoiceSpeed = onCycleVoiceSpeed,
+                                downloadProgress = mediaTransferProgress[msg.id],
+                                onVideoClick = { videoMsg ->
+                                    onOpenVideo(videoMsg) { readyFile ->
+                                        viewerVideoCaption = videoMsg.text
+                                        viewerVideoFile = readyFile
+                                    }
+                                },
+                                onDocumentClick = onOpenDocument
                             )
                         }
                     }
@@ -746,6 +918,46 @@ fun ChatRoomScreen(
                             WindowInsets.navigationBars.union(WindowInsets.ime).only(WindowInsetsSides.Bottom)
                         )
                 ) {
+                    if (activeUploadLabel != null) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 3.dp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 2.dp)
+                                .testTag("upload_progress_banner")
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = activeUploadLabel,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    val pct = ((activeUploadProgress ?: 0f) * 100).toInt().coerceIn(1, 100)
+                                    Text(
+                                        text = "$pct%",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                LinearProgressIndicator(
+                                    progress = { (activeUploadProgress ?: 0.05f).coerceIn(0.05f, 1f) },
+                                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(4.dp))
+                                )
+                            }
+                        }
+                    }
+
                     Surface(
                         shape = RoundedCornerShape(26.dp),
                         color = MaterialTheme.colorScheme.surface,
@@ -816,7 +1028,7 @@ fun ChatRoomScreen(
                             }
 
                             if (voiceRecording.isRecording) {
-                                // Voice Recording Bar inside the floating pill
+                                // Voice Recording Bar (Hands-Free Locked Mode) inside the floating pill
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -829,13 +1041,36 @@ fun ChatRoomScreen(
                                             .clip(CircleShape)
                                             .background(DangerRed)
                                     )
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = TimeFormatters.formatDuration(voiceRecording.elapsedSec),
                                         style = MaterialTheme.typography.titleSmall,
                                         color = DangerRed
                                     )
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(50.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Lock,
+                                                contentDescription = "Manos libres activo",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Text(
+                                                text = "Manos libres",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Row(
                                         modifier = Modifier.weight(1f).height(28.dp),
                                         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -976,6 +1211,26 @@ fun ChatRoomScreen(
                                             onDismissRequest = { showAttachmentMenu = false }
                                         ) {
                                             DropdownMenuItem(
+                                                text = { Text("Tomar foto") },
+                                                leadingIcon = { Icon(Icons.Filled.CameraAlt, contentDescription = null) },
+                                                onClick = {
+                                                    showAttachmentMenu = false
+                                                    val hasCam = ContextCompat.checkSelfPermission(
+                                                        context, Manifest.permission.CAMERA
+                                                    ) == PackageManager.PERMISSION_GRANTED
+                                                    if (hasCam) {
+                                                        val uri = CameraCaptureHelper.createTempPhotoUri(context)
+                                                        if (uri != null) {
+                                                            pendingCameraUri = uri
+                                                            cameraCaptureLauncher.launch(uri)
+                                                        }
+                                                    } else {
+                                                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                                    }
+                                                },
+                                                modifier = Modifier.testTag("attach_take_photo")
+                                            )
+                                            DropdownMenuItem(
                                                 text = { Text("Foto de galería") },
                                                 leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null) },
                                                 onClick = {
@@ -983,7 +1238,28 @@ fun ChatRoomScreen(
                                                     photoPickerLauncher.launch(
                                                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                                     )
-                                                }
+                                                },
+                                                modifier = Modifier.testTag("attach_gallery_photo")
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Video de galería (corto)") },
+                                                leadingIcon = { Icon(Icons.Filled.Movie, contentDescription = null) },
+                                                onClick = {
+                                                    showAttachmentMenu = false
+                                                    videoPickerLauncher.launch(
+                                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                                                    )
+                                                },
+                                                modifier = Modifier.testTag("attach_gallery_video")
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Documento o archivo (hasta 5 MB)") },
+                                                leadingIcon = { Icon(Icons.Filled.Description, contentDescription = null) },
+                                                onClick = {
+                                                    showAttachmentMenu = false
+                                                    documentPickerLauncher.launch(arrayOf("*/*"))
+                                                },
+                                                modifier = Modifier.testTag("attach_document")
                                             )
                                             DropdownMenuItem(
                                                 text = { Text("Enviar ubicación") },
@@ -1006,7 +1282,8 @@ fun ChatRoomScreen(
                                                             )
                                                         )
                                                     }
-                                                }
+                                                },
+                                                modifier = Modifier.testTag("attach_location")
                                             )
                                             DropdownMenuItem(
                                                 text = { Text("Crear encuesta") },
@@ -1014,7 +1291,8 @@ fun ChatRoomScreen(
                                                 onClick = {
                                                     showAttachmentMenu = false
                                                     showPollDialog = true
-                                                }
+                                                },
+                                                modifier = Modifier.testTag("attach_poll")
                                             )
                                         }
                                     }
@@ -1052,15 +1330,30 @@ fun ChatRoomScreen(
                                             }
                                         }
                                     } else {
+                                        val startHandsFreeMic = {
+                                            val granted = ContextCompat.checkSelfPermission(
+                                                context, Manifest.permission.RECORD_AUDIO
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                            if (granted) onStartVoiceRecording()
+                                            else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
                                         IconButton(
-                                            onClick = {
-                                                val granted = ContextCompat.checkSelfPermission(
-                                                    context, Manifest.permission.RECORD_AUDIO
-                                                ) == PackageManager.PERMISSION_GRANTED
-                                                if (granted) onStartVoiceRecording()
-                                                else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                            },
-                                            modifier = Modifier.testTag("record_voice_button")
+                                            onClick = startHandsFreeMic,
+                                            modifier = Modifier
+                                                .pointerInput(Unit) {
+                                                    var dragUpAccum = 0f
+                                                    detectVerticalDragGestures(
+                                                        onDragStart = { dragUpAccum = 0f },
+                                                        onVerticalDrag = { _, dragAmount ->
+                                                            dragUpAccum += dragAmount
+                                                            if (dragUpAccum < -32f) {
+                                                                dragUpAccum = 0f
+                                                                startHandsFreeMic()
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                                .testTag("record_voice_button")
                                         ) {
                                             Box(
                                                 modifier = Modifier
@@ -1071,7 +1364,7 @@ fun ChatRoomScreen(
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Filled.Mic,
-                                                    contentDescription = "Grabar nota de voz",
+                                                    contentDescription = "Grabar nota de voz (toca o desliza hacia arriba para manos libres)",
                                                     tint = MaterialTheme.colorScheme.onPrimary,
                                                     modifier = Modifier.size(20.dp)
                                                 )
@@ -1222,15 +1515,35 @@ fun ChatRoomScreen(
         )
     }
 
+    pendingVideoUri?.let { uri ->
+        VideoPreviewSendDialog(
+            videoUri = uri,
+            onDismiss = { pendingVideoUri = null },
+            onSend = { caption ->
+                onSendVideo(uri, caption, replyingTo?.id)
+                replyingTo = null
+                pendingVideoUri = null
+            }
+        )
+    }
+
     viewerImageUri?.let { uri ->
         FullScreenImageDialog(imageUri = uri, onDismiss = { viewerImageUri = null })
+    }
+
+    viewerVideoFile?.let { file ->
+        FullScreenVideoDialog(
+            videoFile = file,
+            caption = viewerVideoCaption,
+            onDismiss = { viewerVideoFile = null }
+        )
     }
 
     if (showLocationDialog) {
         LocationPickerDialog(
             onDismiss = { showLocationDialog = false },
-            onSendLocation = { name, address, lat, lng ->
-                onSendLocation(name, address, lat, lng, replyingTo?.id)
+            onSendLocation = { name, address, lat, lng, liveDurationMinutes ->
+                onSendLocation(name, address, lat, lng, replyingTo?.id, liveDurationMinutes)
                 replyingTo = null
                 showLocationDialog = false
             }
