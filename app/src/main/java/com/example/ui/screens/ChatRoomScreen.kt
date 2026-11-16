@@ -9,6 +9,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +43,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -68,6 +70,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.outlined.SentimentSatisfied
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -98,7 +101,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -195,6 +201,7 @@ fun ChatRoomScreen(
     var showBatchDeleteDialog by remember { mutableStateOf(false) }
 
     var showEmojiDrawer by remember { mutableStateOf(false) }
+    var isComposerFocused by remember { mutableStateOf(false) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
     var showHeaderMenu by remember { mutableStateOf(false) }
     var showLocationDialog by remember { mutableStateOf(false) }
@@ -619,295 +626,391 @@ fun ChatRoomScreen(
                     }
                 }
 
-                // Composer Area
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 3.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.windowInsetsPadding(
+                // Composer Area (Floating Pill style adapted to app Material 3 colors)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .windowInsetsPadding(
                             WindowInsets.navigationBars.union(WindowInsets.ime).only(WindowInsetsSides.Bottom)
                         )
+                ) {
+                    // Contextual Quick Format Toolbar (*negrita*, _cursiva_, ~tachado~)
+                    AnimatedVisibility(
+                        visible = !voiceRecording.isRecording && (isComposerFocused || inputText.isNotBlank())
                     ) {
-                        // Reply / Edit Banner
-                        val bannerTarget = editingMessage ?: replyingTo
-                        if (bannerTarget != null) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-                                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+                                ),
+                                tonalElevation = 1.dp
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = if (editingMessage != null) "Editando mensaje"
-                                        else "Respondiendo a ${membersMap[bannerTarget.senderId]?.name ?: "Mensaje"}",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Text(
-                                        text = MessageFormatter.stripMarkdownForPreview(bannerTarget.text)
-                                            .ifBlank { bannerTarget.pollQuestion ?: "Adjunto" },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                IconButton(onClick = {
-                                    if (editingMessage != null) {
-                                        editingMessage = null
-                                        inputText = ""
-                                    }
-                                    replyingTo = null
-                                }) {
-                                    Icon(Icons.Filled.Close, contentDescription = "Cancelar")
-                                }
-                            }
-                        }
-
-                        // Quick Format Toolbar (*negrita*, _cursiva_, ~tachado~)
-                        if (!voiceRecording.isRecording) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = "Formato:",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                FormatChipButton(
-                                    icon = Icons.Filled.FormatBold,
-                                    desc = "Negrita",
-                                    tag = "format_bold_button"
-                                ) { inputText = wrapOrAppendToken(inputText, "*") }
-                                FormatChipButton(
-                                    icon = Icons.Filled.FormatItalic,
-                                    desc = "Cursiva",
-                                    tag = "format_italic_button"
-                                ) { inputText = wrapOrAppendToken(inputText, "_") }
-                                FormatChipButton(
-                                    icon = Icons.Filled.FormatStrikethrough,
-                                    desc = "Tachado",
-                                    tag = "format_strike_button"
-                                ) { inputText = wrapOrAppendToken(inputText, "~") }
-                            }
-                        }
-
-                        if (voiceRecording.isRecording) {
-                            // Voice Recording Bar
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(CircleShape)
-                                        .background(DangerRed)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = TimeFormatters.formatDuration(voiceRecording.elapsedSec),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = DangerRed
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
                                 Row(
-                                    modifier = Modifier.weight(1f).height(28.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = "Formato:",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    FormatChipButton(
+                                        icon = Icons.Filled.FormatBold,
+                                        desc = "Negrita",
+                                        tag = "format_bold_button"
+                                    ) { inputText = wrapOrAppendToken(inputText, "*") }
+                                    FormatChipButton(
+                                        icon = Icons.Filled.FormatItalic,
+                                        desc = "Cursiva",
+                                        tag = "format_italic_button"
+                                    ) { inputText = wrapOrAppendToken(inputText, "_") }
+                                    FormatChipButton(
+                                        icon = Icons.Filled.FormatStrikethrough,
+                                        desc = "Tachado",
+                                        tag = "format_strike_button"
+                                    ) { inputText = wrapOrAppendToken(inputText, "~") }
+                                }
+                            }
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(26.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 2.dp,
+                        shadowElevation = 4.dp,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            // Reply / Edit Banner docked cleanly inside the pill
+                            val bannerTarget = editingMessage ?: replyingTo
+                            if (bannerTarget != null) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                                        .padding(horizontal = 14.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    voiceRecording.amplitudes.forEach { amp ->
+                                    Box(
+                                        modifier = Modifier
+                                            .width(3.dp)
+                                            .height(28.dp)
+                                            .clip(RoundedCornerShape(2.dp))
+                                            .background(MaterialTheme.colorScheme.primary)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (editingMessage != null) "Editando mensaje"
+                                            else "Respondiendo a ${membersMap[bannerTarget.senderId]?.name ?: "Mensaje"}",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = MessageFormatter.stripMarkdownForPreview(bannerTarget.text)
+                                                .ifBlank { bannerTarget.pollQuestion ?: "Adjunto" },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            if (editingMessage != null) {
+                                                editingMessage = null
+                                                inputText = ""
+                                            }
+                                            replyingTo = null
+                                        },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription = "Cancelar",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                            }
+
+                            if (voiceRecording.isRecording) {
+                                // Voice Recording Bar inside the floating pill
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(DangerRed)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = TimeFormatters.formatDuration(voiceRecording.elapsedSec),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = DangerRed
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Row(
+                                        modifier = Modifier.weight(1f).height(28.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        voiceRecording.amplitudes.forEach { amp ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .fillMaxHeight(amp.coerceIn(0.2f, 1f))
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(MaterialTheme.colorScheme.primary)
+                                            )
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = onCancelVoiceRecording,
+                                        modifier = Modifier.testTag("cancel_voice_button")
+                                    ) {
+                                        Icon(Icons.Filled.Delete, contentDescription = "Cancelar audio", tint = DangerRed)
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            onSendVoiceRecording(replyingTo?.id)
+                                            replyingTo = null
+                                        },
+                                        modifier = Modifier.testTag("send_voice_button")
+                                    ) {
                                         Box(
                                             modifier = Modifier
-                                                .weight(1f)
-                                                .fillMaxHeight(amp.coerceIn(0.2f, 1f))
-                                                .clip(RoundedCornerShape(2.dp))
-                                                .background(MaterialTheme.colorScheme.primary)
-                                        )
+                                                .size(40.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primary),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                Icons.AutoMirrored.Filled.Send,
+                                                contentDescription = "Enviar nota de voz",
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
                                     }
                                 }
-                                IconButton(
-                                    onClick = onCancelVoiceRecording,
-                                    modifier = Modifier.testTag("cancel_voice_button")
-                                ) {
-                                    Icon(Icons.Filled.Delete, contentDescription = "Cancelar audio", tint = DangerRed)
-                                }
-                                IconButton(
-                                    onClick = {
-                                        onSendVoiceRecording(replyingTo?.id)
-                                        replyingTo = null
-                                    },
+                            } else {
+                                // Unified Pill Row: [ Emoji | Mensaje | Attach | (Send / Mic) ]
+                                Row(
                                     modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primary)
-                                        .testTag("send_voice_button")
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.Bottom
                                 ) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.Send,
-                                        contentDescription = "Enviar nota de voz",
-                                        tint = MaterialTheme.colorScheme.onPrimary
-                                    )
-                                }
-                            }
-                        } else {
-                            // Standard Composer Row
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.Bottom
-                            ) {
-                                IconButton(
-                                    onClick = {
-                                        val nextOpen = !showEmojiDrawer
-                                        if (nextOpen) keyboardController?.hide()
-                                        showEmojiDrawer = nextOpen
-                                    },
-                                    modifier = Modifier.testTag("toggle_emoji_button")
-                                ) {
-                                    Icon(
-                                        Icons.Filled.EmojiEmotions,
-                                        contentDescription = "Emojis",
-                                        tint = if (showEmojiDrawer) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                OutlinedTextField(
-                                    value = inputText,
-                                    onValueChange = {
-                                        inputText = it
-                                        onTypingChange(it.isNotBlank())
-                                    },
-                                    placeholder = { Text("Escribe un mensaje...") },
-                                    maxLines = 4,
-                                    shape = RoundedCornerShape(24.dp),
-                                    modifier = Modifier.weight(1f).testTag("chat_message_input")
-                                )
-                                Box {
                                     IconButton(
-                                        onClick = { showAttachmentMenu = true },
-                                        modifier = Modifier.testTag("attach_button")
+                                        onClick = {
+                                            val nextOpen = !showEmojiDrawer
+                                            if (nextOpen) keyboardController?.hide()
+                                            showEmojiDrawer = nextOpen
+                                        },
+                                        modifier = Modifier.testTag("toggle_emoji_button")
                                     ) {
                                         Icon(
-                                            Icons.Filled.AttachFile,
-                                            contentDescription = "Adjuntar multimedia",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            imageVector = if (showEmojiDrawer) Icons.Filled.EmojiEmotions else Icons.Outlined.SentimentSatisfied,
+                                            contentDescription = "Emojis",
+                                            tint = if (showEmojiDrawer) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(24.dp)
                                         )
                                     }
-                                    DropdownMenu(
-                                        expanded = showAttachmentMenu,
-                                        onDismissRequest = { showAttachmentMenu = false }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(horizontal = 2.dp, vertical = 12.dp),
+                                        contentAlignment = Alignment.CenterStart
                                     ) {
-                                        DropdownMenuItem(
-                                            text = { Text("Foto de galería") },
-                                            leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null) },
-                                            onClick = {
-                                                showAttachmentMenu = false
-                                                photoPickerLauncher.launch(
-                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                                )
-                                            }
+                                        if (inputText.isEmpty()) {
+                                            Text(
+                                                text = "Mensaje",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        BasicTextField(
+                                            value = inputText,
+                                            onValueChange = {
+                                                inputText = it
+                                                onTypingChange(it.isNotBlank())
+                                            },
+                                            maxLines = 5,
+                                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .onFocusChanged { isComposerFocused = it.isFocused }
+                                                .testTag("chat_message_input")
                                         )
-                                        DropdownMenuItem(
-                                            text = { Text("Enviar ubicación") },
-                                            leadingIcon = { Icon(Icons.Filled.LocationOn, contentDescription = null) },
-                                            onClick = {
-                                                showAttachmentMenu = false
-                                                val hasFine = ContextCompat.checkSelfPermission(
-                                                    context, Manifest.permission.ACCESS_FINE_LOCATION
-                                                ) == PackageManager.PERMISSION_GRANTED
-                                                val hasCoarse = ContextCompat.checkSelfPermission(
-                                                    context, Manifest.permission.ACCESS_COARSE_LOCATION
-                                                ) == PackageManager.PERMISSION_GRANTED
-                                                if (hasFine || hasCoarse) {
-                                                    showLocationDialog = true
-                                                } else {
-                                                    locationPermissionLauncher.launch(
-                                                        arrayOf(
-                                                            Manifest.permission.ACCESS_FINE_LOCATION,
-                                                            Manifest.permission.ACCESS_COARSE_LOCATION
-                                                        )
+                                    }
+
+                                    Box {
+                                        IconButton(
+                                            onClick = { showAttachmentMenu = true },
+                                            modifier = Modifier.testTag("attach_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.AttachFile,
+                                                contentDescription = "Adjuntar multimedia",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier
+                                                    .size(22.dp)
+                                                    .rotate(40f)
+                                            )
+                                        }
+                                        DropdownMenu(
+                                            expanded = showAttachmentMenu,
+                                            onDismissRequest = { showAttachmentMenu = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text("Foto de galería") },
+                                                leadingIcon = { Icon(Icons.Filled.Image, contentDescription = null) },
+                                                onClick = {
+                                                    showAttachmentMenu = false
+                                                    photoPickerLauncher.launch(
+                                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                                     )
                                                 }
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Crear encuesta") },
-                                            leadingIcon = { Icon(Icons.Filled.Poll, contentDescription = null) },
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Enviar ubicación") },
+                                                leadingIcon = { Icon(Icons.Filled.LocationOn, contentDescription = null) },
+                                                onClick = {
+                                                    showAttachmentMenu = false
+                                                    val hasFine = ContextCompat.checkSelfPermission(
+                                                        context, Manifest.permission.ACCESS_FINE_LOCATION
+                                                    ) == PackageManager.PERMISSION_GRANTED
+                                                    val hasCoarse = ContextCompat.checkSelfPermission(
+                                                        context, Manifest.permission.ACCESS_COARSE_LOCATION
+                                                    ) == PackageManager.PERMISSION_GRANTED
+                                                    if (hasFine || hasCoarse) {
+                                                        showLocationDialog = true
+                                                    } else {
+                                                        locationPermissionLauncher.launch(
+                                                            arrayOf(
+                                                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                                                Manifest.permission.ACCESS_COARSE_LOCATION
+                                                            )
+                                                        )
+                                                    }
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Crear encuesta") },
+                                                leadingIcon = { Icon(Icons.Filled.Poll, contentDescription = null) },
+                                                onClick = {
+                                                    showAttachmentMenu = false
+                                                    showPollDialog = true
+                                                }
+                                            )
+                                        }
+                                    }
+
+                                    if (inputText.isNotBlank()) {
+                                        IconButton(
                                             onClick = {
-                                                showAttachmentMenu = false
-                                                showPollDialog = true
+                                                val editing = editingMessage
+                                                if (editing != null) {
+                                                    onEditMessage(editing.id, inputText)
+                                                    editingMessage = null
+                                                } else {
+                                                    onSendText(inputText, replyingTo?.id)
+                                                    replyingTo = null
+                                                }
+                                                inputText = ""
+                                                showEmojiDrawer = false
+                                            },
+                                            modifier = Modifier.testTag("send_message_button")
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.primary),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                                    contentDescription = "Enviar mensaje",
+                                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
                                             }
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(4.dp))
-                                if (inputText.isNotBlank()) {
-                                    IconButton(
-                                        onClick = {
-                                            val editing = editingMessage
-                                            if (editing != null) {
-                                                onEditMessage(editing.id, inputText)
-                                                editingMessage = null
-                                            } else {
-                                                onSendText(inputText, replyingTo?.id)
-                                                replyingTo = null
+                                        }
+                                    } else {
+                                        IconButton(
+                                            onClick = {
+                                                val granted = ContextCompat.checkSelfPermission(
+                                                    context, Manifest.permission.RECORD_AUDIO
+                                                ) == PackageManager.PERMISSION_GRANTED
+                                                if (granted) onStartVoiceRecording()
+                                                else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                            },
+                                            modifier = Modifier.testTag("record_voice_button")
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.primary),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Mic,
+                                                    contentDescription = "Grabar nota de voz",
+                                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
                                             }
-                                            inputText = ""
-                                            showEmojiDrawer = false
-                                        },
-                                        modifier = Modifier
-                                            .size(48.dp)
-                                            .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.primary)
-                                            .testTag("send_message_button")
-                                    ) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.Send,
-                                            contentDescription = "Enviar mensaje",
-                                            tint = MaterialTheme.colorScheme.onPrimary
-                                        )
-                                    }
-                                } else {
-                                    IconButton(
-                                        onClick = {
-                                            val granted = ContextCompat.checkSelfPermission(
-                                                context, Manifest.permission.RECORD_AUDIO
-                                            ) == PackageManager.PERMISSION_GRANTED
-                                            if (granted) onStartVoiceRecording()
-                                            else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                        },
-                                        modifier = Modifier
-                                            .size(48.dp)
-                                            .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.primary)
-                                            .testTag("record_voice_button")
-                                    ) {
-                                        Icon(
-                                            Icons.Filled.Mic,
-                                            contentDescription = "Grabar nota de voz",
-                                            tint = MaterialTheme.colorScheme.onPrimary
-                                        )
+                                        }
                                     }
                                 }
                             }
                         }
+                    }
 
-                        AnimatedVisibility(visible = showEmojiDrawer) {
+                    AnimatedVisibility(visible = showEmojiDrawer) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 2.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             FlowRow(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                                     .padding(12.dp),
                                 horizontalArrangement = Arrangement.SpaceEvenly,
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
