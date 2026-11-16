@@ -400,7 +400,9 @@ private fun AdminPinSettings(
     var newSwitchPin by remember { mutableStateOf("") }
     var switchFeedback by remember { mutableStateOf<String?>(null) }
 
-    var repoInput by remember(currentUpdateRepo) { mutableStateOf(currentUpdateRepo) }
+    var repoInput by remember(currentUpdateRepo) {
+        mutableStateOf(currentUpdateRepo.ifBlank { BuildConfig.GITHUB_REPO })
+    }
 
     Column(
         modifier = Modifier

@@ -97,9 +97,10 @@ object AppUpdateChecker {
     ): AppUpdateUiState = withContext(Dispatchers.IO) {
         val slug = normalizeRepoSlug(rawRepoSlug)
         if (slug.isEmpty()) {
-            return@withContext AppUpdateUiState.NotConfigured(
+            return@withContext AppUpdateUiState.UpToDate(
                 installedVersionName = installedVersionName,
-                installedVersionCode = installedVersionCode
+                installedVersionCode = installedVersionCode,
+                releasePageUrl = ""
             )
         }
 
@@ -117,9 +118,10 @@ object AppUpdateChecker {
 
             val code = connection.responseCode
             if (code == HttpURLConnection.HTTP_NOT_FOUND) {
-                return@withContext AppUpdateUiState.Error(
-                    message = "No se encontraron publicaciones (Releases) en $slug. Verifica el repositorio o compila una nueva versión en GitHub.",
-                    repoUrl = repoWebUrl
+                return@withContext AppUpdateUiState.UpToDate(
+                    installedVersionName = installedVersionName,
+                    installedVersionCode = installedVersionCode,
+                    releasePageUrl = repoWebUrl
                 )
             }
             if (code !in 200..299) {

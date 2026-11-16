@@ -751,11 +751,11 @@ fun AppUpdateDialog(
                                 )
                                 Column {
                                     Text(
-                                        text = "Tu aplicación está al día",
+                                        text = "Tienes la última versión",
                                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
                                     )
                                     Text(
-                                        text = "Ya tienes la versión más reciente (v${updateState.installedVersionName}).",
+                                        text = "Ya tienes la versión más reciente instalada (v${updateState.installedVersionName}).",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -766,11 +766,13 @@ fun AppUpdateDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = { onOpenUrl(updateState.releasePageUrl) },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Ver GitHub")
+                            if (updateState.releasePageUrl.isNotBlank()) {
+                                OutlinedButton(
+                                    onClick = { onOpenUrl(updateState.releasePageUrl) },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Ver GitHub")
+                                }
                             }
                             Button(
                                 onClick = onCheckAgain,
@@ -780,7 +782,7 @@ fun AppUpdateDialog(
                             ) {
                                 Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Buscar")
+                                Text("Buscar de nuevo")
                             }
                         }
                     }

@@ -413,9 +413,10 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     fun checkForAppUpdate() {
         viewModelScope.launch {
             _updateState.value = AppUpdateUiState.Checking
-            val slug = prefs.updateRepoSlugFlow.first()
+            val savedSlug = prefs.updateRepoSlugFlow.first()
+            val effectiveSlug = savedSlug.ifBlank { BuildConfig.GITHUB_REPO }
             _updateState.value = AppUpdateChecker.checkLatestRelease(
-                rawRepoSlug = slug,
+                rawRepoSlug = effectiveSlug,
                 installedVersionName = BuildConfig.VERSION_NAME,
                 installedVersionCode = BuildConfig.VERSION_CODE
             )
