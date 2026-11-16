@@ -102,7 +102,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -110,7 +109,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -187,7 +188,7 @@ fun ChatRoomScreen(
     }
     val messageMap = remember(visibleMessages) { visibleMessages.associateBy { it.id } }
 
-    var inputText by remember { mutableStateOf("") }
+    var inputTextValue by remember { mutableStateOf(TextFieldValue("")) }
     var replyingTo by remember { mutableStateOf<ChatMessageEntity?>(null) }
     var editingMessage by remember { mutableStateOf<ChatMessageEntity?>(null) }
     var actionTargetMessage by remember { mutableStateOf<ChatMessageEntity?>(null) }
@@ -201,7 +202,6 @@ fun ChatRoomScreen(
     var showBatchDeleteDialog by remember { mutableStateOf(false) }
 
     var showEmojiDrawer by remember { mutableStateOf(false) }
-    var isComposerFocused by remember { mutableStateOf(false) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
     var showHeaderMenu by remember { mutableStateOf(false) }
     var showLocationDialog by remember { mutableStateOf(false) }
@@ -634,10 +634,15 @@ fun ChatRoomScreen(
                             WindowInsets.navigationBars.union(WindowInsets.ime).only(WindowInsetsSides.Bottom)
                         )
                 ) {
-                    // Contextual Quick Format Toolbar (*negrita*, _cursiva_, ~tachado~)
-                    AnimatedVisibility(
-                        visible = !voiceRecording.isRecording && (isComposerFocused || inputText.isNotBlank())
-                    ) {
+                    // Contextual Quick Format Toolbar (*negrita*, _cursiva_, ~tachado~) shown only when text is selected
+                    val hasTextSelection = !voiceRecording.isRecording &&
+                        !inputTextValue.selection.collapsed &&
+                        inputTextValue.text.substring(
+                            inputTextValue.selection.min.coerceIn(0, inputTextValue.text.length),
+                            inputTextValue.selection.max.coerceIn(0, inputTextValue.text.length)
+                        ).isNotBlank()
+
+                    AnimatedVisibility(visible = hasTextSelection) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -668,17 +673,17 @@ fun ChatRoomScreen(
                                         icon = Icons.Filled.FormatBold,
                                         desc = "Negrita",
                                         tag = "format_bold_button"
-                                    ) { inputText = wrapOrAppendToken(inputText, "*") }
+                                    ) { inputTextValue = applyFormatToSelection(inputTextValue, "*") }
                                     FormatChipButton(
                                         icon = Icons.Filled.FormatItalic,
                                         desc = "Cursiva",
                                         tag = "format_italic_button"
-                                    ) { inputText = wrapOrAppendToken(inputText, "_") }
+                                    ) { inputTextValue = applyFormatToSelection(inputTextValue, "_") }
                                     FormatChipButton(
                                         icon = Icons.Filled.FormatStrikethrough,
                                         desc = "Tachado",
                                         tag = "format_strike_button"
-                                    ) { inputText = wrapOrAppendToken(inputText, "~") }
+                                    ) { inputTextValue = applyFormatToSelection(inputTextValue, "~") }
                                 }
                             }
                         }
@@ -736,7 +741,7 @@ fun ChatRoomScreen(
                                         onClick = {
                                             if (editingMessage != null) {
                                                 editingMessage = null
-                                                inputText = ""
+                                                inputTextValue = TextFieldValue("")
                                             }
                                             replyingTo = null
                                         },
@@ -849,7 +854,7 @@ fun ChatRoomScreen(
                                             .padding(horizontal = 2.dp, vertical = 12.dp),
                                         contentAlignment = Alignment.CenterStart
                                     ) {
-                                        if (inputText.isEmpty()) {
+                                        if (inputTextValue.text.isEmpty()) {
                                             Text(
                                                 text = "Mensaje",
                                                 style = MaterialTheme.typography.bodyLarge,
@@ -859,10 +864,10 @@ fun ChatRoomScreen(
                                             )
                                         }
                                         BasicTextField(
-                                            value = inputText,
+                                            value = inputTextValue,
                                             onValueChange = {
-                                                inputText = it
-                                                onTypingChange(it.isNotBlank())
+                                                inputTextValue = it
+                                                onTypingChange(it.text.isNotBlank())
                                             },
                                             maxLines = 5,
                                             textStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -871,7 +876,6 @@ fun ChatRoomScreen(
                                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .onFocusChanged { isComposerFocused = it.isFocused }
                                                 .testTag("chat_message_input")
                                         )
                                     }
@@ -938,18 +942,19 @@ fun ChatRoomScreen(
                                         }
                                     }
 
-                                    if (inputText.isNotBlank()) {
+                                    if (inputTextValue.text.isNotBlank()) {
                                         IconButton(
                                             onClick = {
+                                                val rawText = inputTextValue.text
                                                 val editing = editingMessage
                                                 if (editing != null) {
-                                                    onEditMessage(editing.id, inputText)
+                                                    onEditMessage(editing.id, rawText)
                                                     editingMessage = null
                                                 } else {
-                                                    onSendText(inputText, replyingTo?.id)
+                                                    onSendText(rawText, replyingTo?.id)
                                                     replyingTo = null
                                                 }
-                                                inputText = ""
+                                                inputTextValue = TextFieldValue("")
                                                 showEmojiDrawer = false
                                             },
                                             modifier = Modifier.testTag("send_message_button")
@@ -1020,7 +1025,9 @@ fun ChatRoomScreen(
                                         modifier = Modifier
                                             .size(40.dp)
                                             .clip(CircleShape)
-                                            .clickable { inputText += emoji },
+                                            .clickable {
+                                                inputTextValue = insertTextAtSelection(inputTextValue, emoji)
+                                            },
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(emoji, fontSize = 22.sp)
@@ -1053,7 +1060,7 @@ fun ChatRoomScreen(
             onEdit = {
                 replyingTo = null
                 editingMessage = target
-                inputText = target.text
+                inputTextValue = TextFieldValue(target.text, TextRange(target.text.length))
             },
             onTogglePin = { onTogglePin(target.id) },
             onStartMultiSelect = {
@@ -1154,23 +1161,48 @@ private fun FormatChipButton(
     }
 }
 
-private fun wrapOrAppendToken(current: String, token: String): String {
-    if (current.isBlank()) return "${token}texto${token}"
-    val trimmed = current.trimEnd()
-    val lastSpace = trimmed.lastIndexOf(' ')
-    return if (lastSpace >= 0) {
-        val prefix = trimmed.substring(0, lastSpace + 1)
-        val word = trimmed.substring(lastSpace + 1)
-        if (word.startsWith(token) && word.endsWith(token) && word.length > 2) {
-            current
-        } else {
-            "$prefix$token$word$token "
-        }
-    } else {
-        if (trimmed.startsWith(token) && trimmed.endsWith(token) && trimmed.length > 2) {
-            current
-        } else {
-            "$token$trimmed$token "
-        }
+internal fun applyFormatToSelection(current: TextFieldValue, token: String): TextFieldValue {
+    val start = current.selection.min.coerceIn(0, current.text.length)
+    val end = current.selection.max.coerceIn(start, current.text.length)
+    if (start == end) return current
+
+    val selected = current.text.substring(start, end)
+    // Toggle off if surrounding characters already hold the token
+    if (start >= token.length &&
+        end + token.length <= current.text.length &&
+        current.text.substring(start - token.length, start) == token &&
+        current.text.substring(end, end + token.length) == token
+    ) {
+        val nextText = current.text.removeRange(end, end + token.length)
+            .removeRange(start - token.length, start)
+        return TextFieldValue(
+            text = nextText,
+            selection = TextRange(start - token.length, end - token.length)
+        )
     }
+
+    // Toggle off if selection itself includes the wrapping tokens
+    if (selected.length > token.length * 2 && selected.startsWith(token) && selected.endsWith(token)) {
+        val unwrapped = selected.substring(token.length, selected.length - token.length)
+        val nextText = current.text.replaceRange(start, end, unwrapped)
+        return TextFieldValue(
+            text = nextText,
+            selection = TextRange(start, start + unwrapped.length)
+        )
+    }
+
+    val wrapped = "$token$selected$token"
+    val nextText = current.text.replaceRange(start, end, wrapped)
+    return TextFieldValue(
+        text = nextText,
+        selection = TextRange(start + token.length, end + token.length)
+    )
+}
+
+private fun insertTextAtSelection(current: TextFieldValue, insertion: String): TextFieldValue {
+    val start = current.selection.min.coerceIn(0, current.text.length)
+    val end = current.selection.max.coerceIn(start, current.text.length)
+    val nextText = current.text.replaceRange(start, end, insertion)
+    val nextCursor = start + insertion.length
+    return TextFieldValue(text = nextText, selection = TextRange(nextCursor))
 }

@@ -34,6 +34,21 @@ class ExampleRobolectricTest {
   }
 
   @Test
+  fun `chat format helper wraps and toggles selected text only`() {
+    val initial = androidx.compose.ui.text.input.TextFieldValue(
+      text = "Hola familia",
+      selection = androidx.compose.ui.text.TextRange(5, 12)
+    )
+    val bolded = com.example.ui.screens.applyFormatToSelection(initial, "*")
+    assertEquals("Hola *familia*", bolded.text)
+    assertEquals(androidx.compose.ui.text.TextRange(6, 13), bolded.selection)
+
+    val unbolded = com.example.ui.screens.applyFormatToSelection(bolded, "*")
+    assertEquals("Hola familia", unbolded.text)
+    assertEquals(androidx.compose.ui.text.TextRange(5, 12), unbolded.selection)
+  }
+
+  @Test
   fun `app update checker parses versions and normalizes repo url`() {
     assertEquals(
       "miusuario/Mensajer-a-Familiar-",
