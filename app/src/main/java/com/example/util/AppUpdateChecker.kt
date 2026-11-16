@@ -2,9 +2,11 @@ package com.example.util
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONObject
 import java.net.HttpURLConnection
-import java.net.URL
+import java.util.concurrent.TimeUnit
 
 data class AppReleaseInfo(
     val tagName: String,
@@ -36,6 +38,23 @@ sealed interface AppUpdateUiState {
 }
 
 object AppUpdateChecker {
+
+    private val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .build()
+    }
+
+    private val noRedirectClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+    }
 
     fun normalizeRepoSlug(raw: String): String {
         val trimmed = raw.trim().removeSuffix("/")
@@ -105,82 +124,145 @@ object AppUpdateChecker {
         }
 
         val repoWebUrl = "https://github.com/$slug/releases"
-        val apiUrl = "https://api.github.com/repos/$slug/releases/latest"
-        var connection: HttpURLConnection? = null
+        var lastException: Exception? = null
+
+        // 1) Primary: GitHub Releases API
         try {
-            connection = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 10000
-                readTimeout = 10000
-                setRequestProperty("Accept", "application/vnd.github+json")
-                setRequestProperty("User-Agent", "NidoFamiliar-Android")
-            }
+            val apiRequest = Request.Builder()
+                .url("https://api.github.com/repos/$slug/releases/latest")
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "NidoFamiliar-Android")
+                .build()
 
-            val code = connection.responseCode
-            if (code == HttpURLConnection.HTTP_NOT_FOUND) {
-                return@withContext AppUpdateUiState.UpToDate(
-                    installedVersionName = installedVersionName,
-                    installedVersionCode = installedVersionCode,
-                    releasePageUrl = repoWebUrl
-                )
-            }
-            if (code !in 200..299) {
-                return@withContext AppUpdateUiState.Error(
-                    message = "No se pudo consultar actualizaciones (código $code).",
-                    repoUrl = repoWebUrl
-                )
-            }
+            client.newCall(apiRequest).execute().use { response ->
+                val code = response.code
+                if (code == HttpURLConnection.HTTP_NOT_FOUND) {
+                    return@withContext AppUpdateUiState.UpToDate(
+                        installedVersionName = installedVersionName,
+                        installedVersionCode = installedVersionCode,
+                        releasePageUrl = repoWebUrl
+                    )
+                }
+                if (code in 200..299) {
+                    val bodyText = response.body?.string().orEmpty()
+                    val json = JSONObject(bodyText)
+                    val tagName = json.optString("tag_name", "")
+                    val title = json.optString("name", tagName)
+                    val notes = json.optString("body", "")
+                        .ifBlank { "Mejoras y correcciones de NidoFamiliar." }
+                    val htmlUrl = json.optString("html_url", repoWebUrl)
 
-            val bodyText = connection.inputStream.bufferedReader().use { it.readText() }
-            val json = JSONObject(bodyText)
-            val tagName = json.optString("tag_name", "")
-            val title = json.optString("name", tagName)
-            val notes = json.optString("body", "").ifBlank { "Mejoras y correcciones de NidoFamiliar." }
-            val htmlUrl = json.optString("html_url", repoWebUrl)
+                    var apkUrl = htmlUrl
+                    val assets = json.optJSONArray("assets")
+                    if (assets != null) {
+                        for (i in 0 until assets.length()) {
+                            val asset = assets.optJSONObject(i) ?: continue
+                            val assetName = asset.optString("name", "")
+                            if (assetName.endsWith(".apk", ignoreCase = true)) {
+                                apkUrl = asset.optString("browser_download_url", htmlUrl)
+                                break
+                            }
+                        }
+                    }
 
-            var apkUrl = htmlUrl
-            val assets = json.optJSONArray("assets")
-            if (assets != null) {
-                for (i in 0 until assets.length()) {
-                    val asset = assets.optJSONObject(i) ?: continue
-                    val assetName = asset.optString("name", "")
-                    if (assetName.endsWith(".apk", ignoreCase = true)) {
-                        apkUrl = asset.optString("browser_download_url", htmlUrl)
-                        break
+                    val (remoteVerName, remoteVerCode) = parseReleaseVersion(tagName, title)
+                    val releaseInfo = AppReleaseInfo(
+                        tagName = tagName,
+                        versionName = remoteVerName,
+                        versionCode = remoteVerCode,
+                        releaseNotes = notes,
+                        downloadUrl = apkUrl,
+                        releasePageUrl = htmlUrl
+                    )
+
+                    return@withContext if (isRemoteNewer(
+                            installedVersionCode,
+                            installedVersionName,
+                            remoteVerCode,
+                            remoteVerName
+                        )
+                    ) {
+                        AppUpdateUiState.UpdateAvailable(
+                            installedVersionName = installedVersionName,
+                            installedVersionCode = installedVersionCode,
+                            release = releaseInfo
+                        )
+                    } else {
+                        AppUpdateUiState.UpToDate(
+                            installedVersionName = installedVersionName,
+                            installedVersionCode = installedVersionCode,
+                            releasePageUrl = htmlUrl
+                        )
                     }
                 }
             }
+        } catch (e: Exception) {
+            lastException = e
+        }
 
-            val (remoteVerName, remoteVerCode) = parseReleaseVersion(tagName, title)
-            val releaseInfo = AppReleaseInfo(
-                tagName = tagName,
-                versionName = remoteVerName,
-                versionCode = remoteVerCode,
-                releaseNotes = notes,
-                downloadUrl = apkUrl,
-                releasePageUrl = htmlUrl
-            )
+        // 2) Fallback: Direct GitHub web redirect (avoids api.github.com rate limits)
+        try {
+            val webRequest = Request.Builder()
+                .url("https://github.com/$slug/releases/latest")
+                .header("User-Agent", "NidoFamiliar-Android")
+                .build()
 
-            if (isRemoteNewer(installedVersionCode, installedVersionName, remoteVerCode, remoteVerName)) {
-                AppUpdateUiState.UpdateAvailable(
-                    installedVersionName = installedVersionName,
-                    installedVersionCode = installedVersionCode,
-                    release = releaseInfo
-                )
-            } else {
-                AppUpdateUiState.UpToDate(
-                    installedVersionName = installedVersionName,
-                    installedVersionCode = installedVersionCode,
-                    releasePageUrl = htmlUrl
-                )
+            noRedirectClient.newCall(webRequest).execute().use { response ->
+                val location = response.header("Location").orEmpty()
+                val tagMarker = "/releases/tag/"
+                val tagIdx = location.indexOf(tagMarker)
+                if (tagIdx >= 0) {
+                    val tagName = location.substring(tagIdx + tagMarker.length)
+                        .substringBefore("?")
+                        .substringBefore("#")
+                        .trim()
+                    val (remoteVerName, remoteVerCode) = parseReleaseVersion(tagName, tagName)
+                    val releasePage = "https://github.com/$slug/releases/tag/$tagName"
+                    val apkUrl = "https://github.com/$slug/releases/download/$tagName/app-debug.apk"
+                    val releaseInfo = AppReleaseInfo(
+                        tagName = tagName,
+                        versionName = remoteVerName,
+                        versionCode = remoteVerCode,
+                        releaseNotes = "Nueva compilación disponible en GitHub ($tagName).",
+                        downloadUrl = apkUrl,
+                        releasePageUrl = releasePage
+                    )
+                    return@withContext if (isRemoteNewer(
+                            installedVersionCode,
+                            installedVersionName,
+                            remoteVerCode,
+                            remoteVerName
+                        )
+                    ) {
+                        AppUpdateUiState.UpdateAvailable(
+                            installedVersionName = installedVersionName,
+                            installedVersionCode = installedVersionCode,
+                            release = releaseInfo
+                        )
+                    } else {
+                        AppUpdateUiState.UpToDate(
+                            installedVersionName = installedVersionName,
+                            installedVersionCode = installedVersionCode,
+                            releasePageUrl = releasePage
+                        )
+                    }
+                } else if (response.code == HttpURLConnection.HTTP_NOT_FOUND || location.endsWith("/releases")) {
+                    return@withContext AppUpdateUiState.UpToDate(
+                        installedVersionName = installedVersionName,
+                        installedVersionCode = installedVersionCode,
+                        releasePageUrl = repoWebUrl
+                    )
+                }
             }
         } catch (e: Exception) {
-            AppUpdateUiState.Error(
-                message = "Sin conexión o no se pudo conectar con GitHub. Revisa tu internet e intenta nuevamente.",
-                repoUrl = repoWebUrl
-            )
-        } finally {
-            connection?.disconnect()
+            lastException = e
         }
+
+        val detail = lastException?.let { "${it.javaClass.simpleName}: ${it.localizedMessage.orEmpty()}".trim() }
+            ?: "sin respuesta"
+        AppUpdateUiState.Error(
+            message = "No se pudo conectar con GitHub ($detail). Revisa tu internet e intenta nuevamente.",
+            repoUrl = repoWebUrl
+        )
     }
 }
