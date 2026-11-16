@@ -1,18 +1,23 @@
 package com.example.util
 
+import android.app.Activity
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import androidx.core.content.pm.PackageInfoCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -27,6 +32,19 @@ data class AppReleaseInfo(
     val releaseNotes: String,
     val downloadUrl: String,
     val releasePageUrl: String
+)
+
+data class ApkInspectionResult(
+    val isValidArchive: Boolean,
+    val packageName: String? = null,
+    val versionCode: Long? = null,
+    val versionName: String? = null,
+    val apkSha256: String? = null,
+    val installedSha256: String? = null,
+    val hasSignatureConflict: Boolean = false,
+    val isDowngrade: Boolean = false,
+    val blockingError: String? = null,
+    val signatureWarning: String? = null
 )
 
 sealed interface AppUpdateUiState {
@@ -62,27 +80,42 @@ object AppUpdateChecker {
     private const val EXPECTED_DEBUG_SHA256 =
         "33D2C0F213FED29E496863488A303962B27C80F5C8C17F10C59B47DFFA15385C"
 
-    fun getInstalledSigningSha256(context: Context): String? = runCatching {
-        val pm = context.packageManager
-        val pkgName = context.packageName
+    private fun extractPackageSha256(info: PackageInfo?): String? {
+        info ?: return null
         @Suppress("DEPRECATION")
         val certBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val info = pm.getPackageInfo(pkgName, PackageManager.GET_SIGNING_CERTIFICATES)
             val signingInfo = info.signingInfo
             val sigs = if (signingInfo?.hasMultipleSigners() == true) {
                 signingInfo.apkContentsSigners
             } else {
-                signingInfo?.signingCertificateHistory
+                signingInfo?.signingCertificateHistory ?: signingInfo?.apkContentsSigners
             }
             sigs?.firstOrNull()?.toByteArray()
         } else {
-            val info = pm.getPackageInfo(pkgName, PackageManager.GET_SIGNATURES)
             info.signatures?.firstOrNull()?.toByteArray()
-        } ?: return@runCatching null
+        } ?: return null
 
-        MessageDigest.getInstance("SHA-256")
+        return MessageDigest.getInstance("SHA-256")
             .digest(certBytes)
             .joinToString("") { "%02X".format(it) }
+    }
+
+    fun getInstalledSigningSha256(context: Context): String? = runCatching {
+        val pm = context.packageManager
+        val pkgName = context.packageName
+        @Suppress("DEPRECATION")
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            PackageManager.GET_SIGNATURES
+        }
+        val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.getPackageInfo(pkgName, PackageManager.PackageInfoFlags.of(flags.toLong()))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getPackageInfo(pkgName, flags)
+        }
+        extractPackageSha256(info)
     }.getOrNull()
 
     fun isConsistentDebugSigning(context: Context): Boolean? {
@@ -90,10 +123,84 @@ object AppUpdateChecker {
         return sha.equals(EXPECTED_DEBUG_SHA256, ignoreCase = true)
     }
 
+    fun inspectApkFile(
+        context: Context,
+        apkFile: File,
+        installedVersionCode: Int
+    ): ApkInspectionResult {
+        if (!apkFile.exists() || apkFile.length() <= 0L) {
+            return ApkInspectionResult(
+                isValidArchive = false,
+                blockingError = "El archivo APK descargado no existe o está vacío."
+            )
+        }
+        return runCatching {
+            val pm = context.packageManager
+            @Suppress("DEPRECATION")
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                PackageManager.GET_SIGNING_CERTIFICATES
+            } else {
+                PackageManager.GET_SIGNATURES
+            }
+            val archiveInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageArchiveInfo(apkFile.absolutePath, PackageManager.PackageInfoFlags.of(flags.toLong()))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageArchiveInfo(apkFile.absolutePath, flags)
+            }
+
+            if (archiveInfo == null) {
+                return@runCatching ApkInspectionResult(
+                    isValidArchive = false,
+                    blockingError = "El archivo descargado no se pudo leer como un paquete APK válido."
+                )
+            }
+
+            val apkPkg = archiveInfo.packageName
+            val apkVerCode = PackageInfoCompat.getLongVersionCode(archiveInfo)
+            val apkVerName = archiveInfo.versionName
+            val apkSha = extractPackageSha256(archiveInfo)
+            val installedSha = getInstalledSigningSha256(context)
+
+            val wrongPackage = !apkPkg.isNullOrBlank() && apkPkg != context.packageName
+            val isDowngrade = apkVerCode < installedVersionCode.toLong()
+            val sigConflict = !apkSha.isNullOrBlank() &&
+                !installedSha.isNullOrBlank() &&
+                !apkSha.equals(installedSha, ignoreCase = true)
+
+            val blockingError = when {
+                wrongPackage ->
+                    "El APK descargado pertenece a otro paquete ($apkPkg) y no puede actualizar a FamiChat."
+                isDowngrade ->
+                    "El APK descargado (comp. $apkVerCode) es anterior a la versión instalada (comp. $installedVersionCode). Android no permite instalar una versión menor encima."
+                else -> null
+            }
+
+            val signatureWarning = if (sigConflict) {
+                "Conflicto de firma detectado: la app instalada usa firma ${installedSha?.take(8)}… y el APK de GitHub usa ${apkSha?.take(8)}…. Android rechazará actualizar encima; desinstala FamiChat una sola vez e instala esta versión (las siguientes ya actualizarán automáticamente)."
+            } else null
+
+            ApkInspectionResult(
+                isValidArchive = true,
+                packageName = apkPkg,
+                versionCode = apkVerCode,
+                versionName = apkVerName,
+                apkSha256 = apkSha,
+                installedSha256 = installedSha,
+                hasSignatureConflict = sigConflict,
+                isDowngrade = isDowngrade,
+                blockingError = blockingError,
+                signatureWarning = signatureWarning
+            )
+        }.getOrElse {
+            ApkInspectionResult(isValidArchive = true)
+        }
+    }
+
     fun extractApkUrlFromHtml(html: String, slug: String): String? {
         val escapedSlug = Regex.escape(slug)
         val regex = Regex(
-            """href="(/$escapedSlug/releases/download/[^"]+\.apk)"""",
+            """href=["'](?:https?://github\.com)?(/$escapedSlug/releases/download/[^"'\s]+\.apk(?:\?[^"'\s]*)?)["']""",
             RegexOption.IGNORE_CASE
         )
         val path = regex.find(html)?.groupValues?.getOrNull(1) ?: return null
@@ -102,16 +209,16 @@ object AppUpdateChecker {
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(12, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
             .followRedirects(true)
             .build()
     }
 
     private val noRedirectClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(12, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
             .followRedirects(false)
             .followSslRedirects(false)
             .build()
@@ -119,15 +226,18 @@ object AppUpdateChecker {
 
     private val downloadClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
             .build()
     }
 
     fun normalizeRepoSlug(raw: String): String {
-        val trimmed = raw.trim().removeSuffix("/")
+        val trimmed = raw.trim()
+            .substringBefore("?")
+            .substringBefore("#")
+            .removeSuffix("/")
         if (trimmed.isEmpty()) return ""
         val githubPrefix = "github.com/"
         val idx = trimmed.indexOf(githubPrefix, ignoreCase = true)
@@ -136,8 +246,13 @@ object AppUpdateChecker {
         } else {
             trimmed
         }
-        val parts = path.split("/").filter { it.isNotBlank() }
-        return if (parts.size >= 2) "${parts[0]}/${parts[1]}" else ""
+        val parts = path.split("/")
+            .filter { it.isNotBlank() }
+            .toMutableList()
+        if (parts.size < 2) return ""
+        val owner = parts[0]
+        val repo = parts[1].removeSuffix(".git")
+        return if (owner.isNotBlank() && repo.isNotBlank()) "$owner/$repo" else ""
     }
 
     fun parseReleaseVersion(tagName: String, title: String): Pair<String, Int?> {
@@ -179,6 +294,118 @@ object AppUpdateChecker {
         return 0
     }
 
+    internal fun parseReleaseJsonObject(json: JSONObject, repoWebUrl: String): AppReleaseInfo? {
+        if (json.optBoolean("draft", false)) return null
+        val tagName = json.optString("tag_name", "").trim()
+        if (tagName.isEmpty()) return null
+        val title = json.optString("name", tagName)
+        val notes = json.optString("body", "")
+            .ifBlank { "Mejoras y correcciones de FamiChat." }
+        val htmlUrl = json.optString("html_url", repoWebUrl)
+
+        var apkUrl = ""
+        val assets = json.optJSONArray("assets")
+        if (assets != null) {
+            for (i in 0 until assets.length()) {
+                val asset = assets.optJSONObject(i) ?: continue
+                val assetName = asset.optString("name", "")
+                val download = asset.optString("browser_download_url", "")
+                if (assetName.endsWith(".apk", ignoreCase = true) && download.startsWith("http")) {
+                    apkUrl = download
+                    break
+                }
+            }
+        }
+
+        val (remoteVerName, remoteVerCode) = parseReleaseVersion(tagName, title)
+        return AppReleaseInfo(
+            tagName = tagName,
+            versionName = remoteVerName,
+            versionCode = remoteVerCode,
+            releaseNotes = notes,
+            downloadUrl = apkUrl,
+            releasePageUrl = htmlUrl
+        )
+    }
+
+    internal fun selectBestReleaseFromApiJsonArray(
+        releasesArray: JSONArray,
+        repoWebUrl: String
+    ): AppReleaseInfo? {
+        val parsed = buildList {
+            for (i in 0 until releasesArray.length()) {
+                val obj = releasesArray.optJSONObject(i) ?: continue
+                parseReleaseJsonObject(obj, repoWebUrl)?.let { add(it) }
+            }
+        }
+        val withApk = parsed.filter { it.downloadUrl.isNotBlank() }
+        if (withApk.isNotEmpty()) {
+            return withApk.maxWithOrNull { a, b ->
+                when {
+                    a.versionCode != null && b.versionCode != null ->
+                        a.versionCode.compareTo(b.versionCode)
+                    else -> compareVersionNames(a.versionName, b.versionName)
+                }
+            }
+        }
+        return parsed.firstOrNull()
+    }
+
+    private fun evaluateRelease(
+        releaseInfo: AppReleaseInfo,
+        installedVersionName: String,
+        installedVersionCode: Int
+    ): AppUpdateUiState {
+        val newer = isRemoteNewer(
+            installedVersionCode = installedVersionCode,
+            installedVersionName = installedVersionName,
+            remoteVersionCode = releaseInfo.versionCode,
+            remoteVersionName = releaseInfo.versionName
+        )
+        if (!newer) {
+            return AppUpdateUiState.UpToDate(
+                installedVersionName = installedVersionName,
+                installedVersionCode = installedVersionCode
+            )
+        }
+        if (releaseInfo.downloadUrl.isBlank() ||
+            (!releaseInfo.downloadUrl.contains(".apk", ignoreCase = true) &&
+                !releaseInfo.downloadUrl.contains("/releases/download/", ignoreCase = true))
+        ) {
+            return AppUpdateUiState.Error(
+                message = "Se encontró la versión ${releaseInfo.tagName} en GitHub, pero no tiene un archivo .apk adjunto todavía. Revisa que GitHub Actions haya terminado de compilar."
+            )
+        }
+        return AppUpdateUiState.UpdateAvailable(
+            installedVersionName = installedVersionName,
+            installedVersionCode = installedVersionCode,
+            release = releaseInfo
+        )
+    }
+
+    private fun resolveApkFromWebPages(slug: String, tagName: String): String? {
+        val urlsToTry = listOf(
+            "https://github.com/$slug/releases/expanded_assets/$tagName",
+            "https://github.com/$slug/releases/tag/$tagName"
+        )
+        for (url in urlsToTry) {
+            val found = runCatching {
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "FamiChat-Android")
+                    .header("Accept", "text/html,application/xhtml+xml")
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        extractApkUrlFromHtml(resp.body?.string().orEmpty(), slug)
+                    } else null
+                }
+            }.getOrNull()
+            if (!found.isNullOrBlank()) return found
+        }
+        return null
+    }
+
     suspend fun checkLatestRelease(
         rawRepoSlug: String,
         installedVersionName: String,
@@ -194,8 +421,10 @@ object AppUpdateChecker {
 
         val repoWebUrl = "https://github.com/$slug/releases"
         var lastException: Exception? = null
+        var sawLatestWithoutApk = false
+        var apiReturnedNotFound = false
 
-        // 1) Primary: GitHub Releases API
+        // 1) Primary: GitHub Releases /latest API
         try {
             val apiRequest = Request.Builder()
                 .url("https://api.github.com/repos/$slug/releases/latest")
@@ -206,58 +435,57 @@ object AppUpdateChecker {
             client.newCall(apiRequest).execute().use { response ->
                 val code = response.code
                 if (code == HttpURLConnection.HTTP_NOT_FOUND) {
-                    return@withContext AppUpdateUiState.Error(
-                        message = "No se encontró un Release publicado en \"$slug\" o el repositorio es privado. Verifica que el repositorio sea público y tenga un Release con el archivo .apk."
-                    )
-                }
-                if (code in 200..299) {
+                    apiReturnedNotFound = true
+                } else if (code in 200..299) {
                     val bodyText = response.body?.string().orEmpty()
                     val json = JSONObject(bodyText)
-                    val tagName = json.optString("tag_name", "")
-                    val title = json.optString("name", tagName)
-                    val notes = json.optString("body", "")
-                        .ifBlank { "Mejoras y correcciones de FamiChat." }
-                    val htmlUrl = json.optString("html_url", repoWebUrl)
-
-                    var apkUrl = htmlUrl
-                    val assets = json.optJSONArray("assets")
-                    if (assets != null) {
-                        for (i in 0 until assets.length()) {
-                            val asset = assets.optJSONObject(i) ?: continue
-                            val assetName = asset.optString("name", "")
-                            if (assetName.endsWith(".apk", ignoreCase = true)) {
-                                apkUrl = asset.optString("browser_download_url", htmlUrl)
-                                break
-                            }
+                    val parsed = parseReleaseJsonObject(json, repoWebUrl)
+                    if (parsed != null && parsed.downloadUrl.isNotBlank()) {
+                        return@withContext evaluateRelease(parsed, installedVersionName, installedVersionCode)
+                    } else if (parsed != null) {
+                        // Try web expanded_assets in case API omitted or user wants fallback before scanning list
+                        val webApk = resolveApkFromWebPages(slug, parsed.tagName)
+                        if (!webApk.isNullOrBlank()) {
+                            return@withContext evaluateRelease(
+                                parsed.copy(downloadUrl = webApk),
+                                installedVersionName,
+                                installedVersionCode
+                            )
                         }
+                        sawLatestWithoutApk = true
                     }
+                }
+            }
+        } catch (e: Exception) {
+            lastException = e
+        }
 
-                    val (remoteVerName, remoteVerCode) = parseReleaseVersion(tagName, title)
-                    val releaseInfo = AppReleaseInfo(
-                        tagName = tagName,
-                        versionName = remoteVerName,
-                        versionCode = remoteVerCode,
-                        releaseNotes = notes,
-                        downloadUrl = apkUrl,
-                        releasePageUrl = htmlUrl
-                    )
+        // 2) Secondary API: Releases list (handles prereleases or /latest lacking an APK asset)
+        try {
+            val listRequest = Request.Builder()
+                .url("https://api.github.com/repos/$slug/releases?per_page=10")
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "FamiChat-Android")
+                .build()
 
-                    return@withContext if (isRemoteNewer(
-                            installedVersionCode,
+            client.newCall(listRequest).execute().use { response ->
+                if (response.code in 200..299) {
+                    val arr = JSONArray(response.body?.string().orEmpty())
+                    val best = selectBestReleaseFromApiJsonArray(arr, repoWebUrl)
+                    if (best != null) {
+                        val withResolvedUrl = if (best.downloadUrl.isBlank()) {
+                            best.copy(downloadUrl = resolveApkFromWebPages(slug, best.tagName).orEmpty())
+                        } else {
+                            best
+                        }
+                        return@withContext evaluateRelease(
+                            withResolvedUrl,
                             installedVersionName,
-                            remoteVerCode,
-                            remoteVerName
+                            installedVersionCode
                         )
-                    ) {
-                        AppUpdateUiState.UpdateAvailable(
-                            installedVersionName = installedVersionName,
-                            installedVersionCode = installedVersionCode,
-                            release = releaseInfo
-                        )
-                    } else {
-                        AppUpdateUiState.UpToDate(
-                            installedVersionName = installedVersionName,
-                            installedVersionCode = installedVersionCode
+                    } else if (apiReturnedNotFound) {
+                        return@withContext AppUpdateUiState.Error(
+                            message = "No se encontró ningún Release publicado en \"$slug\" o el repositorio es privado. Verifica en GitHub → Releases que exista una versión con archivo .apk."
                         )
                     }
                 }
@@ -266,7 +494,7 @@ object AppUpdateChecker {
             lastException = e
         }
 
-        // 2) Fallback: Direct GitHub web redirect (avoids api.github.com rate limits)
+        // 3) Fallback: Direct GitHub web redirect + HTML asset scrape (avoids api.github.com rate limits)
         try {
             val webRequest = Request.Builder()
                 .url("https://github.com/$slug/releases/latest")
@@ -284,20 +512,7 @@ object AppUpdateChecker {
                         .trim()
                     val (remoteVerName, remoteVerCode) = parseReleaseVersion(tagName, tagName)
                     val releasePage = "https://github.com/$slug/releases/tag/$tagName"
-                    val expandedAssetsUrl = "https://github.com/$slug/releases/expanded_assets/$tagName"
-                    val resolvedApkUrl = runCatching {
-                        val assetsReq = Request.Builder()
-                            .url(expandedAssetsUrl)
-                            .header("User-Agent", "FamiChat-Android")
-                            .build()
-                        client.newCall(assetsReq).execute().use { assetsResp ->
-                            if (assetsResp.isSuccessful) {
-                                extractApkUrlFromHtml(assetsResp.body?.string().orEmpty(), slug)
-                            } else {
-                                null
-                            }
-                        }
-                    }.getOrNull() ?: releasePage
+                    val resolvedApkUrl = resolveApkFromWebPages(slug, tagName).orEmpty()
                     val releaseInfo = AppReleaseInfo(
                         tagName = tagName,
                         versionName = remoteVerName,
@@ -306,32 +521,52 @@ object AppUpdateChecker {
                         downloadUrl = resolvedApkUrl,
                         releasePageUrl = releasePage
                     )
-                    return@withContext if (isRemoteNewer(
-                            installedVersionCode,
-                            installedVersionName,
-                            remoteVerCode,
-                            remoteVerName
-                        )
-                    ) {
-                        AppUpdateUiState.UpdateAvailable(
-                            installedVersionName = installedVersionName,
-                            installedVersionCode = installedVersionCode,
-                            release = releaseInfo
-                        )
-                    } else {
-                        AppUpdateUiState.UpToDate(
-                            installedVersionName = installedVersionName,
-                            installedVersionCode = installedVersionCode
+                    return@withContext evaluateRelease(
+                        releaseInfo,
+                        installedVersionName,
+                        installedVersionCode
+                    )
+                } else {
+                    val cleanLoc = location.substringBefore("?").trimEnd('/')
+                    if (response.code == HttpURLConnection.HTTP_NOT_FOUND || cleanLoc.endsWith("/releases")) {
+                        // Last check: maybe only prereleases exist on /releases HTML page
+                        val htmlApk = runCatching {
+                            val req = Request.Builder()
+                                .url(repoWebUrl)
+                                .header("User-Agent", "FamiChat-Android")
+                                .build()
+                            client.newCall(req).execute().use { r ->
+                                if (r.isSuccessful) extractApkUrlFromHtml(r.body?.string().orEmpty(), slug) else null
+                            }
+                        }.getOrNull()
+                        if (!htmlApk.isNullOrBlank()) {
+                            val tagFromUrl = htmlApk.substringAfter("/releases/download/", "")
+                                .substringBefore("/")
+                            val (rName, rCode) = parseReleaseVersion(tagFromUrl, tagFromUrl)
+                            val rel = AppReleaseInfo(
+                                tagName = tagFromUrl.ifBlank { "latest" },
+                                versionName = rName,
+                                versionCode = rCode,
+                                releaseNotes = "Nueva compilación disponible en GitHub.",
+                                downloadUrl = htmlApk,
+                                releasePageUrl = repoWebUrl
+                            )
+                            return@withContext evaluateRelease(rel, installedVersionName, installedVersionCode)
+                        }
+                        return@withContext AppUpdateUiState.Error(
+                            message = "No se encontró un Release publicado en \"$slug\" o el repositorio es privado. Verifica que el repositorio sea público y tenga un Release con el archivo .apk."
                         )
                     }
-                } else if (response.code == HttpURLConnection.HTTP_NOT_FOUND || location.endsWith("/releases")) {
-                    return@withContext AppUpdateUiState.Error(
-                        message = "No se encontró un Release publicado en \"$slug\" o el repositorio es privado. Verifica que el repositorio sea público y tenga un Release con el archivo .apk."
-                    )
                 }
             }
         } catch (e: Exception) {
             lastException = e
+        }
+
+        if (sawLatestWithoutApk) {
+            return@withContext AppUpdateUiState.Error(
+                message = "El último Release en \"$slug\" aún no tiene archivo .apk adjunto."
+            )
         }
 
         val detail = lastException?.let { "${it.javaClass.simpleName}: ${it.localizedMessage.orEmpty()}".trim() }
@@ -355,7 +590,12 @@ object AppUpdateChecker {
             )
         }
 
-        val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
+        // Clean legacy cache updates folder if any
+        File(context.cacheDir, "updates").listFiles()?.forEach { old ->
+            if (old.isFile) old.delete()
+        }
+
+        val updatesDir = File(context.filesDir, "updates").apply { mkdirs() }
         updatesDir.listFiles()?.forEach { old ->
             if (old.isFile) old.delete()
         }
@@ -384,7 +624,7 @@ object AppUpdateChecker {
 
                 body.byteStream().use { input ->
                     FileOutputStream(partFile).use { output ->
-                        val buffer = ByteArray(8 * 1024)
+                        val buffer = ByteArray(16 * 1024)
                         while (true) {
                             currentCoroutineContext().ensureActive()
                             val read = input.read(buffer)
@@ -418,6 +658,9 @@ object AppUpdateChecker {
                 if (downloaded <= 0L) {
                     error("El archivo APK descargado está vacío.")
                 }
+                if (totalBytes > 0L && downloaded < totalBytes) {
+                    error("La descarga se interrumpió ($downloaded de $totalBytes bytes). Intenta de nuevo.")
+                }
                 if (targetFile.exists()) targetFile.delete()
                 if (!partFile.renameTo(targetFile)) {
                     partFile.copyTo(targetFile, overwrite = true)
@@ -445,21 +688,54 @@ object AppUpdateChecker {
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:${context.packageName}")
             ).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (context !is Activity) {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
             }
             context.startActivity(intent)
         }
     }
 
     fun launchApkInstaller(context: Context, apkFile: File): Result<Unit> = runCatching {
-        require(apkFile.exists()) { "No se encontró el archivo de actualización descargado." }
+        require(apkFile.exists() && apkFile.length() > 0L) {
+            "No se encontró el archivo de actualización descargado."
+        }
         val authority = "${context.packageName}.fileprovider"
         val contentUri = FileProvider.getUriForFile(context, authority, apkFile)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
+        val clip = ClipData.newRawUri("FamiChat APK", contentUri)
+
+        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(contentUri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            clipData = clip
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (context !is Activity) {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+            putExtra(Intent.EXTRA_RETURN_RESULT, true)
         }
-        context.startActivity(intent)
+
+        if (viewIntent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(viewIntent)
+            return@runCatching
+        }
+
+        @Suppress("DEPRECATION")
+        val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+            setDataAndType(contentUri, "application/vnd.android.package-archive")
+            clipData = clip
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (context !is Activity) {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+            putExtra(Intent.EXTRA_RETURN_RESULT, true)
+        }
+        if (installIntent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(installIntent)
+            return@runCatching
+        }
+
+        context.startActivity(viewIntent)
     }
 }

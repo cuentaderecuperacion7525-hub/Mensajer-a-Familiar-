@@ -60,6 +60,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,10 +84,13 @@ import com.example.ui.theme.LocalDarkTheme
 import com.example.ui.theme.LocalThemeController
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.theme.ReadBlue
+import com.example.util.ApkInspectionResult
 import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateChecker
 import com.example.util.AppUpdateUiState
 import com.example.util.parseHexColor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
@@ -639,10 +643,11 @@ fun AppUpdateDialog(
     val lifecycleOwner = LocalLifecycleOwner.current
     val hasUnifiedSigning = remember(context) { AppUpdateChecker.isConsistentDebugSigning(context) }
     var repoInput by remember(currentRepoSlug) { mutableStateOf(currentRepoSlug) }
-    var showRepoEditor by remember { mutableStateOf(false) }
+    var showRepoEditor by rememberSaveable { mutableStateOf(false) }
     var canInstallPackages by remember { mutableStateOf(AppUpdateChecker.canRequestPackageInstalls(context)) }
-    var waitingPermissionReturn by remember { mutableStateOf(false) }
+    var waitingPermissionReturn by rememberSaveable { mutableStateOf(false) }
     var installErrorMsg by remember { mutableStateOf<String?>(null) }
+    var apkInspection by remember { mutableStateOf<ApkInspectionResult?>(null) }
     val latestUpdateState by rememberUpdatedState(updateState)
 
     DisposableEffect(lifecycleOwner, context) {
@@ -653,8 +658,10 @@ fun AppUpdateDialog(
                 val currentState = latestUpdateState
                 if (allowed && waitingPermissionReturn && currentState is AppUpdateUiState.ReadyToInstall) {
                     waitingPermissionReturn = false
-                    AppUpdateChecker.launchApkInstaller(context, File(currentState.apkFilePath))
-                        .onFailure { installErrorMsg = it.localizedMessage }
+                    if (apkInspection?.blockingError == null) {
+                        AppUpdateChecker.launchApkInstaller(context, File(currentState.apkFilePath))
+                            .onFailure { installErrorMsg = it.localizedMessage }
+                    }
                 }
             }
         }
@@ -706,6 +713,13 @@ fun AppUpdateDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (currentRepoSlug.isNotBlank()) {
+                            Text(
+                                text = "Origen: $currentRepoSlug",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                     IconButton(
                         onClick = onDismiss,
@@ -957,15 +971,31 @@ fun AppUpdateDialog(
                         LaunchedEffect(updateState.apkFilePath) {
                             installErrorMsg = null
                             canInstallPackages = AppUpdateChecker.canRequestPackageInstalls(context)
-                            if (canInstallPackages) {
+                            val inspected = withContext(Dispatchers.IO) {
+                                AppUpdateChecker.inspectApkFile(
+                                    context = context,
+                                    apkFile = apkFile,
+                                    installedVersionCode = BuildConfig.VERSION_CODE
+                                )
+                            }
+                            apkInspection = inspected
+                            if (canInstallPackages && inspected.blockingError == null && !inspected.hasSignatureConflict) {
                                 AppUpdateChecker.launchApkInstaller(context, apkFile)
                                     .onFailure { installErrorMsg = it.localizedMessage }
                             }
                         }
 
+                        val inspection = apkInspection
+                        val blockingMsg = inspection?.blockingError
+                        val sigWarning = inspection?.signatureWarning
+
                         Surface(
                             shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                            color = if (blockingMsg != null) {
+                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                            } else {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                            },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
@@ -974,20 +1004,22 @@ fun AppUpdateDialog(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Filled.CheckCircle,
-                                    contentDescription = "Descarga completa",
-                                    tint = OnlineGreen
+                                    imageVector = if (blockingMsg != null) Icons.Filled.Warning else Icons.Filled.CheckCircle,
+                                    contentDescription = if (blockingMsg != null) "Aviso de paquete" else "Descarga completa",
+                                    tint = if (blockingMsg != null) MaterialTheme.colorScheme.error else OnlineGreen
                                 )
                                 Column {
                                     Text(
-                                        text = "Descarga completa (100%)",
+                                        text = if (blockingMsg != null) "Paquete incompatible" else "Descarga completa (100%)",
                                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
                                     )
                                     Text(
-                                        text = if (canInstallPackages) {
-                                            "Versión v${updateState.release.versionName} lista para instalar."
-                                        } else {
-                                            "Activa el permiso \"Instalar aplicaciones desconocidas\" para FamiChat y volverás directo al instalador."
+                                        text = when {
+                                            blockingMsg != null -> blockingMsg
+                                            canInstallPackages ->
+                                                "Versión v${updateState.release.versionName} lista para instalar."
+                                            else ->
+                                                "Activa el permiso \"Instalar aplicaciones desconocidas\" para FamiChat y volverás directo al instalador."
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -996,32 +1028,81 @@ fun AppUpdateDialog(
                             }
                         }
 
-                        if (!installErrorMsg.isNullOrBlank()) {
-                            Text(
-                                text = installErrorMsg.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
+                        if (!sigWarning.isNullOrBlank() && blockingMsg == null) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Warning,
+                                        contentDescription = "Conflicto de firma",
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                    Text(
+                                        text = sigWarning,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
                         }
 
-                        Button(
-                            onClick = {
-                                installErrorMsg = null
-                                if (AppUpdateChecker.canRequestPackageInstalls(context)) {
-                                    AppUpdateChecker.launchApkInstaller(context, apkFile)
-                                        .onFailure { installErrorMsg = it.localizedMessage }
-                                } else {
-                                    waitingPermissionReturn = true
-                                    AppUpdateChecker.openInstallPermissionSettings(context)
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("update_install_button")
+                        if (!installErrorMsg.isNullOrBlank()) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = installErrorMsg.orEmpty(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
+                        }
+
+                        if (blockingMsg == null) {
+                            Button(
+                                onClick = {
+                                    installErrorMsg = null
+                                    if (AppUpdateChecker.canRequestPackageInstalls(context)) {
+                                        AppUpdateChecker.launchApkInstaller(context, apkFile)
+                                            .onFailure { installErrorMsg = it.localizedMessage }
+                                    } else {
+                                        waitingPermissionReturn = true
+                                        AppUpdateChecker.openInstallPermissionSettings(context)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("update_install_button")
+                            ) {
+                                Icon(Icons.Filled.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    when {
+                                        !canInstallPackages -> "Permitir e instalar"
+                                        inspection?.hasSignatureConflict == true -> "Intentar instalar ahora"
+                                        else -> "Instalar ahora"
+                                    }
+                                )
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = onCheckAgain,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Filled.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(if (canInstallPackages) "Instalar ahora" else "Permitir e instalar")
+                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Volver a verificar")
                         }
                     }
 

@@ -39,6 +39,10 @@ class ExampleRobolectricTest {
       "miusuario/Mensajer-a-Familiar-",
       AppUpdateChecker.normalizeRepoSlug("https://github.com/miusuario/Mensajer-a-Familiar-/releases")
     )
+    assertEquals(
+      "miusuario/FamiChat",
+      AppUpdateChecker.normalizeRepoSlug("https://github.com/miusuario/FamiChat.git")
+    )
     val (name, code) = AppUpdateChecker.parseReleaseVersion("v1.2-c3", "FamiChat v1.2 (Build 3)")
     assertEquals("1.2", name)
     assertEquals(3, code)
@@ -51,6 +55,44 @@ class ExampleRobolectricTest {
       "https://github.com/miusuario/Mensajer-a-Familiar-/releases/download/v2.0.1-c6/FamiChat-v2.0.1-c6-debug.apk",
       AppUpdateChecker.extractApkUrlFromHtml(sampleHtml, "miusuario/Mensajer-a-Familiar-")
     )
+    val fullUrlHtml = """
+      <a href='https://github.com/miusuario/FamiChat/releases/download/v2.1.1-c12/FamiChat-v2.1.1-c12-debug.apk?raw=1'>APK</a>
+    """.trimIndent()
+    assertEquals(
+      "https://github.com/miusuario/FamiChat/releases/download/v2.1.1-c12/FamiChat-v2.1.1-c12-debug.apk?raw=1",
+      AppUpdateChecker.extractApkUrlFromHtml(fullUrlHtml, "miusuario/FamiChat")
+    )
+  }
+
+  @Test
+  fun `app update checker selects newest release containing an apk asset`() {
+    val json = org.json.JSONArray(
+      """
+      [
+        {
+          "tag_name": "v2.1.2-c13",
+          "name": "Draft tag without apk",
+          "draft": false,
+          "assets": []
+        },
+        {
+          "tag_name": "v2.1.1-c12",
+          "name": "FamiChat v2.1.1 (Build 12)",
+          "draft": false,
+          "assets": [
+            {
+              "name": "FamiChat-v2.1.1-c12-debug.apk",
+              "browser_download_url": "https://github.com/u/r/releases/download/v2.1.1-c12/FamiChat-v2.1.1-c12-debug.apk"
+            }
+          ]
+        }
+      ]
+      """.trimIndent()
+    )
+    val selected = AppUpdateChecker.selectBestReleaseFromApiJsonArray(json, "https://github.com/u/r/releases")
+    assertEquals("v2.1.1-c12", selected?.tagName)
+    assertEquals(12, selected?.versionCode)
+    assertTrue(selected?.downloadUrl?.endsWith(".apk") == true)
   }
 
   @Test

@@ -223,10 +223,11 @@ class FamilyViewModel(
         localSlug.ifBlank { null }
             ?: fam?.updateRepoSlug?.ifBlank { null }
             ?: BuildConfig.GITHUB_REPO
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), BuildConfig.GITHUB_REPO)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, BuildConfig.GITHUB_REPO)
 
     private val _updateState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
     val updateState: StateFlow<AppUpdateUiState> = _updateState.asStateFlow()
+    private var updateCheckJob: Job? = null
     private var updateDownloadJob: Job? = null
 
     val activeMember: StateFlow<FamilyMemberEntity?> = combine(members, _activeMemberId) { list, id ->
@@ -854,7 +855,8 @@ class FamilyViewModel(
     }
 
     fun checkForAppUpdate() {
-        viewModelScope.launch {
+        updateCheckJob?.cancel()
+        updateCheckJob = viewModelScope.launch {
             _updateState.value = AppUpdateUiState.Checking
             val savedSlug = prefs.updateRepoSlugFlow.first()
             val effectiveSlug = savedSlug
@@ -927,6 +929,8 @@ class FamilyViewModel(
     }
 
     fun resetUpdateState() {
+        updateCheckJob?.cancel()
+        updateCheckJob = null
         updateDownloadJob?.cancel()
         updateDownloadJob = null
         _updateState.value = AppUpdateUiState.Idle
