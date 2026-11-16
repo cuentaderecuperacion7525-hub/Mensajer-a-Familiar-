@@ -333,12 +333,18 @@ class FamilyViewModel(
     init {
         viewModelScope.launch {
             val savedFamilyId = prefs.activeFamilyIdFlow.first()
-            val fams = myFamilies.first()
-            val resolvedFamilyId = when {
+            val fams = runCatching {
+                cloudRepo.observeMyFamilies(currentUserId).first()
+            }.getOrDefault(emptyList())
+            var resolvedFamilyId = when {
                 savedFamilyId != null && fams.any { it.id == savedFamilyId } -> savedFamilyId
+                fams.any { it.inviteCode == "NIDO01" } -> fams.first { it.inviteCode == "NIDO01" }.id
                 savedFamilyId != null -> savedFamilyId
-                fams.size == 1 -> fams.first().id
                 else -> null
+            }
+            if (resolvedFamilyId == null) {
+                resolvedFamilyId = cloudRepo.ensureFixedFamily(currentUserId).getOrNull()
+                    ?: fams.firstOrNull()?.id
             }
             if (resolvedFamilyId != null) {
                 _activeFamilyId.value = resolvedFamilyId

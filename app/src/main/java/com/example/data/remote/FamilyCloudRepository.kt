@@ -113,12 +113,13 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         adminEmoji: String = "👨🏽",
         adminColorHex: String = "#1A73E8",
         defaultMasterPin: String = "752581",
-        defaultSwitchPin: String = "258046"
+        defaultSwitchPin: String = "258046",
+        customInviteCode: String? = null
     ): Result<Pair<String, String>> {
         val cleanFamName = familyName.trim().take(50).ifEmpty { "Mi Familia" }
         val cleanAdminName = adminName.trim().take(40).ifEmpty { "Papá" }
         val familyId = "fam_${UUID.randomUUID().toString().replace("-", "").take(12)}"
-        val inviteCode = generateInviteCode()
+        val inviteCode = customInviteCode?.trim()?.uppercase() ?: generateInviteCode()
         val adminMemberId = "member_${UUID.randomUUID().toString().replace("-", "").take(8)}"
         val mainChatId = "chat_familia_${UUID.randomUUID().toString().replace("-", "").take(6)}"
         val memberUids = listOf(uid)
@@ -204,6 +205,38 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.CREATE, fRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun ensureFixedFamily(uid: String, fixedCode: String = "NIDO01"): Result<String> {
+        val code = fixedCode.trim().uppercase()
+        val invRef = db.collection("familyInvites").document(code)
+        return try {
+            val invSnap = invRef.get().await()
+            if (invSnap.exists() && invSnap.getBoolean("active") == true) {
+                joinFamilyByInviteCode(uid, code)
+            } else {
+                val created = createFamily(
+                    uid = uid,
+                    familyName = "Mi Familia",
+                    adminName = "Administrador",
+                    customInviteCode = code
+                ).map { it.first }
+                if (created.isSuccess) {
+                    created
+                } else {
+                    val retrySnap = runCatching { invRef.get().await() }.getOrNull()
+                    if (retrySnap != null && retrySnap.exists() && retrySnap.getBoolean("active") == true) {
+                        joinFamilyByInviteCode(uid, code)
+                    } else {
+                        created
+                    }
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
             Result.failure(e)
         }
     }
