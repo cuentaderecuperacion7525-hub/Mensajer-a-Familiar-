@@ -82,10 +82,19 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.CameraAlt
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.NotificationsOff
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.SentimentSatisfied
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.DropdownMenu
@@ -96,6 +105,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -120,6 +130,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -140,6 +151,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -154,6 +166,7 @@ import com.example.data.model.PresenceStatus
 import com.example.ui.components.ChatInfoAndGalleryDialog
 import com.example.ui.components.ChatMessageBubble
 import com.example.ui.components.ChatWallpaperPalette
+import com.example.ui.components.ChatWallpaperPickerDialog
 import com.example.ui.components.ForwardMessageDialog
 import com.example.ui.components.FullScreenImageDialog
 import com.example.ui.components.FullScreenVideoDialog
@@ -246,6 +259,10 @@ fun ChatRoomScreen(
     var forwardTargetMessage by remember { mutableStateOf<ChatMessageEntity?>(null) }
     var infoTargetMessage by remember { mutableStateOf<ChatMessageEntity?>(null) }
     var showChatInfoDialog by remember { mutableStateOf(false) }
+    var showWallpaperDialog by remember { mutableStateOf(false) }
+    var showClearChatConfirmDialog by remember { mutableStateOf(false) }
+    var showBlockContactConfirmDialog by remember { mutableStateOf(false) }
+    var isContactBlocked by rememberSaveable(chatUi.chat.id) { mutableStateOf(false) }
 
     var isSearchOpen by remember { mutableStateOf(false) }
     var inChatQuery by remember { mutableStateOf("") }
@@ -549,9 +566,11 @@ fun ChatRoomScreen(
                                         emoji = chatUi.displayEmoji,
                                         colorHex = chatUi.displayColorHex,
                                         photoData = chatUi.displayPhotoData,
-                                        size = 40.dp,
+                                        size = 42.dp,
                                         isOnline = chatUi.isOnline,
-                                        showOnlineDot = true
+                                        showOnlineDot = false,
+                                        nameForInitials = chatUi.displayTitle,
+                                        isGroupAvatar = chatUi.chat.type == ChatType.GROUP
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column {
@@ -584,10 +603,19 @@ fun ChatRoomScreen(
                                         val isLiveStatus = chatUi.isOnline ||
                                             chatUi.subtitleStatus.contains("escribiendo", ignoreCase = true) ||
                                             chatUi.subtitleStatus.contains("grabando", ignoreCase = true)
+                                        val cleanHeaderSubtitle = when {
+                                            isContactBlocked -> "Contacto bloqueado"
+                                            chatUi.subtitleStatus.contains("escribiendo", ignoreCase = true) ||
+                                                chatUi.subtitleStatus.contains("grabando", ignoreCase = true) -> chatUi.subtitleStatus
+                                            chatUi.isOnline -> "En línea"
+                                            else -> chatUi.subtitleStatus
+                                        }
                                         Text(
-                                            text = chatUi.subtitleStatus,
+                                            text = cleanHeaderSubtitle,
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = if (isLiveStatus) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = if (isContactBlocked) DangerRed
+                                            else if (isLiveStatus) OnlineGreen
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -600,7 +628,26 @@ fun ChatRoomScreen(
                                 }
                             },
                             actions = {
-                                val isDark = LocalDarkTheme.current
+                                IconButton(
+                                    onClick = { onStartCall(CallType.VOICE) },
+                                    modifier = Modifier.testTag("chat_header_voice_call_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Call,
+                                        contentDescription = "Llamada de voz",
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onStartCall(CallType.VIDEO) },
+                                    modifier = Modifier.testTag("chat_header_video_call_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Videocam,
+                                        contentDescription = "Videollamada",
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                                 Box {
                                     IconButton(
                                         onClick = { showHeaderMenu = true },
@@ -608,123 +655,162 @@ fun ChatRoomScreen(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Filled.MoreVert,
-                                            contentDescription = "Opciones del chat"
+                                            contentDescription = "Opciones del chat",
+                                            tint = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
-                                    DropdownMenu(
-                                        expanded = showHeaderMenu,
-                                        onDismissRequest = { showHeaderMenu = false },
-                                        modifier = Modifier.testTag("chat_more_menu")
+                                    MaterialTheme(
+                                        shapes = MaterialTheme.shapes.copy(
+                                            extraSmall = RoundedCornerShape(22.dp)
+                                        )
                                     ) {
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(if (isDark) "Cambiar a tema claro" else "Cambiar a tema oscuro")
-                                            },
-                                            leadingIcon = {
-                                                Icon(
-                                                    imageVector = if (isDark) Icons.Filled.LightMode else Icons.Filled.DarkMode,
-                                                    contentDescription = null
-                                                )
-                                            },
-                                            onClick = {
-                                                showHeaderMenu = false
-                                                onToggleTheme()
-                                            },
-                                            modifier = Modifier.testTag("chat_menu_toggle_theme")
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Ir al panel principal") },
-                                            leadingIcon = {
-                                                Icon(Icons.Filled.Home, contentDescription = null)
-                                            },
-                                            onClick = {
-                                                showHeaderMenu = false
-                                                onGoToHomePanel()
-                                            },
-                                            modifier = Modifier.testTag("chat_menu_go_home")
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Cambiar de perfil") },
-                                            leadingIcon = {
-                                                Icon(Icons.Filled.SwapHoriz, contentDescription = null)
-                                            },
-                                            onClick = {
-                                                showHeaderMenu = false
-                                                onSwitchProfile()
-                                            },
-                                            modifier = Modifier.testTag("chat_menu_switch_profile")
-                                        )
-                                        HorizontalDivider()
-                                        DropdownMenuItem(
-                                            text = { Text("Info, fotos y fondo") },
-                                            leadingIcon = {
-                                                Icon(Icons.Filled.Info, contentDescription = null)
-                                            },
-                                            onClick = {
-                                                showHeaderMenu = false
-                                                showChatInfoDialog = true
-                                            },
-                                            modifier = Modifier.testTag("chat_menu_info_gallery")
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Buscar mensajes") },
-                                            leadingIcon = {
-                                                Icon(Icons.Filled.Search, contentDescription = null)
-                                            },
-                                            onClick = {
-                                                showHeaderMenu = false
-                                                isSearchOpen = true
-                                            },
-                                            modifier = Modifier.testTag("chat_menu_search")
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Llamada de voz") },
-                                            leadingIcon = {
-                                                Icon(Icons.Filled.Call, contentDescription = null)
-                                            },
-                                            onClick = {
-                                                showHeaderMenu = false
-                                                onStartCall(CallType.VOICE)
-                                            },
-                                            modifier = Modifier.testTag("chat_menu_voice_call")
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Videollamada") },
-                                            leadingIcon = {
-                                                Icon(Icons.Filled.Videocam, contentDescription = null)
-                                            },
-                                            onClick = {
-                                                showHeaderMenu = false
-                                                onStartCall(CallType.VIDEO)
-                                            },
-                                            modifier = Modifier.testTag("chat_menu_video_call")
-                                        )
-                                        HorizontalDivider()
-                                        DropdownMenuItem(
-                                            text = { Text(if (chatUi.isPinned) "Desfijar este chat" else "Fijar este chat arriba") },
-                                            leadingIcon = {
-                                                Icon(Icons.Filled.PushPin, contentDescription = null)
-                                            },
-                                            onClick = {
-                                                showHeaderMenu = false
-                                                onTogglePinChat()
-                                            },
-                                            modifier = Modifier.testTag("chat_menu_toggle_pin_chat")
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(if (chatUi.isMuted) "Activar notificaciones" else "Silenciar notificaciones") },
-                                            leadingIcon = {
-                                                Icon(
-                                                    imageVector = if (chatUi.isMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-                                                    contentDescription = null
-                                                )
-                                            },
-                                            onClick = {
-                                                showHeaderMenu = false
-                                                onToggleMuteChat()
-                                            },
-                                            modifier = Modifier.testTag("chat_menu_toggle_mute_chat")
-                                        )
+                                        DropdownMenu(
+                                            expanded = showHeaderMenu,
+                                            onDismissRequest = { showHeaderMenu = false },
+                                            containerColor = MaterialTheme.colorScheme.surface,
+                                            tonalElevation = 3.dp,
+                                            shadowElevation = 8.dp,
+                                            modifier = Modifier
+                                                .widthIn(min = 240.dp)
+                                                .testTag("chat_more_menu")
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = if (chatUi.chat.type == ChatType.GROUP) "Info del grupo" else "Info del contacto",
+                                                        style = MaterialTheme.typography.bodyLarge
+                                                    )
+                                                },
+                                                leadingIcon = {
+                                                    Icon(Icons.Outlined.Info, contentDescription = null)
+                                                },
+                                                onClick = {
+                                                    showHeaderMenu = false
+                                                    showChatInfoDialog = true
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                                                modifier = Modifier.testTag("chat_menu_info_gallery")
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = "Fondo del chat",
+                                                        style = MaterialTheme.typography.bodyLarge
+                                                    )
+                                                },
+                                                leadingIcon = {
+                                                    Icon(Icons.Outlined.Image, contentDescription = null)
+                                                },
+                                                onClick = {
+                                                    showHeaderMenu = false
+                                                    showWallpaperDialog = true
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                                                modifier = Modifier.testTag("chat_menu_wallpaper")
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = "Buscar mensajes",
+                                                        style = MaterialTheme.typography.bodyLarge
+                                                    )
+                                                },
+                                                leadingIcon = {
+                                                    Icon(Icons.Filled.Search, contentDescription = null)
+                                                },
+                                                onClick = {
+                                                    showHeaderMenu = false
+                                                    isSearchOpen = true
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                                                modifier = Modifier.testTag("chat_menu_search")
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = if (chatUi.isPinned) "Desfijar chat" else "Fijar chat arriba",
+                                                        style = MaterialTheme.typography.bodyLarge
+                                                    )
+                                                },
+                                                leadingIcon = {
+                                                    Icon(Icons.Outlined.PushPin, contentDescription = null)
+                                                },
+                                                onClick = {
+                                                    showHeaderMenu = false
+                                                    onTogglePinChat()
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                                                modifier = Modifier.testTag("chat_menu_toggle_pin_chat")
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = if (chatUi.isMuted) "Activar notificaciones" else "Silenciar notificaciones",
+                                                        style = MaterialTheme.typography.bodyLarge
+                                                    )
+                                                },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        imageVector = if (chatUi.isMuted) Icons.Filled.Notifications else Icons.Outlined.NotificationsOff,
+                                                        contentDescription = null
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showHeaderMenu = false
+                                                    onToggleMuteChat()
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                                                modifier = Modifier.testTag("chat_menu_toggle_mute_chat")
+                                            )
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(vertical = 6.dp),
+                                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = "Vaciar chat",
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        color = DangerRed
+                                                    )
+                                                },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Delete,
+                                                        contentDescription = null,
+                                                        tint = DangerRed
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showHeaderMenu = false
+                                                    showClearChatConfirmDialog = true
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                                                modifier = Modifier.testTag("chat_menu_clear_chat")
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = if (isContactBlocked) "Desbloquear contacto" else "Bloquear contacto",
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        color = DangerRed
+                                                    )
+                                                },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Block,
+                                                        contentDescription = null,
+                                                        tint = DangerRed
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showHeaderMenu = false
+                                                    showBlockContactConfirmDialog = true
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                                                modifier = Modifier.testTag("chat_menu_block_contact")
+                                            )
+                                        }
                                     }
                                 }
                             },
@@ -732,13 +818,13 @@ fun ChatRoomScreen(
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 titleContentColor = MaterialTheme.colorScheme.onSurface,
                                 navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                                actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                actionIconContentColor = MaterialTheme.colorScheme.onSurface
                             )
                         )
                     }
                 }
                 androidx.compose.material3.HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.65f)
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
                 )
             }
         }
@@ -796,82 +882,139 @@ fun ChatRoomScreen(
                     }
                 }
 
-                // Messages List + Floating Scroll-to-Bottom Button
+                // Messages List + Empty Chat Greeting State + Floating Scroll-to-Bottom Button
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(vertical = 10.dp)
-                    ) {
-                        items(visibleMessages, key = { it.id }) { msg ->
-                            if (initialUnreadMessageId == msg.id && initialUnreadCount > 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(16.dp),
-                                        color = MaterialTheme.colorScheme.primaryContainer,
-                                        shadowElevation = 2.dp,
-                                        modifier = Modifier.testTag("unread_messages_divider")
+                    if (visibleMessages.isEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 24.dp)
+                                .testTag("empty_chat_greeting_state"),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            MemberAvatar(
+                                emoji = chatUi.displayEmoji,
+                                colorHex = chatUi.displayColorHex,
+                                photoData = chatUi.displayPhotoData,
+                                size = 88.dp,
+                                isOnline = chatUi.isOnline,
+                                showOnlineDot = false,
+                                nameForInitials = chatUi.displayTitle,
+                                isGroupAvatar = chatUi.chat.type == ChatType.GROUP
+                            )
+                            Spacer(modifier = Modifier.height(18.dp))
+                            Text(
+                                text = "Aún no hay mensajes con ${chatUi.displayTitle}",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Envíale un saludo para empezar.",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(22.dp))
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                listOf("¡Hola!", "¿Cómo estás?", "Te quiero").forEach { greeting ->
+                                    OutlinedButton(
+                                        onClick = { onSendText(greeting, null) },
+                                        shape = RoundedCornerShape(50),
+                                        border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary),
+                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                                        modifier = Modifier.testTag("quick_greeting_${greeting.hashCode()}")
                                     ) {
                                         Text(
-                                            text = if (initialUnreadCount == 1) "1 mensaje sin leer"
-                                            else "$initialUnreadCount mensajes sin leer",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                                            text = greeting,
+                                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                 }
                             }
-                            val sender = membersMap[msg.senderId]
-                            val repliedMsg = msg.replyToMessageId?.let { messageMap[it] }
-                            val repliedSenderName = repliedMsg?.senderId?.let { membersMap[it]?.name }
-                            ChatMessageBubble(
-                                message = msg,
-                                isMine = msg.senderId == activeMember.id,
-                                isGroupChat = chatUi.chat.type == ChatType.GROUP,
-                                sender = sender,
-                                repliedMessage = repliedMsg,
-                                repliedSenderName = repliedSenderName,
-                                activeMemberId = activeMember.id,
-                                isSelected = selectedIds.contains(msg.id),
-                                isMultiSelectMode = isMultiSelectMode,
-                                isPlayingVoice = playingVoiceMessageId == msg.id,
-                                voicePlaybackProgress = if (playingVoiceMessageId == msg.id) playingVoiceProgress else 0f,
-                                searchQuery = inChatQuery,
-                                onToggleSelect = {
-                                    if (selectedIds.contains(msg.id)) selectedIds.remove(msg.id)
-                                    else selectedIds.add(msg.id)
-                                },
-                                onLongPress = { actionTargetMessage = msg },
-                                onReplyClick = { replyId ->
-                                    val idx = visibleMessages.indexOfFirst { it.id == replyId }
-                                    if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) }
-                                },
-                                onImageClick = { uri -> viewerImageUri = uri },
-                                onToggleVoicePlay = { onToggleVoicePlay(msg.id) },
-                                onVotePoll = { optId -> onVotePoll(msg.id, optId) },
-                                onToggleReaction = { emoji -> onToggleReaction(msg.id, emoji) },
-                                onSwipeReply = {
-                                    editingMessage = null
-                                    replyingTo = msg
-                                },
-                                onStopLiveLocation = { onStopLiveLocation(msg.id) },
-                                voicePlaybackSpeed = voicePlaybackSpeed,
-                                onCycleVoiceSpeed = onCycleVoiceSpeed,
-                                downloadProgress = mediaTransferProgress[msg.id],
-                                onVideoClick = { videoMsg ->
-                                    onOpenVideo(videoMsg) { readyFile ->
-                                        viewerVideoCaption = videoMsg.text
-                                        viewerVideoFile = readyFile
+                        }
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(vertical = 10.dp)
+                        ) {
+                            items(visibleMessages, key = { it.id }) { msg ->
+                                if (initialUnreadMessageId == msg.id && initialUnreadCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                            shadowElevation = 2.dp,
+                                            modifier = Modifier.testTag("unread_messages_divider")
+                                        ) {
+                                            Text(
+                                                text = if (initialUnreadCount == 1) "1 mensaje sin leer"
+                                                else "$initialUnreadCount mensajes sin leer",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                                            )
+                                        }
                                     }
-                                },
-                                onDocumentClick = onOpenDocument
-                            )
+                                }
+                                val sender = membersMap[msg.senderId]
+                                val repliedMsg = msg.replyToMessageId?.let { messageMap[it] }
+                                val repliedSenderName = repliedMsg?.senderId?.let { membersMap[it]?.name }
+                                ChatMessageBubble(
+                                    message = msg,
+                                    isMine = msg.senderId == activeMember.id,
+                                    isGroupChat = chatUi.chat.type == ChatType.GROUP,
+                                    sender = sender,
+                                    repliedMessage = repliedMsg,
+                                    repliedSenderName = repliedSenderName,
+                                    activeMemberId = activeMember.id,
+                                    isSelected = selectedIds.contains(msg.id),
+                                    isMultiSelectMode = isMultiSelectMode,
+                                    isPlayingVoice = playingVoiceMessageId == msg.id,
+                                    voicePlaybackProgress = if (playingVoiceMessageId == msg.id) playingVoiceProgress else 0f,
+                                    searchQuery = inChatQuery,
+                                    onToggleSelect = {
+                                        if (selectedIds.contains(msg.id)) selectedIds.remove(msg.id)
+                                        else selectedIds.add(msg.id)
+                                    },
+                                    onLongPress = { actionTargetMessage = msg },
+                                    onReplyClick = { replyId ->
+                                        val idx = visibleMessages.indexOfFirst { it.id == replyId }
+                                        if (idx >= 0) scope.launch { listState.animateScrollToItem(idx) }
+                                    },
+                                    onImageClick = { uri -> viewerImageUri = uri },
+                                    onToggleVoicePlay = { onToggleVoicePlay(msg.id) },
+                                    onVotePoll = { optId -> onVotePoll(msg.id, optId) },
+                                    onToggleReaction = { emoji -> onToggleReaction(msg.id, emoji) },
+                                    onSwipeReply = {
+                                        editingMessage = null
+                                        replyingTo = msg
+                                    },
+                                    onStopLiveLocation = { onStopLiveLocation(msg.id) },
+                                    voicePlaybackSpeed = voicePlaybackSpeed,
+                                    onCycleVoiceSpeed = onCycleVoiceSpeed,
+                                    downloadProgress = mediaTransferProgress[msg.id],
+                                    onVideoClick = { videoMsg ->
+                                        onOpenVideo(videoMsg) { readyFile ->
+                                            viewerVideoCaption = videoMsg.text
+                                            viewerVideoFile = readyFile
+                                        }
+                                    },
+                                    onDocumentClick = onOpenDocument
+                                )
+                            }
                         }
                     }
 
@@ -958,18 +1101,16 @@ fun ChatRoomScreen(
                         }
                     }
 
+                    val isDarkComposer = LocalDarkTheme.current
                     Surface(
-                        shape = RoundedCornerShape(26.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 2.dp,
-                        shadowElevation = 4.dp,
-                        border = BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
-                        ),
+                        shape = RoundedCornerShape(28.dp),
+                        color = if (isDarkComposer) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                        else Color(0xFFF2F4F8),
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             // Reply / Edit Banner docked cleanly inside the pill
@@ -1297,6 +1438,31 @@ fun ChatRoomScreen(
                                         }
                                     }
 
+                                    IconButton(
+                                        onClick = {
+                                            val hasCam = ContextCompat.checkSelfPermission(
+                                                context, Manifest.permission.CAMERA
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                            if (hasCam) {
+                                                val uri = CameraCaptureHelper.createTempPhotoUri(context)
+                                                if (uri != null) {
+                                                    pendingCameraUri = uri
+                                                    cameraCaptureLauncher.launch(uri)
+                                                }
+                                            } else {
+                                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("direct_camera_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.CameraAlt,
+                                            contentDescription = "Tomar foto",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+
                                     if (inputTextValue.text.isNotBlank()) {
                                         IconButton(
                                             onClick = {
@@ -1316,7 +1482,7 @@ fun ChatRoomScreen(
                                         ) {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(40.dp)
+                                                    .size(44.dp)
                                                     .clip(CircleShape)
                                                     .background(MaterialTheme.colorScheme.primary),
                                                 contentAlignment = Alignment.Center
@@ -1357,7 +1523,7 @@ fun ChatRoomScreen(
                                         ) {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(40.dp)
+                                                    .size(44.dp)
                                                     .clip(CircleShape)
                                                     .background(MaterialTheme.colorScheme.primary),
                                                 contentAlignment = Alignment.Center
@@ -1474,6 +1640,79 @@ fun ChatRoomScreen(
             onSelectWallpaper = onSelectWallpaper,
             onOpenImage = { uri -> viewerImageUri = uri },
             onDismiss = { showChatInfoDialog = false }
+        )
+    }
+
+    if (showWallpaperDialog) {
+        ChatWallpaperPickerDialog(
+            selectedWallpaperKey = selectedWallpaperKey,
+            onSelectWallpaper = onSelectWallpaper,
+            onDismiss = { showWallpaperDialog = false }
+        )
+    }
+
+    if (showClearChatConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearChatConfirmDialog = false },
+            title = { Text("Vaciar chat") },
+            text = { Text("¿Deseas vaciar todos los mensajes de este chat para ti?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val allIds = visibleMessages.map { it.id }
+                        if (allIds.isNotEmpty()) {
+                            onDeleteForMe(allIds)
+                        }
+                        showClearChatConfirmDialog = false
+                        scope.launch { snackbarHostState.showSnackbar("Chat vaciado") }
+                    }
+                ) {
+                    Text("Vaciar chat", color = DangerRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearChatConfirmDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+
+    if (showBlockContactConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showBlockContactConfirmDialog = false },
+            title = {
+                Text(if (isContactBlocked) "Desbloquear a ${chatUi.displayTitle}" else "Bloquear a ${chatUi.displayTitle}")
+            },
+            text = {
+                Text(
+                    if (isContactBlocked) "¿Deseas desbloquear este contacto para volver a interactuar normalmente?"
+                    else "¿Deseas bloquear a ${chatUi.displayTitle}?"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        isContactBlocked = !isContactBlocked
+                        showBlockContactConfirmDialog = false
+                        scope.launch {
+                            snackbarHostState.showSnackbar(
+                                if (isContactBlocked) "Contacto bloqueado" else "Contacto desbloqueado"
+                            )
+                        }
+                    }
+                ) {
+                    Text(
+                        text = if (isContactBlocked) "Desbloquear" else "Bloquear",
+                        color = DangerRed
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBlockContactConfirmDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
         )
     }
 

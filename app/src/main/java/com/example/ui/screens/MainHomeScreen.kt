@@ -38,7 +38,9 @@ import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.CallMissed
 import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.outlined.Chat
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Call
@@ -59,9 +61,11 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -72,6 +76,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
@@ -247,21 +252,22 @@ fun MainHomeScreen(
                                     emoji = activeMember.avatarEmoji,
                                     colorHex = activeMember.avatarColorHex,
                                     photoData = activeMember.avatarPhotoData,
-                                    size = 38.dp,
+                                    size = 44.dp,
                                     isOnline = activeMember.isOnline,
-                                    showOnlineDot = true
+                                    showOnlineDot = false,
+                                    nameForInitials = activeMember.name
                                 )
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
                                         text = "FamiChat",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "${activeMember.name} · ${activeMember.lastSeenText}",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -324,6 +330,44 @@ fun MainHomeScreen(
                                         modifier = Modifier.testTag("menu_toggle_theme")
                                     )
                                     DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(
+                                                    text = if (notificationsEnabled) "Notificaciones push: Activas"
+                                                    else "Notificaciones push: Silenciadas"
+                                                )
+                                                Text(
+                                                    text = if (notificationsEnabled) "Toca para silenciar notificaciones"
+                                                    else "Toca para activar notificaciones",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = if (notificationsEnabled) Icons.Filled.Notifications
+                                                else Icons.Filled.NotificationsOff,
+                                                contentDescription = null,
+                                                tint = if (notificationsEnabled) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            val nextState = !notificationsEnabled
+                                            if (nextState &&
+                                                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                                !hasNotifPermission
+                                            ) {
+                                                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                            } else {
+                                                onToggleNotifications(nextState)
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("menu_toggle_push_notifications")
+                                    )
+                                    DropdownMenuItem(
                                         text = { Text("Diagnóstico Push y Llamadas") },
                                         leadingIcon = {
                                             Icon(Icons.Filled.NotificationsActive, contentDescription = null)
@@ -368,32 +412,24 @@ fun MainHomeScreen(
                             actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.65f))
                 }
             },
             bottomBar = {
                 if (!isWide) {
-                    NavigationBar(
-                        windowInsets = WindowInsets.navigationBars,
-                        containerColor = MaterialTheme.colorScheme.surface
-                    ) {
-                        MainNavBarItems(
-                            selectedTab = selectedTab,
-                            unreadCount = totalUnread,
-                            onSelectTab = onSelectTab
-                        )
-                    }
-                }
-            },
-            floatingActionButton = {
-                if (selectedTab == MainTab.CHATS) {
-                    FloatingActionButton(
-                        onClick = { showNewChatDialog = true },
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.testTag("new_chat_fab")
-                    ) {
-                        Icon(Icons.Filled.AddComment, contentDescription = "Nuevo chat")
+                    Column {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                        NavigationBar(
+                            windowInsets = WindowInsets.navigationBars,
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 0.dp
+                        ) {
+                            MainNavBarItems(
+                                selectedTab = selectedTab,
+                                unreadCount = totalUnread,
+                                isDarkTheme = isDarkTheme,
+                                onSelectTab = onSelectTab
+                            )
+                        }
                     }
                 }
             }
@@ -509,12 +545,34 @@ fun MainHomeScreen(
                                         )
                                     }
                                 }
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                                 ChatsListSection(
                                     chats = chatPreviews,
+                                    isDarkTheme = isDarkTheme,
+                                    showWelcomeCard = true,
                                     searchQuery = searchQuery,
                                     onSearchChange = onSearchChange,
-                                    onOpenChat = onOpenChat,
+                                    onOpenChat = { targetChatId ->
+                                        if (targetChatId.startsWith("virtual_direct_")) {
+                                            val otherId = targetChatId.removePrefix("virtual_direct_")
+                                            onStartDirectChat(otherId)
+                                        } else {
+                                            onOpenChat(targetChatId)
+                                        }
+                                    },
+                                    onGreetFamily = {
+                                        val firstDirect = chatPreviews.firstOrNull { it.chat.type == ChatType.DIRECT }
+                                        if (firstDirect != null) {
+                                            if (firstDirect.chat.id.startsWith("virtual_direct_")) {
+                                                onStartDirectChat(firstDirect.chat.id.removePrefix("virtual_direct_"))
+                                            } else {
+                                                onOpenChat(firstDirect.chat.id)
+                                            }
+                                        } else {
+                                            val general = chatPreviews.firstOrNull()
+                                            if (general != null) onOpenChat(general.chat.id)
+                                            else showNewChatDialog = true
+                                        }
+                                    },
                                     onTogglePinChat = onTogglePinChat,
                                     onToggleMuteChat = onToggleMuteChat,
                                     emptyTip = "No hay chats que coincidan con tu búsqueda."
@@ -522,9 +580,12 @@ fun MainHomeScreen(
                             }
                             MainTab.GROUPS -> ChatsListSection(
                                 chats = chatPreviews.filter { it.chat.type == ChatType.GROUP },
+                                isDarkTheme = isDarkTheme,
+                                showWelcomeCard = false,
                                 searchQuery = searchQuery,
                                 onSearchChange = onSearchChange,
                                 onOpenChat = onOpenChat,
+                                onGreetFamily = {},
                                 onTogglePinChat = onTogglePinChat,
                                 onToggleMuteChat = onToggleMuteChat,
                                 emptyTip = if (activeMember.isAdmin) {
@@ -709,9 +770,9 @@ private fun MainNavRailItems(
 ) {
     val entries = listOf(
         Triple(MainTab.CHATS, "Chats", Pair(Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat)),
-        Triple(MainTab.GROUPS, "Grupos", Pair(Icons.Filled.Groups, Icons.Outlined.Groups)),
+        Triple(MainTab.GROUPS, "Grupos", Pair(Icons.Filled.Person, Icons.Outlined.Person)),
         Triple(MainTab.CALLS, "Llamadas", Pair(Icons.Filled.Call, Icons.Outlined.Call)),
-        Triple(MainTab.BOARD, "Tablón", Pair(Icons.Filled.Dashboard, Icons.Outlined.Dashboard))
+        Triple(MainTab.BOARD, "Avisos", Pair(Icons.AutoMirrored.Filled.VolumeUp, Icons.AutoMirrored.Outlined.VolumeUp))
     )
 
     entries.forEach { (tab, label, icons) ->
@@ -742,13 +803,14 @@ private fun MainNavRailItems(
 private fun androidx.compose.foundation.layout.RowScope.MainNavBarItems(
     selectedTab: MainTab,
     unreadCount: Int,
+    isDarkTheme: Boolean = false,
     onSelectTab: (MainTab) -> Unit
 ) {
     val entries = listOf(
         Triple(MainTab.CHATS, "Chats", Pair(Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat)),
-        Triple(MainTab.GROUPS, "Grupos", Pair(Icons.Filled.Groups, Icons.Outlined.Groups)),
+        Triple(MainTab.GROUPS, "Grupos", Pair(Icons.Filled.Person, Icons.Outlined.Person)),
         Triple(MainTab.CALLS, "Llamadas", Pair(Icons.Filled.Call, Icons.Outlined.Call)),
-        Triple(MainTab.BOARD, "Tablón", Pair(Icons.Filled.Dashboard, Icons.Outlined.Dashboard))
+        Triple(MainTab.BOARD, "Avisos", Pair(Icons.AutoMirrored.Filled.VolumeUp, Icons.AutoMirrored.Outlined.VolumeUp))
     )
 
     entries.forEach { (tab, label, icons) ->
@@ -758,6 +820,7 @@ private fun androidx.compose.foundation.layout.RowScope.MainNavBarItems(
             label = label,
             icon = if (selected) icons.first else icons.second,
             badgeCount = if (tab == MainTab.CHATS) unreadCount else 0,
+            isDarkTheme = isDarkTheme,
             tag = "nav_${tab.name.lowercase()}",
             onClick = { onSelectTab(tab) }
         )
@@ -770,6 +833,7 @@ private fun androidx.compose.foundation.layout.RowScope.MainNavBarItem(
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     badgeCount: Int,
+    isDarkTheme: Boolean,
     tag: String,
     onClick: () -> Unit
 ) {
@@ -786,7 +850,24 @@ private fun androidx.compose.foundation.layout.RowScope.MainNavBarItem(
                 }
             }
         },
-        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        label = {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        colors = NavigationBarItemDefaults.colors(
+            selectedIconColor = MaterialTheme.colorScheme.primary,
+            selectedTextColor = MaterialTheme.colorScheme.primary,
+            indicatorColor = if (isDarkTheme) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            else Color(0xFFD8E6FF),
+            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+        ),
         modifier = Modifier.testTag(tag)
     )
 }
@@ -794,9 +875,12 @@ private fun androidx.compose.foundation.layout.RowScope.MainNavBarItem(
 @Composable
 private fun ChatsListSection(
     chats: List<ChatThreadUi>,
+    isDarkTheme: Boolean = false,
+    showWelcomeCard: Boolean = true,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     onOpenChat: (String) -> Unit,
+    onGreetFamily: () -> Unit = {},
     onTogglePinChat: (String) -> Unit = {},
     onToggleMuteChat: (String) -> Unit = {},
     emptyTip: String
@@ -811,35 +895,35 @@ private fun ChatsListSection(
 
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
-            shape = RoundedCornerShape(21.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+            shape = RoundedCornerShape(24.dp),
+            color = if (isDarkTheme) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            else Color(0xFFF1F4F9),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 6.dp)
-                .height(42.dp)
+                .height(46.dp)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 14.dp),
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Filled.Search,
                     contentDescription = "Buscar",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Box(
                     modifier = Modifier.weight(1f),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (searchQuery.isEmpty()) {
                         Text(
-                            text = "Buscar chats o mensajes...",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "Buscar chats o mensajes",
+                            style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -849,7 +933,7 @@ private fun ChatsListSection(
                         value = searchQuery,
                         onValueChange = onSearchChange,
                         singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
                             color = MaterialTheme.colorScheme.onSurface
                         ),
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -887,18 +971,65 @@ private fun ChatsListSection(
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(bottom = 88.dp)
+                contentPadding = PaddingValues(bottom = 24.dp)
             ) {
+                if (showWelcomeCard && searchQuery.isBlank()) {
+                    item(key = "welcome_greeting_card") {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isDarkTheme) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                            else Color(0xFFEBF2FE),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                                .testTag("welcome_greeting_card")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                    Text(
+                                        text = "Escribe el primer mensaje",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    Text(
+                                        text = "Saluda a tu familia para empezar.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Button(
+                                    onClick = onGreetFamily,
+                                    shape = RoundedCornerShape(50),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                                    modifier = Modifier.testTag("welcome_greet_button")
+                                ) {
+                                    Text(
+                                        text = "Saludar",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 items(filtered, key = { it.chat.id }) { item ->
                     ChatRowItem(
                         item = item,
                         onClick = { onOpenChat(item.chat.id) },
                         onTogglePin = { onTogglePinChat(item.chat.id) },
                         onToggleMute = { onToggleMuteChat(item.chat.id) }
-                    )
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 82.dp, end = 16.dp),
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
                     )
                 }
             }
@@ -915,6 +1046,27 @@ private fun ChatRowItem(
     onToggleMute: () -> Unit = {}
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
+    val isGroup = item.chat.type == ChatType.GROUP
+    val isEmptyThread = item.lastMessagePreview == "Aún no hay mensajes. ¡Saluda a la familia!" ||
+        item.lastMessagePreview.isBlank()
+
+    val secondaryLineText = when {
+        !isEmptyThread -> item.lastMessagePreview
+        isGroup -> {
+            val count = item.participants.size.coerceAtLeast(1)
+            if (item.isPinned) "$count miembros · Fijado" else "$count miembros"
+        }
+        item.isOnline -> {
+            val lowerTitle = item.displayTitle.lowercase()
+            if (lowerTitle.contains("mam") || lowerTitle.endsWith("a")) "Activa ahora" else "Activo ahora"
+        }
+        else -> "Toca para saludar"
+    }
+
+    val rightTimeText = when {
+        isGroup && isEmptyThread -> ""
+        else -> item.lastMessageTime
+    }
 
     Box {
         Row(
@@ -924,11 +1076,7 @@ private fun ChatRowItem(
                     onClick = onClick,
                     onLongClick = { showContextMenu = true }
                 )
-                .background(
-                    if (item.isPinned) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.16f)
-                    else Color.Transparent
-                )
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(horizontal = 16.dp, vertical = 11.dp)
                 .testTag("chat_item_${item.chat.id}"),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -938,7 +1086,10 @@ private fun ChatRowItem(
                 photoData = item.displayPhotoData,
                 size = 54.dp,
                 isOnline = item.isOnline,
-                showOnlineDot = true
+                showOnlineDot = !isGroup,
+                showOfflineDot = !isGroup,
+                nameForInitials = item.displayTitle,
+                isGroupAvatar = isGroup
             )
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -953,7 +1104,7 @@ private fun ChatRowItem(
                     ) {
                         Text(
                             text = item.displayTitle,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
@@ -968,47 +1119,27 @@ private fun ChatRowItem(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (item.isPinned) {
-                            Icon(
-                                imageVector = Icons.Filled.PushPin,
-                                contentDescription = "Chat fijado",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                        }
+                    if (rightTimeText.isNotBlank()) {
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = item.lastMessageTime,
-                            style = MaterialTheme.typography.labelSmall,
+                            text = rightTimeText,
+                            style = MaterialTheme.typography.bodySmall,
                             color = if (item.unreadCount > 0) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
                 Spacer(modifier = Modifier.height(2.dp))
-                val isLiveSubtitle = item.isOnline ||
-                    item.subtitleStatus.contains("escribiendo", ignoreCase = true) ||
-                    item.subtitleStatus.contains("grabando", ignoreCase = true)
-                Text(
-                    text = item.subtitleStatus,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (isLiveSubtitle) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(3.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (item.isLastMessageFromMe && item.lastMessageStatus != null) {
+                    if (!isEmptyThread && item.isLastMessageFromMe && item.lastMessageStatus != null) {
                         MessageStatusIcon(status = item.lastMessageStatus)
                         Spacer(modifier = Modifier.width(4.dp))
                     }
                     Text(
-                        text = item.lastMessagePreview,
+                        text = secondaryLineText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -1038,33 +1169,35 @@ private fun ChatRowItem(
             }
         }
 
-        DropdownMenu(
-            expanded = showContextMenu,
-            onDismissRequest = { showContextMenu = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text(if (item.isPinned) "Desfijar chat" else "Fijar chat arriba") },
-                leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
-                onClick = {
-                    showContextMenu = false
-                    onTogglePin()
-                },
-                modifier = Modifier.testTag("context_pin_chat_${item.chat.id}")
-            )
-            DropdownMenuItem(
-                text = { Text(if (item.isMuted) "Activar notificaciones" else "Silenciar notificaciones") },
-                leadingIcon = {
-                    Icon(
-                        imageVector = if (item.isMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
-                        contentDescription = null
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    onToggleMute()
-                },
-                modifier = Modifier.testTag("context_mute_chat_${item.chat.id}")
-            )
+        if (!item.chat.id.startsWith("virtual_direct_")) {
+            DropdownMenu(
+                expanded = showContextMenu,
+                onDismissRequest = { showContextMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text(if (item.isPinned) "Desfijar chat" else "Fijar chat arriba") },
+                    leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                    onClick = {
+                        showContextMenu = false
+                        onTogglePin()
+                    },
+                    modifier = Modifier.testTag("context_pin_chat_${item.chat.id}")
+                )
+                DropdownMenuItem(
+                    text = { Text(if (item.isMuted) "Activar notificaciones" else "Silenciar notificaciones") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (item.isMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                            contentDescription = null
+                        )
+                    },
+                    onClick = {
+                        showContextMenu = false
+                        onToggleMute()
+                    },
+                    modifier = Modifier.testTag("context_mute_chat_${item.chat.id}")
+                )
+            }
         }
     }
 }

@@ -561,6 +561,92 @@ fun ChatInfoAndGalleryDialog(
 }
 
 @Composable
+fun ChatWallpaperPickerDialog(
+    selectedWallpaperKey: String,
+    onSelectWallpaper: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val isDark = LocalDarkTheme.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Wallpaper,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text("Fondo del chat")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Elige el color de fondo para esta conversación:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(ChatWallpaperPalette.options, key = { it.key }) { opt ->
+                        val selected = selectedWallpaperKey == opt.key ||
+                            (selectedWallpaperKey.isBlank() && opt.key == "default")
+                        val swatch = if (isDark) opt.darkBg else opt.lightBg
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    onSelectWallpaper(opt.key)
+                                    onDismiss()
+                                }
+                                .padding(4.dp)
+                                .testTag("dialog_wallpaper_${opt.key}")
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(swatch)
+                                    .border(
+                                        width = if (selected) 2.5.dp else 1.dp,
+                                        color = if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (selected) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Check,
+                                        contentDescription = "Seleccionado",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = opt.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cerrar")
+            }
+        }
+    )
+}
+
+@Composable
 fun PushAndCallDiagnosticsDialog(
     familyId: String,
     memberName: String,

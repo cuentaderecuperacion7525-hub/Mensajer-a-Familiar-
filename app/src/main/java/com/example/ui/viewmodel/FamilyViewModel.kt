@@ -354,6 +354,18 @@ class FamilyViewModel(
     private var lastSentPresenceAt: Long = 0L
     private var lastSyncedMemberUids: Set<String> = emptySet()
 
+    private fun formatCompactMemberTime(isOnline: Boolean, liveStatusAt: Long, nowMs: Long): String {
+        if (isOnline) return "ahora"
+        if (liveStatusAt <= 0L) return ""
+        val diffMin = ((nowMs - liveStatusAt).coerceAtLeast(0L) / 60_000L).toInt()
+        return when {
+            diffMin < 1 -> "ahora"
+            diffMin < 60 -> "$diffMin min"
+            diffMin < 1440 -> "${diffMin / 60} h"
+            else -> "${diffMin / 1440} d"
+        }
+    }
+
     private val baseChatPreviews: Flow<List<ChatThreadUi>> = combine(
         rawChats,
         allMessages,
@@ -363,8 +375,9 @@ class FamilyViewModel(
         if (currentId == null) return@combine emptyList()
         val membersMap = membersList.associateBy { it.id }
         val now = System.currentTimeMillis()
+        val existingDirectPartnerIds = mutableSetOf<String>()
 
-        chatsList.mapNotNull { chat ->
+        val existingItems = chatsList.mapNotNull { chat ->
             val participantIds = JsonHelpers.decodeStringList(chat.participantIdsJson)
             if (!participantIds.contains(currentId)) return@mapNotNull null
 
@@ -383,10 +396,15 @@ class FamilyViewModel(
 
             val otherMembers = participants.filter { it.id != currentId }
             val otherMember = if (chat.type == ChatType.DIRECT) otherMembers.firstOrNull() else null
+            if (otherMember != null) {
+                existingDirectPartnerIds.add(otherMember.id)
+            }
 
-            val displayTitle = if (chat.type == ChatType.DIRECT) {
-                otherMember?.name ?: chat.title
-            } else chat.title
+            val displayTitle = when {
+                chat.type == ChatType.DIRECT -> otherMember?.name ?: chat.title
+                chat.id == "chat_general" && chat.title == "Familia General" -> "Mi Familia"
+                else -> chat.title
+            }
 
             val displayEmoji = if (chat.type == ChatType.DIRECT) {
                 otherMember?.avatarEmoji ?: chat.avatarEmoji
@@ -430,7 +448,12 @@ class FamilyViewModel(
             }
 
             val preview = buildLastMessagePreview(lastMsg, membersMap, currentId, chat.type)
-            val timeLabel = lastMsg?.let { TimeFormatters.formatHourMinute(it.timestamp) } ?: ""
+            val timeLabel = when {
+                lastMsg != null -> TimeFormatters.formatHourMinute(lastMsg.timestamp)
+                chat.type == ChatType.DIRECT && otherMember != null ->
+                    formatCompactMemberTime(isOnline, otherMember.liveStatusAt, now)
+                else -> ""
+            }
 
             ChatThreadUi(
                 chat = chat,
@@ -449,6 +472,39 @@ class FamilyViewModel(
                 participants = participants
             )
         }
+
+        val meMember = membersMap[currentId]
+        val virtualDirectItems = membersList
+            .filter { it.id != currentId && !existingDirectPartnerIds.contains(it.id) }
+            .map { other ->
+                val virtualChat = ChatThreadEntity(
+                    id = "virtual_direct_${other.id}",
+                    type = ChatType.DIRECT,
+                    title = other.name,
+                    avatarColorHex = other.avatarColorHex,
+                    avatarEmoji = other.avatarEmoji,
+                    participantIdsJson = JsonHelpers.encodeStringList(listOf(currentId, other.id)),
+                    updatedAt = other.liveStatusAt.coerceAtLeast(1L)
+                )
+                ChatThreadUi(
+                    chat = virtualChat,
+                    displayTitle = other.name,
+                    displayEmoji = other.avatarEmoji,
+                    displayColorHex = other.avatarColorHex,
+                    displayPhotoData = other.avatarPhotoData,
+                    partnerBioText = other.bioText,
+                    isOnline = other.isOnline,
+                    subtitleStatus = other.lastSeenText,
+                    lastMessagePreview = "Sin mensajes aún",
+                    lastMessageTime = formatCompactMemberTime(other.isOnline, other.liveStatusAt, now),
+                    unreadCount = 0,
+                    lastMessageStatus = null,
+                    isLastMessageFromMe = false,
+                    participants = listOfNotNull(meMember, other)
+                )
+            }
+
+        existingItems + virtualDirectItems
     }
 
     val chatPreviews: StateFlow<List<ChatThreadUi>> = combine(
@@ -457,12 +513,15 @@ class FamilyViewModel(
         mutedChatIds
     ) { list, pinned, muted ->
         list.map { item ->
+            val isDefaultGroupPinned = item.chat.id == "chat_general" && !pinned.contains("unpinned_chat_general")
             item.copy(
-                isPinned = pinned.contains(item.chat.id),
+                isPinned = pinned.contains(item.chat.id) || isDefaultGroupPinned,
                 isMuted = muted.contains(item.chat.id)
             )
         }.sortedWith(
             compareByDescending<ChatThreadUi> { it.isPinned }
+                .thenByDescending { it.chat.type == ChatType.GROUP }
+                .thenByDescending { it.isOnline }
                 .thenByDescending { it.chat.updatedAt }
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

@@ -98,18 +98,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -181,13 +187,16 @@ fun FamilyStatusStrip(
         // My Status item
         item(key = "my_status") {
             val hasVideo = myStatuses.any { it.isVideo }
+            val hasStatus = myStatuses.isNotEmpty()
+            val ringColor = if (hasStatus) MaterialTheme.colorScheme.primary
+            else Color(0xFF9AA0A6)
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
-                    .width(68.dp)
+                    .width(74.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .clickable {
-                        if (myStatuses.isNotEmpty()) {
+                        if (hasStatus) {
                             onOpenMemberStatuses(
                                 MemberStatusGroup(
                                     member = activeMember,
@@ -202,20 +211,32 @@ fun FamilyStatusStrip(
                     .padding(vertical = 2.dp)
                     .testTag("my_status_tile")
             ) {
-                Box(modifier = Modifier.size(58.dp), contentAlignment = Alignment.Center) {
-                    val ringColor = if (myStatuses.isNotEmpty()) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+                Box(modifier = Modifier.size(64.dp), contentAlignment = Alignment.Center) {
                     Box(
                         modifier = Modifier
-                            .size(56.dp)
-                            .border(2.dp, ringColor, CircleShape)
-                            .padding(3.dp)
+                            .size(62.dp)
+                            .drawBehind {
+                                val strokePx = 2.2.dp.toPx()
+                                val radius = (size.minDimension - strokePx) / 2f
+                                drawCircle(
+                                    color = ringColor,
+                                    radius = radius,
+                                    style = Stroke(
+                                        width = strokePx,
+                                        pathEffect = if (hasStatus) null
+                                        else PathEffect.dashPathEffect(floatArrayOf(12f, 9f), 0f)
+                                    )
+                                )
+                            }
+                            .padding(5.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         MemberAvatar(
                             emoji = activeMember.avatarEmoji,
                             colorHex = activeMember.avatarColorHex,
                             photoData = activeMember.avatarPhotoData,
-                            size = 50.dp
+                            nameForInitials = activeMember.name,
+                            size = 52.dp
                         )
                     }
                     if (hasVideo) {
@@ -242,7 +263,7 @@ fun FamilyStatusStrip(
                             .size(22.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primary)
-                            .border(1.5.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                            .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
                             .clickable { onAddStatus() }
                             .testTag("add_status_quick_button"),
                         contentAlignment = Alignment.Center
@@ -255,11 +276,11 @@ fun FamilyStatusStrip(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(5.dp))
                 Text(
-                    text = if (myStatuses.isNotEmpty()) "Mi estado (${myStatuses.size})" else "Mi estado",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text = "Mi estado",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -272,7 +293,7 @@ fun FamilyStatusStrip(
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
-                    .width(68.dp)
+                    .width(86.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .clickable { onOpenMemberStatuses(group) }
                     .padding(vertical = 2.dp)
@@ -283,19 +304,20 @@ fun FamilyStatusStrip(
                 } else {
                     MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                 }
-                Box(modifier = Modifier.size(58.dp), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier.size(64.dp), contentAlignment = Alignment.Center) {
                     Box(
                         modifier = Modifier
-                            .size(56.dp)
+                            .size(62.dp)
                             .border(2.5.dp, ringColor, CircleShape)
-                            .padding(3.dp),
+                            .padding(5.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         MemberAvatar(
                             emoji = group.member.avatarEmoji,
                             colorHex = group.member.avatarColorHex,
                             photoData = group.member.avatarPhotoData,
-                            size = 50.dp
+                            nameForInitials = group.member.name,
+                            size = 52.dp
                         )
                     }
                     if (hasVideo) {
@@ -317,17 +339,40 @@ fun FamilyStatusStrip(
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = group.member.name,
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = if (group.hasUnviewed) FontWeight.Bold else FontWeight.Normal
-                    ),
-                    color = if (group.hasUnviewed) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Spacer(modifier = Modifier.height(5.dp))
+                if (group.hasUnviewed) {
+                    Text(
+                        text = buildAnnotatedString {
+                            withStyle(
+                                SpanStyle(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            ) {
+                                append(group.member.name)
+                            }
+                            withStyle(
+                                SpanStyle(
+                                    fontWeight = FontWeight.Normal,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            ) {
+                                append(" · nuevo")
+                            }
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
+                    Text(
+                        text = group.member.name,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }

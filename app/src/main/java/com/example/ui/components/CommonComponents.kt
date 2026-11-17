@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -103,6 +104,25 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
+fun extractAvatarInitials(name: String?, fallbackEmoji: String): String {
+    val cleanName = name?.trim().orEmpty()
+    if (cleanName.isNotEmpty()) {
+        val parts = cleanName.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (parts.size >= 2) {
+            val first = parts[0].firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()
+            val second = parts[1].firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()
+            if (first != null && second != null) return "$first$second"
+        }
+        val single = parts.firstOrNull()?.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()
+        if (single != null) return single.toString()
+    }
+    val cleanFallback = fallbackEmoji.trim()
+    if (cleanFallback.isNotEmpty() && cleanFallback.all { it.isLetterOrDigit() }) {
+        return cleanFallback.take(2).uppercase()
+    }
+    return ""
+}
+
 @Composable
 fun MemberAvatar(
     emoji: String,
@@ -110,43 +130,72 @@ fun MemberAvatar(
     size: Dp = 48.dp,
     isOnline: Boolean = false,
     showOnlineDot: Boolean = false,
+    showOfflineDot: Boolean = false,
     photoData: String? = null,
+    nameForInitials: String? = null,
+    isGroupAvatar: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val bgColor = parseHexColor(colorHex)
+    val initials = remember(nameForInitials, emoji) {
+        extractAvatarInitials(nameForInitials, emoji)
+    }
+    val treatAsGroup = isGroupAvatar || emoji == "🏠" || emoji == "👨‍👩‍👧‍👦"
+
     Box(modifier = modifier.size(size)) {
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .clip(CircleShape)
-                .background(bgColor.copy(alpha = 0.18f))
-                .border(1.5.dp, bgColor.copy(alpha = 0.55f), CircleShape),
+                .background(bgColor),
             contentAlignment = Alignment.Center
         ) {
-            if (!photoData.isNullOrBlank()) {
-                AsyncImage(
-                    model = ImageCompressionHelper.resolveCoilModel(photoData),
-                    contentDescription = "Foto de perfil",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Text(
-                    text = emoji.ifBlank { "👤" },
-                    fontSize = (size.value * 0.48f).sp
-                )
+            when {
+                !photoData.isNullOrBlank() -> {
+                    AsyncImage(
+                        model = ImageCompressionHelper.resolveCoilModel(photoData),
+                        contentDescription = "Foto de perfil",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                treatAsGroup -> {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Outlined.Person,
+                        contentDescription = "Grupo familiar",
+                        tint = Color.White,
+                        modifier = Modifier.size((size.value * 0.50f).dp)
+                    )
+                }
+                initials.isNotEmpty() -> {
+                    Text(
+                        text = initials,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = (size.value * if (initials.length > 1) 0.36f else 0.42f).sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                else -> {
+                    Text(
+                        text = emoji.ifBlank { "👤" },
+                        color = Color.White,
+                        fontSize = (size.value * 0.44f).sp
+                    )
+                }
             }
         }
-        if (showOnlineDot && isOnline) {
+        if ((showOnlineDot && isOnline) || (showOfflineDot && !isOnline)) {
+            val dotColor = if (isOnline) OnlineGreen else Color(0xFF9AA0A6)
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .size((size.value * 0.28f).coerceAtLeast(11f).dp)
+                    .size((size.value * 0.28f).coerceAtLeast(12f).dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(2.dp)
                     .clip(CircleShape)
-                    .background(OnlineGreen)
+                    .background(dotColor)
             )
         }
     }
@@ -236,6 +285,7 @@ fun UserProfileOptionsDialog(
                         emoji = member.avatarEmoji,
                         colorHex = member.avatarColorHex,
                         photoData = previewPhotoData,
+                        nameForInitials = member.name,
                         size = 58.dp,
                         isOnline = isOnlineInput,
                         showOnlineDot = true
@@ -432,148 +482,6 @@ fun UserProfileOptionsDialog(
                             .testTag("profile_save_status_button")
                     ) {
                         Text("Guardar perfil")
-                    }
-                }
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-
-                // Apariencia
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onToggleTheme() }
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(
-                            imageVector = if (effectiveDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
-                            contentDescription = "Tema de la aplicación",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Column {
-                            Text("Tema oscuro", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                text = if (effectiveDarkTheme) "Activo (oscuro)" else "Desactivado (blanco)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    Switch(
-                        checked = effectiveDarkTheme,
-                        onCheckedChange = { onToggleTheme() },
-                        modifier = Modifier.testTag("profile_theme_switch")
-                    )
-                }
-
-                // Notificaciones
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onToggleNotifications(!notificationsEnabled) }
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(
-                            imageVector = Icons.Filled.Notifications,
-                            contentDescription = "Notificaciones del sistema",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Column(modifier = Modifier.weight(1f, fill = false)) {
-                            Text("Notificaciones push", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                text = when {
-                                    !notificationsEnabled -> "Silenciadas en este teléfono"
-                                    member.fcmTokens.isNotEmpty() -> "FCM + sincronización en 2.º plano activos"
-                                    else -> "Activas (registrando push en la nube...)"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    Switch(
-                        checked = notificationsEnabled,
-                        onCheckedChange = onToggleNotifications,
-                        modifier = Modifier.testTag("profile_notifications_switch")
-                    )
-                }
-
-                // Switch de perfil con clave del administrador
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable {
-                            onDismiss()
-                            onRequestSwitchProfile()
-                        }
-                        .testTag("profile_switch_row")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.SwapHoriz,
-                                contentDescription = "Switch de perfil",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Column {
-                                Text("Switch de perfil", style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    text = if (member.isAdmin) {
-                                        "Salir al selector de perfiles"
-                                    } else {
-                                        "Salir con clave del administrador"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        Switch(
-                            checked = false,
-                            onCheckedChange = {
-                                onDismiss()
-                                onRequestSwitchProfile()
-                            },
-                            modifier = Modifier.testTag("profile_switch_control")
-                        )
-                    }
-                }
-
-                if (member.isAdmin) {
-                    OutlinedButton(
-                        onClick = {
-                            onDismiss()
-                            onOpenAdminPanel()
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("profile_admin_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.AdminPanelSettings,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Abrir Panel de Administración")
                     }
                 }
             }
