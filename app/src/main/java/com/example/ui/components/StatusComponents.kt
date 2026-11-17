@@ -18,6 +18,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -26,8 +27,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -45,6 +49,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
@@ -53,6 +58,8 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -77,6 +84,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -847,17 +855,36 @@ fun StatusViewerDialog(
 
     var replyInput by remember(currentStatus.id) { mutableStateOf("") }
     var showViewersSheet by remember(currentStatus.id) { mutableStateOf(false) }
+    var showOptionsMenu by remember(currentStatus.id) { mutableStateOf(false) }
 
     // Video status state
     var readyVideoFile by remember(currentStatus.id) { mutableStateOf<File?>(null) }
     var videoViewRef by remember(currentStatus.id) { mutableStateOf<VideoView?>(null) }
+    var mediaPlayerRef by remember(currentStatus.id) { mutableStateOf<android.media.MediaPlayer?>(null) }
     var isVideoPlaying by remember(currentStatus.id) { mutableStateOf(true) }
     var isVideoMuted by remember(currentStatus.id) { mutableStateOf(false) }
     var videoProgress by remember(currentStatus.id) { mutableFloatStateOf(0f) }
 
+    val thumbBitmap = remember(currentStatus.id, currentStatus.videoThumbnailData) {
+        ImageCompressionHelper.decodeToBitmap(currentStatus.videoThumbnailData)?.asImageBitmap()
+    }
+    val initialVideoRatio = remember(currentStatus.id, thumbBitmap) {
+        if (thumbBitmap != null && thumbBitmap.height > 0) {
+            (thumbBitmap.width.toFloat() / thumbBitmap.height.toFloat()).coerceIn(0.35f, 2.5f)
+        } else {
+            9f / 16f
+        }
+    }
+    var videoAspectRatio by remember(currentStatus.id) { mutableFloatStateOf(initialVideoRatio) }
+
     // Photo zoom state (reset per status)
     var photoScale by remember(currentStatus.id) { mutableFloatStateOf(1f) }
     var photoOffset by remember(currentStatus.id) { mutableStateOf(Offset.Zero) }
+
+    val viewerIds = remember(currentStatus.viewedByMemberIdsJson, activeMemberId) {
+        JsonHelpers.decodeStringList(currentStatus.viewedByMemberIdsJson)
+            .filterNot { it == activeMemberId }
+    }
 
     LaunchedEffect(currentStatus.id) {
         onMarkViewed(currentStatus.id)
@@ -868,11 +895,13 @@ fun StatusViewerDialog(
         }
     }
 
+    val isOverlayPaused = replyInput.isNotEmpty() || showViewersSheet || showOptionsMenu || photoScale > 1.05f
+
     // Track video progress smoothly without recomposing photo statuses
-    LaunchedEffect(currentStatus.id, readyVideoFile, isVideoPlaying, replyInput.isNotEmpty(), showViewersSheet) {
+    LaunchedEffect(currentStatus.id, readyVideoFile, isVideoPlaying, isOverlayPaused) {
         if (!currentStatus.isVideo || readyVideoFile == null) return@LaunchedEffect
         val vv = videoViewRef
-        if (replyInput.isNotEmpty() || showViewersSheet) {
+        if (isOverlayPaused) {
             try {
                 if (vv?.isPlaying == true) vv.pause()
             } catch (_: Exception) {
@@ -906,6 +935,7 @@ fun StatusViewerDialog(
                 videoViewRef?.stopPlayback()
             } catch (_: Exception) {
             }
+            mediaPlayerRef = null
         }
     }
 
@@ -925,7 +955,10 @@ fun StatusViewerDialog(
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = true
+        )
     ) {
         val hasMedia = currentStatus.isVideo || !currentStatus.mediaUri.isNullOrBlank()
         val bgColor = if (hasMedia) {
@@ -933,19 +966,22 @@ fun StatusViewerDialog(
         } else {
             parseHexColor(currentStatus.backgroundHex)
         }
+        val hasMenuActions = hasMedia || isMine
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(bgColor)
-                .systemBarsPadding()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding()
         ) {
-            // 1. TOP HEADER BAR (Never covers the photo/video viewport!)
+            // 1. COMPACT TOP HEADER BAR WITH 3-DOTS MENU (⋮)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .background(Color.Black.copy(alpha = 0.52f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 StatusSegmentedProgressRow(
                     itemCount = items.size,
@@ -953,10 +989,10 @@ fun StatusViewerDialog(
                     currentStatusId = currentStatus.id,
                     isVideo = currentStatus.isVideo,
                     videoProgress = videoProgress,
-                    isPaused = replyInput.isNotEmpty() || showViewersSheet || photoScale > 1.05f,
+                    isPaused = isOverlayPaused,
                     onAutoAdvance = ::advanceNextOrDismiss
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -965,114 +1001,212 @@ fun StatusViewerDialog(
                         emoji = group.member.avatarEmoji,
                         colorHex = group.member.avatarColorHex,
                         photoData = group.member.avatarPhotoData,
-                        size = 40.dp
+                        size = 38.dp
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = if (isMine) "Mi estado" else group.member.name,
                             color = Color.White,
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         val typePrefix = if (currentStatus.isVideo) "🎬 Video · " else ""
                         Text(
                             text = typePrefix + TimeFormatters.formatLastSeen(currentStatus.createdAt)
                                 .replace("Últ. vez ", "Publicado "),
                             color = Color.White.copy(alpha = 0.85f),
-                            style = MaterialTheme.typography.labelSmall
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                    if (currentStatus.isVideo && readyVideoFile != null) {
-                        IconButton(
-                            onClick = {
-                                val nextPlay = !isVideoPlaying
-                                isVideoPlaying = nextPlay
-                                try {
-                                    if (nextPlay) videoViewRef?.start() else videoViewRef?.pause()
-                                } catch (_: Exception) {
+
+                    if (hasMenuActions) {
+                        Box {
+                            IconButton(
+                                onClick = { showOptionsMenu = true },
+                                modifier = Modifier.testTag("status_more_options_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.MoreVert,
+                                    contentDescription = "Más opciones del estado",
+                                    tint = Color.White
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showOptionsMenu,
+                                onDismissRequest = { showOptionsMenu = false }
+                            ) {
+                                if (currentStatus.isVideo && readyVideoFile != null) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(if (isVideoPlaying) "Pausar video" else "Reproducir video")
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = if (isVideoPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                                contentDescription = null
+                                            )
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            val nextPlay = !isVideoPlaying
+                                            isVideoPlaying = nextPlay
+                                            try {
+                                                if (nextPlay) videoViewRef?.start() else videoViewRef?.pause()
+                                            } catch (_: Exception) {
+                                            }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(if (isVideoMuted) "Activar sonido" else "Silenciar video")
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = if (isVideoMuted) Icons.AutoMirrored.Filled.VolumeUp
+                                                else Icons.AutoMirrored.Filled.VolumeOff,
+                                                contentDescription = null
+                                            )
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            val nextMute = !isVideoMuted
+                                            isVideoMuted = nextMute
+                                            try {
+                                                val vol = if (nextMute) 0f else 1f
+                                                mediaPlayerRef?.setVolume(vol, vol)
+                                            } catch (_: Exception) {
+                                            }
+                                        }
+                                    )
+                                }
+                                if (hasMedia) {
+                                    DropdownMenuItem(
+                                        text = { Text("Guardar en Galería") },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.Download, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            onSaveStatusToGallery(currentStatus)
+                                        },
+                                        modifier = Modifier.testTag("save_status_media_button")
+                                    )
+                                }
+                                if (isMine) {
+                                    DropdownMenuItem(
+                                        text = { Text("Visto por (${viewerIds.size})") },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.Visibility, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            showViewersSheet = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = "Eliminar estado",
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Filled.Delete,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            val deletingId = currentStatus.id
+                                            onDeleteStatus(deletingId)
+                                            if (items.size <= 1) onDismiss()
+                                            else if (safeIdx >= items.lastIndex) currentIndex = (safeIdx - 1).coerceAtLeast(0)
+                                        },
+                                        modifier = Modifier.testTag("delete_status_menu_item")
+                                    )
                                 }
                             }
-                        ) {
-                            Icon(
-                                imageVector = if (isVideoPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                contentDescription = if (isVideoPlaying) "Pausar video" else "Reproducir video",
-                                tint = Color.White
-                            )
                         }
                     }
-                    if (hasMedia) {
-                        IconButton(
-                            onClick = { onSaveStatusToGallery(currentStatus) },
-                            modifier = Modifier.testTag("save_status_media_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Download,
-                                contentDescription = "Guardar en galería",
-                                tint = Color.White
-                            )
-                        }
-                    }
-                    if (isMine) {
-                        IconButton(onClick = {
-                            val deletingId = currentStatus.id
-                            onDeleteStatus(deletingId)
-                            if (items.size <= 1) onDismiss()
-                            else if (safeIdx >= items.lastIndex) currentIndex = (safeIdx - 1).coerceAtLeast(0)
-                        }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Eliminar estado", tint = Color.White)
-                        }
-                    }
+
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Filled.Close, contentDescription = "Cerrar", tint = Color.White)
                     }
                 }
             }
 
-            // 2. CENTER FULL MEDIA VIEWPORT (100% of photo/video visible without cropping or flicker)
-            Box(
+            // 2. CENTER FULL MEDIA VIEWPORT (Strictly bounded by BoxWithConstraints so it never pushes the bottom bar off screen!)
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .clipToBounds()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
+                val availW = maxWidth
+                val availH = maxHeight
+
                 when {
                     currentStatus.isVideo -> {
                         val file = readyVideoFile
-                        if (file != null && file.exists()) {
-                            AndroidView(
-                                factory = { ctx ->
-                                    FrameLayout(ctx).apply {
-                                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                                        val vv = VideoView(ctx).apply {
-                                            layoutParams = FrameLayout.LayoutParams(
-                                                FrameLayout.LayoutParams.MATCH_PARENT,
-                                                FrameLayout.LayoutParams.MATCH_PARENT,
-                                                Gravity.CENTER
-                                            )
-                                            setVideoPath(file.absolutePath)
-                                            setOnPreparedListener { mp ->
-                                                mp.isLooping = false
-                                                val vol = if (isVideoMuted) 0f else 1f
-                                                mp.setVolume(vol, vol)
-                                                start()
-                                                isVideoPlaying = true
-                                            }
-                                            setOnCompletionListener {
-                                                videoProgress = 1f
-                                                advanceNextOrDismiss()
-                                            }
-                                        }
-                                        videoViewRef = vv
-                                        addView(vv)
-                                    }
-                                },
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            // Show full video thumbnail while loading/assembling chunks
-                            val thumbBitmap = remember(currentStatus.id, currentStatus.videoThumbnailData) {
-                                ImageCompressionHelper.decodeToBitmap(currentStatus.videoThumbnailData)?.asImageBitmap()
+                        if (file != null && file.exists() && availW > 0.dp && availH > 0.dp) {
+                            val safeRatio = videoAspectRatio.coerceIn(0.35f, 2.5f)
+                            val containerRatio = availW / availH
+                            val (fittedW, fittedH) = if (safeRatio > containerRatio) {
+                                availW to (availW / safeRatio)
+                            } else {
+                                (availH * safeRatio) to availH
                             }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(fittedW, fittedH)
+                                    .clip(RoundedCornerShape(10.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AndroidView(
+                                    factory = { ctx ->
+                                        FrameLayout(ctx).apply {
+                                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                            val vv = VideoView(ctx).apply {
+                                                layoutParams = FrameLayout.LayoutParams(
+                                                    FrameLayout.LayoutParams.MATCH_PARENT,
+                                                    FrameLayout.LayoutParams.MATCH_PARENT,
+                                                    Gravity.CENTER
+                                                )
+                                                setVideoPath(file.absolutePath)
+                                                setOnPreparedListener { mp ->
+                                                    mediaPlayerRef = mp
+                                                    if (mp.videoWidth > 0 && mp.videoHeight > 0) {
+                                                        videoAspectRatio = (mp.videoWidth.toFloat() / mp.videoHeight.toFloat())
+                                                            .coerceIn(0.35f, 2.5f)
+                                                    }
+                                                    mp.isLooping = false
+                                                    val vol = if (isVideoMuted) 0f else 1f
+                                                    mp.setVolume(vol, vol)
+                                                    start()
+                                                    isVideoPlaying = true
+                                                }
+                                                setOnCompletionListener {
+                                                    videoProgress = 1f
+                                                    advanceNextOrDismiss()
+                                                }
+                                            }
+                                            videoViewRef = vv
+                                            addView(vv)
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        } else {
                             if (thumbBitmap != null) {
                                 Image(
                                     bitmap = thumbBitmap,
@@ -1107,7 +1241,6 @@ fun StatusViewerDialog(
                     }
 
                     !currentStatus.mediaUri.isNullOrBlank() -> {
-                        // Synchronous bitmap rendering for data:image URIs — zero flicker, full Fit
                         val decodedBitmap = remember(currentStatus.id, currentStatus.mediaUri) {
                             ImageCompressionHelper.decodeToBitmap(currentStatus.mediaUri)?.asImageBitmap()
                         }
@@ -1219,29 +1352,27 @@ fun StatusViewerDialog(
                 }
             }
 
-            // 3. BOTTOM FOOTER BAR (Caption + Viewers Pill or Reply Input)
+            // 3. BOTTOM FOOTER BAR (Always 100% visible above navigation bar!)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (hasMedia && currentStatus.text.isNotBlank()) {
                     Text(
                         text = currentStatus.text,
                         color = Color.White,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 10.dp)
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(bottom = 8.dp)
                     )
                 }
 
                 if (isMine) {
-                    val viewerIds = remember(currentStatus.viewedByMemberIdsJson) {
-                        JsonHelpers.decodeStringList(currentStatus.viewedByMemberIdsJson)
-                            .filterNot { it == activeMemberId }
-                    }
                     Surface(
                         shape = RoundedCornerShape(50.dp),
                         color = Color.White.copy(alpha = 0.18f),
@@ -1311,8 +1442,6 @@ fun StatusViewerDialog(
         }
 
         if (showViewersSheet) {
-            val viewerIds = JsonHelpers.decodeStringList(currentStatus.viewedByMemberIdsJson)
-                .filterNot { it == activeMemberId }
             AlertDialog(
                 onDismissRequest = { showViewersSheet = false },
                 title = { Text("Visto por (${viewerIds.size})") },
@@ -1349,3 +1478,4 @@ fun StatusViewerDialog(
         }
     }
 }
+
