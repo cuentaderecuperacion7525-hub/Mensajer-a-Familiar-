@@ -3,6 +3,7 @@ package com.example.util
 import android.app.Activity
 import android.content.ClipData
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
@@ -427,12 +428,15 @@ object AppUpdateChecker {
         var sawLatestWithoutApk = false
         var apiReturnedNotFound = false
 
+        var latestEvaluatedState: AppUpdateUiState? = null
+
         // 1) Primary: GitHub Releases /latest API
         try {
             val apiRequest = Request.Builder()
                 .url("https://api.github.com/repos/$slug/releases/latest")
                 .header("Accept", "application/vnd.github+json")
-                .header("Cache-Control", "no-cache")
+                .header("Cache-Control", "no-cache, no-store")
+                .header("Pragma", "no-cache")
                 .header("User-Agent", "FamiChat-Android")
                 .build()
 
@@ -445,18 +449,27 @@ object AppUpdateChecker {
                     val json = JSONObject(bodyText)
                     val parsed = parseReleaseJsonObject(json, repoWebUrl)
                     if (parsed != null && parsed.downloadUrl.isNotBlank()) {
-                        return@withContext evaluateRelease(parsed, installedVersionName, installedVersionCode)
+                        val evalState = evaluateRelease(parsed, installedVersionName, installedVersionCode)
+                        if (evalState is AppUpdateUiState.UpdateAvailable) {
+                            return@withContext evalState
+                        }
+                        latestEvaluatedState = evalState
                     } else if (parsed != null) {
                         // Try web expanded_assets in case API omitted or user wants fallback before scanning list
                         val webApk = resolveApkFromWebPages(slug, parsed.tagName)
                         if (!webApk.isNullOrBlank()) {
-                            return@withContext evaluateRelease(
+                            val evalState = evaluateRelease(
                                 parsed.copy(downloadUrl = webApk),
                                 installedVersionName,
                                 installedVersionCode
                             )
+                            if (evalState is AppUpdateUiState.UpdateAvailable) {
+                                return@withContext evalState
+                            }
+                            latestEvaluatedState = evalState
+                        } else {
+                            sawLatestWithoutApk = true
                         }
-                        sawLatestWithoutApk = true
                     }
                 }
             }
@@ -464,12 +477,13 @@ object AppUpdateChecker {
             lastException = e
         }
 
-        // 2) Secondary API: Releases list (handles prereleases or /latest lacking an APK asset)
+        // 2) Secondary API: Releases list (handles prereleases, newer releases, or /latest lacking an APK asset)
         try {
             val listRequest = Request.Builder()
                 .url("https://api.github.com/repos/$slug/releases?per_page=10")
                 .header("Accept", "application/vnd.github+json")
-                .header("Cache-Control", "no-cache")
+                .header("Cache-Control", "no-cache, no-store")
+                .header("Pragma", "no-cache")
                 .header("User-Agent", "FamiChat-Android")
                 .build()
 
@@ -488,6 +502,8 @@ object AppUpdateChecker {
                             installedVersionName,
                             installedVersionCode
                         )
+                    } else if (latestEvaluatedState != null) {
+                        return@withContext latestEvaluatedState!!
                     } else if (apiReturnedNotFound) {
                         return@withContext AppUpdateUiState.Error(
                             message = "No se encontró ningún Release publicado en \"$slug\" o el repositorio es privado. Verifica en GitHub → Releases que exista una versión con archivo .apk."
@@ -497,6 +513,10 @@ object AppUpdateChecker {
             }
         } catch (e: Exception) {
             lastException = e
+        }
+
+        if (latestEvaluatedState != null) {
+            return@withContext latestEvaluatedState!!
         }
 
         // 3) Fallback: Direct GitHub web redirect + HTML asset scrape (avoids api.github.com rate limits)
@@ -597,6 +617,29 @@ object AppUpdateChecker {
                 val b1 = ins.read()
                 b0 == 0x50 && b1 == 0x4B
             }
+        }.getOrDefault(false)
+    }
+
+    private fun hasZipEocd(file: File): Boolean {
+        if (!file.exists() || file.length() < 22L) return false
+        return runCatching {
+            val len = file.length()
+            val tailSize = minOf(len, 66_000L).toInt()
+            val buf = ByteArray(tailSize)
+            java.io.RandomAccessFile(file, "r").use { raf ->
+                raf.seek(len - tailSize)
+                raf.readFully(buf)
+            }
+            for (i in tailSize - 22 downTo 0) {
+                if (buf[i] == 0x50.toByte() &&
+                    buf[i + 1] == 0x4B.toByte() &&
+                    buf[i + 2] == 0x05.toByte() &&
+                    buf[i + 3] == 0x06.toByte()
+                ) {
+                    return@runCatching true
+                }
+            }
+            false
         }.getOrDefault(false)
     }
 
@@ -707,19 +750,18 @@ object AppUpdateChecker {
                                 while (true) {
                                     currentCoroutineContext().ensureActive()
                                     val read = input.read(buffer)
-                                    if (read <= 0) break
-                                    if (!checkedMagic) {
+                                    if (read == -1) break
+                                    if (read == 0) continue
+                                    output.write(buffer, 0, read)
+                                    downloaded += read
+                                    if (!checkedMagic && downloaded >= 2L) {
                                         checkedMagic = true
-                                        val isZipHeader = read >= 2 &&
-                                            buffer[0] == 0x50.toByte() &&
-                                            buffer[1] == 0x4B.toByte()
-                                        if (!isZipHeader) {
+                                        output.flush()
+                                        if (!hasValidZipMagic(partFile)) {
                                             partFile.delete()
                                             error("El archivo descargado no es un paquete APK válido.")
                                         }
                                     }
-                                    output.write(buffer, 0, read)
-                                    downloaded += read
 
                                     val now = System.currentTimeMillis()
                                     val pct = if (totalBytes > 0L) {
@@ -737,13 +779,17 @@ object AppUpdateChecker {
                             }
                         }
 
-                        if (totalBytes <= 0L && downloaded > 0L) {
+                        if (totalBytes <= 0L && downloaded > 0L && hasZipEocd(partFile)) {
                             expectedTotalBytes = downloaded
                         }
                     }
 
                     val finalSize = if (partFile.exists()) partFile.length() else 0L
-                    if (finalSize > 0L && (expectedTotalBytes <= 0L || finalSize >= expectedTotalBytes)) {
+                    val isComplete = finalSize > 0L && (
+                        (expectedTotalBytes > 0L && finalSize >= expectedTotalBytes) ||
+                            (expectedTotalBytes <= 0L && hasZipEocd(partFile))
+                        )
+                    if (isComplete) {
                         break
                     }
                 } catch (e: Throwable) {
@@ -785,17 +831,24 @@ object AppUpdateChecker {
         }
     }
 
+    private tailrec fun findActivity(context: Context): Activity? = when (context) {
+        is Activity -> context
+        is ContextWrapper -> findActivity(context.baseContext)
+        else -> null
+    }
+
     fun openInstallPermissionSettings(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val hostActivity = findActivity(context)
             val intent = Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:${context.packageName}")
             ).apply {
-                if (context !is Activity) {
+                if (hostActivity == null) {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
             }
-            context.startActivity(intent)
+            (hostActivity ?: context).startActivity(intent)
         }
     }
 
@@ -803,6 +856,8 @@ object AppUpdateChecker {
         require(apkFile.exists() && apkFile.length() > 0L) {
             "No se encontró el archivo de actualización descargado."
         }
+        val hostActivity = findActivity(context)
+        val launchCtx = hostActivity ?: context
         val authority = "${context.packageName}.fileprovider"
         val contentUri = FileProvider.getUriForFile(context, authority, apkFile)
         val clip = ClipData.newRawUri("FamiChat APK", contentUri)
@@ -811,14 +866,14 @@ object AppUpdateChecker {
             setDataAndType(contentUri, "application/vnd.android.package-archive")
             clipData = clip
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            if (context !is Activity) {
+            if (hostActivity == null) {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
         }
 
         if (viewIntent.resolveActivity(context.packageManager) != null) {
-            context.startActivity(viewIntent)
+            launchCtx.startActivity(viewIntent)
             return@runCatching
         }
 
@@ -827,17 +882,17 @@ object AppUpdateChecker {
             setDataAndType(contentUri, "application/vnd.android.package-archive")
             clipData = clip
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            if (context !is Activity) {
+            if (hostActivity == null) {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
             putExtra(Intent.EXTRA_RETURN_RESULT, true)
         }
         if (installIntent.resolveActivity(context.packageManager) != null) {
-            context.startActivity(installIntent)
+            launchCtx.startActivity(installIntent)
             return@runCatching
         }
 
-        context.startActivity(viewIntent)
+        launchCtx.startActivity(viewIntent)
     }
 }

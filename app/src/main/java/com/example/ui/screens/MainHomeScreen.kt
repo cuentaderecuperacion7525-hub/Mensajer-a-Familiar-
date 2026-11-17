@@ -30,9 +30,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.CallMissed
@@ -534,6 +536,7 @@ fun MainHomeScreen(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState())
                                         .padding(vertical = 8.dp)
                                 ) {
                                     // Section: CUENTA
