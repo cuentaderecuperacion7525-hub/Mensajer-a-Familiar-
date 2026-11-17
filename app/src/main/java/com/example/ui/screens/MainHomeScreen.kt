@@ -559,6 +559,21 @@ fun MainHomeScreen(
                 }
             }
         }
+
+        viewingStatusGroup?.let { group ->
+            StatusViewerDialog(
+                group = group,
+                activeMemberId = activeMember.id,
+                allMembers = allMembers,
+                mediaTransferProgress = mediaTransferProgress,
+                onMarkViewed = onMarkStatusViewed,
+                onDeleteStatus = onDeleteStatus,
+                onReplyStatus = onReplyToStatus,
+                onPrepareStatusVideo = onPrepareStatusVideo,
+                onSaveStatusToGallery = onSaveStatusMediaToGallery,
+                onDismiss = { viewingStatusMemberId = null }
+            )
+        }
     }
 
     if (showNewChatDialog) {
@@ -652,21 +667,6 @@ fun MainHomeScreen(
                 onPublishVideoStatus(uri, caption)
                 showCreateStatusDialog = false
             }
-        )
-    }
-
-    viewingStatusGroup?.let { group ->
-        StatusViewerDialog(
-            group = group,
-            activeMemberId = activeMember.id,
-            allMembers = allMembers,
-            mediaTransferProgress = mediaTransferProgress,
-            onMarkViewed = onMarkStatusViewed,
-            onDeleteStatus = onDeleteStatus,
-            onReplyStatus = onReplyToStatus,
-            onPrepareStatusVideo = onPrepareStatusVideo,
-            onSaveStatusToGallery = onSaveStatusMediaToGallery,
-            onDismiss = { viewingStatusMemberId = null }
         )
     }
 

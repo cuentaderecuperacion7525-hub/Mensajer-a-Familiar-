@@ -6,6 +6,7 @@ import android.net.Uri
 import android.view.Gravity
 import android.widget.FrameLayout
 import android.widget.VideoView
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,23 +24,34 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -67,6 +79,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -87,6 +100,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -99,8 +113,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -953,34 +966,32 @@ fun StatusViewerDialog(
         }
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = true
-        )
-    ) {
-        val hasMedia = currentStatus.isVideo || !currentStatus.mediaUri.isNullOrBlank()
-        val bgColor = if (hasMedia) {
-            Color(0xFF0B141A)
-        } else {
-            parseHexColor(currentStatus.backgroundHex)
-        }
-        val hasMenuActions = hasMedia || isMine
+    BackHandler(onBack = onDismiss)
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(bgColor)
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .imePadding()
-        ) {
+    val hasMedia = currentStatus.isVideo || !currentStatus.mediaUri.isNullOrBlank()
+    val bgColor = if (hasMedia) {
+        Color(0xFF0B141A)
+    } else {
+        parseHexColor(currentStatus.backgroundHex)
+    }
+    val hasMenuActions = hasMedia || isMine
+
+    Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing,
+        containerColor = bgColor,
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(30f)
+            .pointerInput(Unit) { detectTapGestures { } },
+        topBar = {
             // 1. COMPACT TOP HEADER BAR WITH 3-DOTS MENU (⋮)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.52f))
+                    .background(Color.Black.copy(alpha = 0.56f))
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+                    )
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 StatusSegmentedProgressRow(
@@ -1140,224 +1151,17 @@ fun StatusViewerDialog(
                     }
                 }
             }
-
-            // 2. CENTER FULL MEDIA VIEWPORT (Strictly bounded by BoxWithConstraints so it never pushes the bottom bar off screen!)
-            BoxWithConstraints(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .clipToBounds()
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                val availW = maxWidth
-                val availH = maxHeight
-
-                when {
-                    currentStatus.isVideo -> {
-                        val file = readyVideoFile
-                        if (file != null && file.exists() && availW > 0.dp && availH > 0.dp) {
-                            val safeRatio = videoAspectRatio.coerceIn(0.35f, 2.5f)
-                            val containerRatio = availW / availH
-                            val (fittedW, fittedH) = if (safeRatio > containerRatio) {
-                                availW to (availW / safeRatio)
-                            } else {
-                                (availH * safeRatio) to availH
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .size(fittedW, fittedH)
-                                    .clip(RoundedCornerShape(10.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                AndroidView(
-                                    factory = { ctx ->
-                                        FrameLayout(ctx).apply {
-                                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                                            val vv = VideoView(ctx).apply {
-                                                layoutParams = FrameLayout.LayoutParams(
-                                                    FrameLayout.LayoutParams.MATCH_PARENT,
-                                                    FrameLayout.LayoutParams.MATCH_PARENT,
-                                                    Gravity.CENTER
-                                                )
-                                                setVideoPath(file.absolutePath)
-                                                setOnPreparedListener { mp ->
-                                                    mediaPlayerRef = mp
-                                                    if (mp.videoWidth > 0 && mp.videoHeight > 0) {
-                                                        videoAspectRatio = (mp.videoWidth.toFloat() / mp.videoHeight.toFloat())
-                                                            .coerceIn(0.35f, 2.5f)
-                                                    }
-                                                    mp.isLooping = false
-                                                    val vol = if (isVideoMuted) 0f else 1f
-                                                    mp.setVolume(vol, vol)
-                                                    start()
-                                                    isVideoPlaying = true
-                                                }
-                                                setOnCompletionListener {
-                                                    videoProgress = 1f
-                                                    advanceNextOrDismiss()
-                                                }
-                                            }
-                                            videoViewRef = vv
-                                            addView(vv)
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        } else {
-                            if (thumbBitmap != null) {
-                                Image(
-                                    bitmap = thumbBitmap,
-                                    contentDescription = "Miniatura de video de estado",
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            val dlPct = mediaTransferProgress[currentStatus.id]?.let { (it * 100f).toInt().coerceIn(5, 100) }
-                            Surface(
-                                shape = RoundedCornerShape(18.dp),
-                                color = Color.Black.copy(alpha = 0.72f)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    CircularProgressIndicator(
-                                        color = Color.White,
-                                        strokeWidth = 3.dp,
-                                        modifier = Modifier.size(36.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    Text(
-                                        text = if (dlPct != null) "Cargando video... $dlPct%" else "Preparando video...",
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    !currentStatus.mediaUri.isNullOrBlank() -> {
-                        val decodedBitmap = remember(currentStatus.id, currentStatus.mediaUri) {
-                            ImageCompressionHelper.decodeToBitmap(currentStatus.mediaUri)?.asImageBitmap()
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .pointerInput(currentStatus.id) {
-                                    detectTransformGestures { _, pan, zoom, _ ->
-                                        val nextScale = (photoScale * zoom).coerceIn(1f, 4f)
-                                        photoScale = nextScale
-                                        photoOffset = if (nextScale > 1f) photoOffset + pan else Offset.Zero
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (decodedBitmap != null) {
-                                Image(
-                                    bitmap = decodedBitmap,
-                                    contentDescription = "Foto de estado",
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .graphicsLayer(
-                                            scaleX = photoScale,
-                                            scaleY = photoScale,
-                                            translationX = photoOffset.x,
-                                            translationY = photoOffset.y
-                                        )
-                                )
-                            } else {
-                                val fallbackRequest = remember(currentStatus.id, currentStatus.mediaUri) {
-                                    ImageRequest.Builder(context)
-                                        .data(ImageCompressionHelper.resolveCoilModel(currentStatus.mediaUri))
-                                        .crossfade(false)
-                                        .build()
-                                }
-                                AsyncImage(
-                                    model = fallbackRequest,
-                                    contentDescription = "Foto de estado",
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .graphicsLayer(
-                                            scaleX = photoScale,
-                                            scaleY = photoScale,
-                                            translationX = photoOffset.x,
-                                            translationY = photoOffset.y
-                                        )
-                                )
-                            }
-                        }
-                    }
-
-                    else -> {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 28.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = currentStatus.text,
-                                color = Color.White,
-                                fontSize = 26.sp,
-                                lineHeight = 34.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
-                }
-
-                // Left / Right navigation tap strips (only active when not zoomed in)
-                if (photoScale <= 1.05f) {
-                    Row(modifier = Modifier.fillMaxSize()) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .pointerInput(currentStatus.id, safeIdx) {
-                                    detectTapGestures(
-                                        onTap = { goPrevious() },
-                                        onDoubleTap = {
-                                            if (!currentStatus.isVideo && !currentStatus.mediaUri.isNullOrBlank()) {
-                                                photoScale = if (photoScale > 1.2f) 1f else 2.2f
-                                                photoOffset = Offset.Zero
-                                            }
-                                        }
-                                    )
-                                }
-                        )
-                        Box(
-                            modifier = Modifier
-                                .weight(2f)
-                                .fillMaxHeight()
-                                .pointerInput(currentStatus.id, safeIdx) {
-                                    detectTapGestures(
-                                        onTap = { advanceNextOrDismiss() },
-                                        onDoubleTap = {
-                                            if (!currentStatus.isVideo && !currentStatus.mediaUri.isNullOrBlank()) {
-                                                photoScale = if (photoScale > 1.2f) 1f else 2.2f
-                                                photoOffset = Offset.Zero
-                                            }
-                                        }
-                                    )
-                                }
-                        )
-                    }
-                }
-            }
-
-            // 3. BOTTOM FOOTER BAR (Always 100% visible above navigation bar!)
+        },
+        bottomBar = {
+            // 3. BOTTOM FOOTER BAR (Directly in Activity window with safeDrawing + extra bottom margin so it is 100% visible!)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 18.dp),
+                    .background(Color.Black.copy(alpha = 0.78f))
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
+                    )
+                    .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (hasMedia && currentStatus.text.isNotBlank()) {
@@ -1366,7 +1170,7 @@ fun StatusViewerDialog(
                         color = Color.White,
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
-                        maxLines = 3,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
@@ -1401,21 +1205,42 @@ fun StatusViewerDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedTextField(
-                            value = replyInput,
-                            onValueChange = { replyInput = it },
-                            placeholder = { Text("Responder al estado...", color = Color.White.copy(alpha = 0.7f)) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color.White.copy(alpha = 0.8f),
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.45f),
-                                cursorColor = Color.White
-                            ),
+                        Surface(
                             shape = RoundedCornerShape(24.dp),
-                            modifier = Modifier.weight(1f)
-                        )
+                            color = Color.White.copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.55f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 46.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 11.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (replyInput.isEmpty()) {
+                                    Text(
+                                        text = "Responder al estado...",
+                                        color = Color.White.copy(alpha = 0.72f),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                BasicTextField(
+                                    value = replyInput,
+                                    onValueChange = { replyInput = it },
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
+                                    cursorBrush = SolidColor(Color.White),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("status_reply_input")
+                                )
+                            }
+                        }
+
                         IconButton(
                             onClick = {
                                 if (replyInput.isNotBlank()) {
@@ -1426,56 +1251,269 @@ fun StatusViewerDialog(
                             },
                             enabled = replyInput.isNotBlank(),
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(46.dp)
                                 .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.primary)
+                                .testTag("status_reply_send_button")
                         ) {
                             Icon(
                                 Icons.AutoMirrored.Filled.Send,
                                 contentDescription = "Enviar respuesta",
-                                tint = MaterialTheme.colorScheme.onPrimary
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
                 }
             }
         }
+    ) { innerPadding ->
+        // 2. CENTER FULL MEDIA VIEWPORT (Strictly bounded inside innerPadding between topBar and bottomBar!)
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .clipToBounds()
+                .padding(horizontal = 6.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            val availW = maxWidth
+            val availH = maxHeight
 
-        if (showViewersSheet) {
-            AlertDialog(
-                onDismissRequest = { showViewersSheet = false },
-                title = { Text("Visto por (${viewerIds.size})") },
-                text = {
-                    if (viewerIds.isEmpty()) {
-                        Text("Nadie más ha visto este estado todavía.")
-                    } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(viewerIds) { id ->
-                                val viewer = membersMap[id]
-                                if (viewer != null) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        MemberAvatar(
-                                            emoji = viewer.avatarEmoji,
-                                            colorHex = viewer.avatarColorHex,
-                                            photoData = viewer.avatarPhotoData,
-                                            size = 36.dp
-                                        )
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Column {
-                                            Text(viewer.name, style = MaterialTheme.typography.titleSmall)
-                                            Text(viewer.roleLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            when {
+                currentStatus.isVideo -> {
+                    val file = readyVideoFile
+                    if (file != null && file.exists() && availW > 0.dp && availH > 0.dp) {
+                        val safeRatio = videoAspectRatio.coerceIn(0.35f, 2.5f)
+                        val containerRatio = availW / availH
+                        val (fittedW, fittedH) = if (safeRatio > containerRatio) {
+                            availW to (availW / safeRatio)
+                        } else {
+                            (availH * safeRatio) to availH
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(fittedW, fittedH)
+                                .clip(RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AndroidView(
+                                factory = { ctx ->
+                                    FrameLayout(ctx).apply {
+                                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                        val vv = VideoView(ctx).apply {
+                                            layoutParams = FrameLayout.LayoutParams(
+                                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                                Gravity.CENTER
+                                            )
+                                            setVideoPath(file.absolutePath)
+                                            setOnPreparedListener { mp ->
+                                                mediaPlayerRef = mp
+                                                if (mp.videoWidth > 0 && mp.videoHeight > 0) {
+                                                    videoAspectRatio = (mp.videoWidth.toFloat() / mp.videoHeight.toFloat())
+                                                        .coerceIn(0.35f, 2.5f)
+                                                }
+                                                mp.isLooping = false
+                                                val vol = if (isVideoMuted) 0f else 1f
+                                                mp.setVolume(vol, vol)
+                                                start()
+                                                isVideoPlaying = true
+                                            }
+                                            setOnCompletionListener {
+                                                videoProgress = 1f
+                                                advanceNextOrDismiss()
+                                            }
                                         }
+                                        videoViewRef = vv
+                                        addView(vv)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    } else {
+                        if (thumbBitmap != null) {
+                            Image(
+                                bitmap = thumbBitmap,
+                                contentDescription = "Miniatura de video de estado",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        val dlPct = mediaTransferProgress[currentStatus.id]?.let { (it * 100f).toInt().coerceIn(5, 100) }
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            color = Color.Black.copy(alpha = 0.72f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    strokeWidth = 3.dp,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = if (dlPct != null) "Cargando video... $dlPct%" else "Preparando video...",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+                }
+
+                !currentStatus.mediaUri.isNullOrBlank() -> {
+                    val decodedBitmap = remember(currentStatus.id, currentStatus.mediaUri) {
+                        ImageCompressionHelper.decodeToBitmap(currentStatus.mediaUri)?.asImageBitmap()
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(currentStatus.id) {
+                                detectTransformGestures { _, pan, zoom, _ ->
+                                    val nextScale = (photoScale * zoom).coerceIn(1f, 4f)
+                                    photoScale = nextScale
+                                    photoOffset = if (nextScale > 1f) photoOffset + pan else Offset.Zero
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (decodedBitmap != null) {
+                            Image(
+                                bitmap = decodedBitmap,
+                                contentDescription = "Foto de estado",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer(
+                                        scaleX = photoScale,
+                                        scaleY = photoScale,
+                                        translationX = photoOffset.x,
+                                        translationY = photoOffset.y
+                                    )
+                            )
+                        } else {
+                            val fallbackRequest = remember(currentStatus.id, currentStatus.mediaUri) {
+                                ImageRequest.Builder(context)
+                                    .data(ImageCompressionHelper.resolveCoilModel(currentStatus.mediaUri))
+                                    .crossfade(false)
+                                    .build()
+                            }
+                            AsyncImage(
+                                model = fallbackRequest,
+                                contentDescription = "Foto de estado",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer(
+                                        scaleX = photoScale,
+                                        scaleY = photoScale,
+                                        translationX = photoOffset.x,
+                                        translationY = photoOffset.y
+                                    )
+                            )
+                        }
+                    }
+                }
+
+                else -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 28.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = currentStatus.text,
+                            color = Color.White,
+                            fontSize = 26.sp,
+                            lineHeight = 34.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+
+            // Left / Right navigation tap strips (only active when not zoomed in)
+            if (photoScale <= 1.05f) {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .pointerInput(currentStatus.id, safeIdx) {
+                                detectTapGestures(
+                                    onTap = { goPrevious() },
+                                    onDoubleTap = {
+                                        if (!currentStatus.isVideo && !currentStatus.mediaUri.isNullOrBlank()) {
+                                            photoScale = if (photoScale > 1.2f) 1f else 2.2f
+                                            photoOffset = Offset.Zero
+                                        }
+                                    }
+                                )
+                            }
+                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(2f)
+                            .fillMaxHeight()
+                            .pointerInput(currentStatus.id, safeIdx) {
+                                detectTapGestures(
+                                    onTap = { advanceNextOrDismiss() },
+                                    onDoubleTap = {
+                                        if (!currentStatus.isVideo && !currentStatus.mediaUri.isNullOrBlank()) {
+                                            photoScale = if (photoScale > 1.2f) 1f else 2.2f
+                                            photoOffset = Offset.Zero
+                                        }
+                                    }
+                                )
+                            }
+                    )
+                }
+            }
+        }
+    }
+
+    if (showViewersSheet) {
+        AlertDialog(
+            onDismissRequest = { showViewersSheet = false },
+            title = { Text("Visto por (${viewerIds.size})") },
+            text = {
+                if (viewerIds.isEmpty()) {
+                    Text("Nadie más ha visto este estado todavía.")
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(viewerIds) { id ->
+                            val viewer = membersMap[id]
+                            if (viewer != null) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    MemberAvatar(
+                                        emoji = viewer.avatarEmoji,
+                                        colorHex = viewer.avatarColorHex,
+                                        photoData = viewer.avatarPhotoData,
+                                        size = 36.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(viewer.name, style = MaterialTheme.typography.titleSmall)
+                                        Text(viewer.roleLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
                             }
                         }
                     }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showViewersSheet = false }) { Text("Cerrar") }
                 }
-            )
-        }
+            },
+            confirmButton = {
+                TextButton(onClick = { showViewersSheet = false }) { Text("Cerrar") }
+            }
+        )
     }
 }
 
