@@ -59,9 +59,14 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
@@ -83,6 +88,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -94,16 +101,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.data.model.CallDirection
 import com.example.data.model.CallRecordEntity
 import com.example.data.model.CallType
@@ -276,140 +290,21 @@ fun MainHomeScreen(
                             }
                         },
                         actions = {
-                            Box {
-                                IconButton(
-                                    onClick = { showOverflowMenu = true },
-                                    modifier = Modifier.testTag("home_more_menu_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.MoreVert,
-                                        contentDescription = "Opciones de perfil"
-                                    )
-                                }
-                                DropdownMenu(
-                                    expanded = showOverflowMenu,
-                                    onDismissRequest = { showOverflowMenu = false },
-                                    modifier = Modifier.testTag("home_more_menu")
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text("Mi perfil y características") },
-                                        leadingIcon = {
-                                            Icon(Icons.Filled.Person, contentDescription = null)
-                                        },
-                                        onClick = {
-                                            showOverflowMenu = false
-                                            showProfileOptionsDialog = true
-                                        },
-                                        modifier = Modifier.testTag("menu_profile_options")
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Switch (Cambiar de perfil)") },
-                                        leadingIcon = {
-                                            Icon(Icons.Filled.SwapHoriz, contentDescription = null)
-                                        },
-                                        onClick = {
-                                            showOverflowMenu = false
-                                            onSwitchProfile()
-                                        },
-                                        modifier = Modifier.testTag("menu_switch_profile")
-                                    )
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(if (isDarkTheme) "Cambiar a tema blanco" else "Cambiar a tema oscuro")
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = if (isDarkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
-                                                contentDescription = null
-                                            )
-                                        },
-                                        onClick = {
-                                            showOverflowMenu = false
-                                            onToggleTheme()
-                                        },
-                                        modifier = Modifier.testTag("menu_toggle_theme")
-                                    )
-                                    DropdownMenuItem(
-                                        text = {
-                                            Column {
-                                                Text(
-                                                    text = if (notificationsEnabled) "Notificaciones push: Activas"
-                                                    else "Notificaciones push: Silenciadas"
-                                                )
-                                                Text(
-                                                    text = if (notificationsEnabled) "Toca para silenciar notificaciones"
-                                                    else "Toca para activar notificaciones",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = if (notificationsEnabled) Icons.Filled.Notifications
-                                                else Icons.Filled.NotificationsOff,
-                                                contentDescription = null,
-                                                tint = if (notificationsEnabled) MaterialTheme.colorScheme.primary
-                                                else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        },
-                                        onClick = {
-                                            showOverflowMenu = false
-                                            val nextState = !notificationsEnabled
-                                            if (nextState &&
-                                                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                                !hasNotifPermission
-                                            ) {
-                                                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                            } else {
-                                                onToggleNotifications(nextState)
-                                            }
-                                        },
-                                        modifier = Modifier.testTag("menu_toggle_push_notifications")
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Diagnóstico Push y Llamadas") },
-                                        leadingIcon = {
-                                            Icon(Icons.Filled.NotificationsActive, contentDescription = null)
-                                        },
-                                        onClick = {
-                                            showOverflowMenu = false
-                                            showDiagnosticsDialog = true
-                                        },
-                                        modifier = Modifier.testTag("menu_push_diagnostics")
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Actualizar aplicación") },
-                                        leadingIcon = {
-                                            Icon(Icons.Filled.SystemUpdate, contentDescription = null)
-                                        },
-                                        onClick = {
-                                            showOverflowMenu = false
-                                            showUpdateDialog = true
-                                            onCheckForUpdate()
-                                        },
-                                        modifier = Modifier.testTag("menu_check_update")
-                                    )
-                                    if (activeMember.isAdmin) {
-                                        DropdownMenuItem(
-                                            text = { Text("Panel de Administración") },
-                                            leadingIcon = {
-                                                Icon(Icons.Filled.AdminPanelSettings, contentDescription = null)
-                                            },
-                                            onClick = {
-                                                showOverflowMenu = false
-                                                onOpenAdminPanel()
-                                            },
-                                            modifier = Modifier.testTag("menu_admin_panel")
-                                        )
-                                    }
-                                }
+                            IconButton(
+                                onClick = { showOverflowMenu = !showOverflowMenu },
+                                modifier = Modifier.testTag("home_more_menu_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.MoreVert,
+                                    contentDescription = "Opciones de perfil",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.surface,
                             titleContentColor = MaterialTheme.colorScheme.onSurface,
-                            actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            actionIconContentColor = MaterialTheme.colorScheme.onSurface
                         )
                     )
                 }
@@ -617,6 +512,308 @@ fun MainHomeScreen(
                             )
                         }
                     }
+
+                    if (showOverflowMenu) {
+                        val toggleNotifsAction = {
+                            val nextState = !notificationsEnabled
+                            if (nextState &&
+                                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                !hasNotifPermission
+                            ) {
+                                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                onToggleNotifications(nextState)
+                            }
+                        }
+                        val updateSubtitle = when (updateState) {
+                            is AppUpdateUiState.UpdateAvailable -> "Nueva versión v${updateState.release.versionName}"
+                            is AppUpdateUiState.Downloading -> "Descargando ${updateState.progressPercent.coerceAtLeast(0)}%"
+                            is AppUpdateUiState.ReadyToInstall -> "Lista para instalar"
+                            else -> "Estás al día"
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.22f))
+                                .clickable { showOverflowMenu = false }
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(22.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                tonalElevation = 4.dp,
+                                shadowElevation = 12.dp,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 6.dp, end = 12.dp)
+                                    .width(304.dp)
+                                    .clickable(enabled = false) {}
+                                    .testTag("home_more_menu")
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp)
+                                ) {
+                                    // Section: CUENTA
+                                    Text(
+                                        text = "CUENTA",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.8.sp
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 6.dp)
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                showOverflowMenu = false
+                                                showProfileOptionsDialog = true
+                                            }
+                                            .padding(horizontal = 20.dp, vertical = 12.dp)
+                                            .testTag("menu_profile_options"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Person,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Text(
+                                            text = "Mi perfil",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                showOverflowMenu = false
+                                                onSwitchProfile()
+                                            }
+                                            .padding(horizontal = 20.dp, vertical = 12.dp)
+                                            .testTag("menu_switch_profile"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.SwapHoriz,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Text(
+                                            text = "Cambiar de perfil",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(vertical = 6.dp),
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                                    )
+
+                                    // Section: PREFERENCIAS
+                                    Text(
+                                        text = "PREFERENCIAS",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.8.sp
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp)
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { toggleNotifsAction() }
+                                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                                            .testTag("menu_toggle_push_notifications"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Notifications,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Notificaciones",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = if (notificationsEnabled) "Activas" else "Silenciadas",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        MenuPillSwitch(
+                                            checked = notificationsEnabled,
+                                            onCheckedChange = { toggleNotifsAction() }
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { onToggleTheme() }
+                                            .padding(horizontal = 20.dp, vertical = 12.dp)
+                                            .testTag("menu_toggle_theme"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.DarkMode,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Text(
+                                            text = "Tema oscuro",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        MenuPillSwitch(
+                                            checked = isDarkTheme,
+                                            onCheckedChange = { onToggleTheme() }
+                                        )
+                                    }
+
+                                    if (activeMember.isAdmin) {
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(vertical = 6.dp),
+                                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                                        )
+                                        // Section: FAMILIA
+                                        Text(
+                                            text = "FAMILIA",
+                                            style = MaterialTheme.typography.labelMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 0.8.sp
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp)
+                                        )
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    showOverflowMenu = false
+                                                    onOpenAdminPanel()
+                                                }
+                                                .padding(horizontal = 20.dp, vertical = 10.dp)
+                                                .testTag("menu_admin_panel"),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Shield,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(16.dp))
+                                            Text(
+                                                text = "Panel de\nadministración",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(50),
+                                                color = if (isDarkTheme) MaterialTheme.colorScheme.primaryContainer
+                                                else Color(0xFFE8F0FE)
+                                            ) {
+                                                Text(
+                                                    text = "Admin",
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(vertical = 6.dp),
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                                    )
+
+                                    // Section: AYUDA
+                                    Text(
+                                        text = "AYUDA",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.8.sp
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp)
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                showOverflowMenu = false
+                                                showDiagnosticsDialog = true
+                                            }
+                                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                                            .testTag("menu_push_diagnostics"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        EcgPulseIcon(
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Text(
+                                            text = "Diagnóstico de llamadas y\navisos",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                showOverflowMenu = false
+                                                showUpdateDialog = true
+                                                onCheckForUpdate()
+                                            }
+                                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                                            .testTag("menu_check_update"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.FileDownload,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Column {
+                                            Text(
+                                                text = "Buscar actualización",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = updateSubtitle,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -758,6 +955,60 @@ fun MainHomeScreen(
             onSendTestNotification = onSendTestPushNotification,
             onSaveTurnConfig = onSaveTurnConfig,
             onDismiss = { showDiagnosticsDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun MenuPillSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    val trackColor = if (checked) MaterialTheme.colorScheme.primary else Color(0xFF787E8A)
+    Box(
+        modifier = Modifier
+            .width(46.dp)
+            .height(26.dp)
+            .clip(CircleShape)
+            .background(trackColor)
+            .clickable { onCheckedChange(!checked) }
+            .padding(3.dp),
+        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart
+    ) {
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(Color.White)
+        )
+    }
+}
+
+@Composable
+private fun EcgPulseIcon(
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cy = h * 0.52f
+        val path = Path().apply {
+            moveTo(w * 0.08f, cy)
+            lineTo(w * 0.30f, cy)
+            lineTo(w * 0.42f, h * 0.16f)
+            lineTo(w * 0.58f, h * 0.84f)
+            lineTo(w * 0.70f, cy)
+            lineTo(w * 0.92f, cy)
+        }
+        drawPath(
+            path = path,
+            color = tint,
+            style = Stroke(
+                width = 2.dp.toPx(),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
         )
     }
 }

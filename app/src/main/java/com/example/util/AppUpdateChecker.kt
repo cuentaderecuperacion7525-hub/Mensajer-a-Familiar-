@@ -13,12 +13,14 @@ import androidx.core.content.FileProvider
 import androidx.core.content.pm.PackageInfoCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -226,10 +228,11 @@ object AppUpdateChecker {
 
     private val downloadClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
+            .retryOnConnectionFailure(true)
             .build()
     }
 
@@ -579,6 +582,24 @@ object AppUpdateChecker {
         )
     }
 
+    private fun parseTotalBytesFromContentRange(contentRange: String?): Long {
+        if (contentRange.isNullOrBlank()) return -1L
+        val slashIdx = contentRange.lastIndexOf('/')
+        if (slashIdx < 0 || slashIdx + 1 >= contentRange.length) return -1L
+        return contentRange.substring(slashIdx + 1).trim().toLongOrNull() ?: -1L
+    }
+
+    private fun hasValidZipMagic(file: File): Boolean {
+        if (!file.exists() || file.length() < 2L) return false
+        return runCatching {
+            file.inputStream().use { ins ->
+                val b0 = ins.read()
+                val b1 = ins.read()
+                b0 == 0x50 && b1 == 0x4B
+            }
+        }.getOrDefault(false)
+    }
+
     suspend fun downloadApkToCache(
         context: Context,
         release: AppReleaseInfo,
@@ -599,81 +620,160 @@ object AppUpdateChecker {
         }
 
         val updatesDir = File(context.filesDir, "updates").apply { mkdirs() }
-        updatesDir.listFiles()?.forEach { old ->
-            if (old.isFile) old.delete()
-        }
-        val partFile = File(updatesDir, "FamiChat-update.apk.part")
+        val safeTag = release.tagName.replace(Regex("[^a-zA-Z0-9._-]"), "_").ifBlank { "latest" }
+        val partFileName = "FamiChat-$safeTag.apk.part"
+        val partFile = File(updatesDir, partFileName)
         val targetFile = File(updatesDir, "FamiChat-update.apk")
 
+        // Delete older version .part files while preserving current version's .part for instant resume
+        updatesDir.listFiles()?.forEach { old ->
+            if (old.isFile && old.name != partFileName) {
+                old.delete()
+            }
+        }
+
+        if (partFile.exists() && !hasValidZipMagic(partFile)) {
+            partFile.delete()
+        }
+
         return@withContext runCatching {
-            val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", "FamiChat-Android")
-                .header("Accept", "application/vnd.android.package-archive, application/octet-stream, */*")
-                .build()
+            val maxAttempts = 6
+            var expectedTotalBytes = -1L
+            var lastError: Throwable? = null
 
-            downloadClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    error("Error al descargar (HTTP ${response.code})")
+            for (attempt in 1..maxAttempts) {
+                currentCoroutineContext().ensureActive()
+                val resumeOffset = if (partFile.exists()) partFile.length().coerceAtLeast(0L) else 0L
+
+                if (expectedTotalBytes > 0L && resumeOffset >= expectedTotalBytes && hasValidZipMagic(partFile)) {
+                    break
                 }
-                val body = response.body ?: error("Respuesta vacía al descargar el APK")
-                val totalBytes = body.contentLength()
-                var downloaded = 0L
-                var lastPercent = -1
-                var lastEmitTime = 0L
-                var checkedMagic = false
 
-                onProgress(if (totalBytes > 0L) 0 else -1, 0L, totalBytes)
+                try {
+                    val reqBuilder = Request.Builder()
+                        .url(url)
+                        .header("User-Agent", "FamiChat-Android")
+                        .header("Accept", "application/vnd.android.package-archive, application/octet-stream, */*")
+                        .header("Accept-Encoding", "identity")
+                        .header("Connection", "keep-alive")
 
-                body.byteStream().use { input ->
-                    FileOutputStream(partFile).use { output ->
-                        val buffer = ByteArray(16 * 1024)
-                        while (true) {
-                            currentCoroutineContext().ensureActive()
-                            val read = input.read(buffer)
-                            if (read <= 0) break
-                            if (!checkedMagic) {
-                                checkedMagic = true
-                                val isZipHeader = read >= 2 && buffer[0] == 0x50.toByte() && buffer[1] == 0x4B.toByte()
-                                if (!isZipHeader) {
-                                    error("El archivo descargado no es un APK válido.")
+                    if (resumeOffset > 0L) {
+                        reqBuilder.header("Range", "bytes=$resumeOffset-")
+                    }
+
+                    downloadClient.newCall(reqBuilder.build()).execute().use { response ->
+                        val code = response.code
+                        if (code == 416) {
+                            // Range not satisfiable: reset partial file and retry cleanly from 0
+                            if (expectedTotalBytes > 0L && resumeOffset >= expectedTotalBytes && hasValidZipMagic(partFile)) {
+                                return@use
+                            }
+                            partFile.delete()
+                            continue
+                        }
+                        if (!response.isSuccessful) {
+                            error("Error al descargar (HTTP $code)")
+                        }
+
+                        val body = response.body ?: error("Respuesta vacía al descargar el APK")
+                        val isPartial = code == HttpURLConnection.HTTP_PARTIAL && resumeOffset > 0L
+                        val bodyLen = body.contentLength()
+                        val totalFromRange = parseTotalBytesFromContentRange(response.header("Content-Range"))
+
+                        val totalBytes = when {
+                            totalFromRange > 0L -> totalFromRange
+                            isPartial && bodyLen > 0L -> resumeOffset + bodyLen
+                            !isPartial && bodyLen > 0L -> bodyLen
+                            expectedTotalBytes > 0L -> expectedTotalBytes
+                            else -> -1L
+                        }
+                        if (totalBytes > 0L) {
+                            expectedTotalBytes = totalBytes
+                        }
+
+                        var downloaded = if (isPartial) resumeOffset else 0L
+                        var lastPercent = -1
+                        var lastEmitTime = 0L
+                        var checkedMagic = isPartial && hasValidZipMagic(partFile)
+
+                        val initialPct = if (totalBytes > 0L) {
+                            ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
+                        } else -1
+                        onProgress(initialPct, downloaded, totalBytes)
+
+                        body.byteStream().use { input ->
+                            BufferedOutputStream(FileOutputStream(partFile, isPartial), 64 * 1024).use { output ->
+                                val buffer = ByteArray(64 * 1024)
+                                while (true) {
+                                    currentCoroutineContext().ensureActive()
+                                    val read = input.read(buffer)
+                                    if (read <= 0) break
+                                    if (!checkedMagic) {
+                                        checkedMagic = true
+                                        val isZipHeader = read >= 2 &&
+                                            buffer[0] == 0x50.toByte() &&
+                                            buffer[1] == 0x4B.toByte()
+                                        if (!isZipHeader) {
+                                            partFile.delete()
+                                            error("El archivo descargado no es un paquete APK válido.")
+                                        }
+                                    }
+                                    output.write(buffer, 0, read)
+                                    downloaded += read
+
+                                    val now = System.currentTimeMillis()
+                                    val pct = if (totalBytes > 0L) {
+                                        ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
+                                    } else {
+                                        -1
+                                    }
+                                    if ((pct != lastPercent && pct >= 0) || now - lastEmitTime >= 120L) {
+                                        lastPercent = pct
+                                        lastEmitTime = now
+                                        onProgress(pct, downloaded, totalBytes)
+                                    }
                                 }
-                            }
-                            output.write(buffer, 0, read)
-                            downloaded += read
-
-                            val now = System.currentTimeMillis()
-                            val pct = if (totalBytes > 0L) {
-                                ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
-                            } else {
-                                -1
-                            }
-                            if ((pct != lastPercent && pct >= 0) || now - lastEmitTime >= 150L) {
-                                lastPercent = pct
-                                lastEmitTime = now
-                                onProgress(pct, downloaded, totalBytes)
+                                output.flush()
                             }
                         }
-                        output.flush()
+
+                        if (totalBytes <= 0L && downloaded > 0L) {
+                            expectedTotalBytes = downloaded
+                        }
+                    }
+
+                    val finalSize = if (partFile.exists()) partFile.length() else 0L
+                    if (finalSize > 0L && (expectedTotalBytes <= 0L || finalSize >= expectedTotalBytes)) {
+                        break
+                    }
+                } catch (e: Throwable) {
+                    currentCoroutineContext().ensureActive()
+                    lastError = e
+                    if (attempt < maxAttempts) {
+                        delay(600L * attempt)
                     }
                 }
-
-                if (downloaded <= 0L) {
-                    error("El archivo APK descargado está vacío.")
-                }
-                if (totalBytes > 0L && downloaded < totalBytes) {
-                    error("La descarga se interrumpió ($downloaded de $totalBytes bytes). Intenta de nuevo.")
-                }
-                if (targetFile.exists()) targetFile.delete()
-                if (!partFile.renameTo(targetFile)) {
-                    partFile.copyTo(targetFile, overwrite = true)
-                    partFile.delete()
-                }
-                onProgress(100, downloaded, if (totalBytes > 0L) totalBytes else downloaded)
-                targetFile
             }
-        }.onFailure {
-            partFile.delete()
+
+            val completedSize = if (partFile.exists()) partFile.length() else 0L
+            if (completedSize <= 0L || !hasValidZipMagic(partFile)) {
+                throw (lastError ?: IllegalStateException("El archivo APK descargado está vacío."))
+            }
+            if (expectedTotalBytes > 0L && completedSize < expectedTotalBytes) {
+                val mbDown = String.format("%.1f", completedSize / (1024f * 1024f))
+                val mbTot = String.format("%.1f", expectedTotalBytes / (1024f * 1024f))
+                throw IllegalStateException(
+                    "Conexión inestable ($mbDown MB de $mbTot MB). Toca 'Descargar e instalar' para reanudar desde $mbDown MB."
+                )
+            }
+
+            if (targetFile.exists()) targetFile.delete()
+            if (!partFile.renameTo(targetFile)) {
+                partFile.copyTo(targetFile, overwrite = true)
+                partFile.delete()
+            }
+            onProgress(100, completedSize, if (expectedTotalBytes > 0L) expectedTotalBytes else completedSize)
+            targetFile
         }
     }
 

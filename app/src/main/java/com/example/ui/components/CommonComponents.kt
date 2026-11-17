@@ -996,10 +996,16 @@ fun AppUpdateDialog(
                                 String.format("%.1f MB descargados", downloadedMb)
                             }
                             Text(
-                                text = "$sizeLabel · No salgas de esta ventana; el instalador se abrirá automáticamente.",
+                                text = "$sizeLabel · Reanudación automática activa si se corta la señal.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            TextButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.align(Alignment.End).testTag("update_cancel_download_button")
+                            ) {
+                                Text("Cancelar / Pausar")
+                            }
                         }
                     }
 

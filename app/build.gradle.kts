@@ -17,11 +17,17 @@ android {
     applicationId = "com.aistudio.nidofamiliar.mrxqkp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 22
-    versionName = "2.6.0"
+    versionCode = 24
+    versionName = "2.6.2"
 
     val githubRepo = (System.getenv("GITHUB_REPOSITORY") ?: "").trim().replace("\"", "")
     buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
+
+    if (System.getenv("GITHUB_ACTIONS") == "true") {
+      ndk {
+        abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+      }
+    }
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -66,6 +72,11 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+  }
+  packaging {
+    jniLibs {
+      useLegacyPackaging = true
+    }
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {

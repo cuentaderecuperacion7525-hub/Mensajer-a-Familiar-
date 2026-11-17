@@ -648,170 +648,15 @@ fun ChatRoomScreen(
                                         tint = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
-                                Box {
-                                    IconButton(
-                                        onClick = { showHeaderMenu = true },
-                                        modifier = Modifier.testTag("chat_more_menu_button")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.MoreVert,
-                                            contentDescription = "Opciones del chat",
-                                            tint = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                    MaterialTheme(
-                                        shapes = MaterialTheme.shapes.copy(
-                                            extraSmall = RoundedCornerShape(22.dp)
-                                        )
-                                    ) {
-                                        DropdownMenu(
-                                            expanded = showHeaderMenu,
-                                            onDismissRequest = { showHeaderMenu = false },
-                                            containerColor = MaterialTheme.colorScheme.surface,
-                                            tonalElevation = 3.dp,
-                                            shadowElevation = 8.dp,
-                                            modifier = Modifier
-                                                .widthIn(min = 240.dp)
-                                                .testTag("chat_more_menu")
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        text = if (chatUi.chat.type == ChatType.GROUP) "Info del grupo" else "Info del contacto",
-                                                        style = MaterialTheme.typography.bodyLarge
-                                                    )
-                                                },
-                                                leadingIcon = {
-                                                    Icon(Icons.Outlined.Info, contentDescription = null)
-                                                },
-                                                onClick = {
-                                                    showHeaderMenu = false
-                                                    showChatInfoDialog = true
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
-                                                modifier = Modifier.testTag("chat_menu_info_gallery")
-                                            )
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        text = "Fondo del chat",
-                                                        style = MaterialTheme.typography.bodyLarge
-                                                    )
-                                                },
-                                                leadingIcon = {
-                                                    Icon(Icons.Outlined.Image, contentDescription = null)
-                                                },
-                                                onClick = {
-                                                    showHeaderMenu = false
-                                                    showWallpaperDialog = true
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
-                                                modifier = Modifier.testTag("chat_menu_wallpaper")
-                                            )
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        text = "Buscar mensajes",
-                                                        style = MaterialTheme.typography.bodyLarge
-                                                    )
-                                                },
-                                                leadingIcon = {
-                                                    Icon(Icons.Filled.Search, contentDescription = null)
-                                                },
-                                                onClick = {
-                                                    showHeaderMenu = false
-                                                    isSearchOpen = true
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
-                                                modifier = Modifier.testTag("chat_menu_search")
-                                            )
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        text = if (chatUi.isPinned) "Desfijar chat" else "Fijar chat arriba",
-                                                        style = MaterialTheme.typography.bodyLarge
-                                                    )
-                                                },
-                                                leadingIcon = {
-                                                    Icon(Icons.Outlined.PushPin, contentDescription = null)
-                                                },
-                                                onClick = {
-                                                    showHeaderMenu = false
-                                                    onTogglePinChat()
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
-                                                modifier = Modifier.testTag("chat_menu_toggle_pin_chat")
-                                            )
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        text = if (chatUi.isMuted) "Activar notificaciones" else "Silenciar notificaciones",
-                                                        style = MaterialTheme.typography.bodyLarge
-                                                    )
-                                                },
-                                                leadingIcon = {
-                                                    Icon(
-                                                        imageVector = if (chatUi.isMuted) Icons.Filled.Notifications else Icons.Outlined.NotificationsOff,
-                                                        contentDescription = null
-                                                    )
-                                                },
-                                                onClick = {
-                                                    showHeaderMenu = false
-                                                    onToggleMuteChat()
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
-                                                modifier = Modifier.testTag("chat_menu_toggle_mute_chat")
-                                            )
-                                            HorizontalDivider(
-                                                modifier = Modifier.padding(vertical = 6.dp),
-                                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                                            )
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        text = "Vaciar chat",
-                                                        style = MaterialTheme.typography.bodyLarge,
-                                                        color = DangerRed
-                                                    )
-                                                },
-                                                leadingIcon = {
-                                                    Icon(
-                                                        imageVector = Icons.Outlined.Delete,
-                                                        contentDescription = null,
-                                                        tint = DangerRed
-                                                    )
-                                                },
-                                                onClick = {
-                                                    showHeaderMenu = false
-                                                    showClearChatConfirmDialog = true
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
-                                                modifier = Modifier.testTag("chat_menu_clear_chat")
-                                            )
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        text = if (isContactBlocked) "Desbloquear contacto" else "Bloquear contacto",
-                                                        style = MaterialTheme.typography.bodyLarge,
-                                                        color = DangerRed
-                                                    )
-                                                },
-                                                leadingIcon = {
-                                                    Icon(
-                                                        imageVector = Icons.Filled.Block,
-                                                        contentDescription = null,
-                                                        tint = DangerRed
-                                                    )
-                                                },
-                                                onClick = {
-                                                    showHeaderMenu = false
-                                                    showBlockContactConfirmDialog = true
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
-                                                modifier = Modifier.testTag("chat_menu_block_contact")
-                                            )
-                                        }
-                                    }
+                                IconButton(
+                                    onClick = { showHeaderMenu = !showHeaderMenu },
+                                    modifier = Modifier.testTag("chat_more_menu_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.MoreVert,
+                                        contentDescription = "Opciones del chat",
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(
@@ -1569,6 +1414,207 @@ fun ChatRoomScreen(
                                         Text(emoji, fontSize = 22.sp)
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (showHeaderMenu) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.25f))
+                        .clickable { showHeaderMenu = false }
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(22.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 4.dp,
+                        shadowElevation = 12.dp,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 6.dp, end = 12.dp)
+                            .width(268.dp)
+                            .clickable(enabled = false) {}
+                            .testTag("chat_more_menu")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showHeaderMenu = false
+                                        showChatInfoDialog = true
+                                    }
+                                    .padding(horizontal = 20.dp, vertical = 13.dp)
+                                    .testTag("chat_menu_info_gallery"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Info,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = if (chatUi.chat.type == ChatType.GROUP) "Info del grupo" else "Info del contacto",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showHeaderMenu = false
+                                        showWallpaperDialog = true
+                                    }
+                                    .padding(horizontal = 20.dp, vertical = 13.dp)
+                                    .testTag("chat_menu_wallpaper"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Image,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = "Fondo del chat",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showHeaderMenu = false
+                                        isSearchOpen = true
+                                    }
+                                    .padding(horizontal = 20.dp, vertical = 13.dp)
+                                    .testTag("chat_menu_search"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Search,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = "Buscar mensajes",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showHeaderMenu = false
+                                        onTogglePinChat()
+                                    }
+                                    .padding(horizontal = 20.dp, vertical = 13.dp)
+                                    .testTag("chat_menu_toggle_pin_chat"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.PushPin,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = if (chatUi.isPinned) "Desfijar chat" else "Fijar chat arriba",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showHeaderMenu = false
+                                        onToggleMuteChat()
+                                    }
+                                    .padding(horizontal = 20.dp, vertical = 13.dp)
+                                    .testTag("chat_menu_toggle_mute_chat"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (chatUi.isMuted) Icons.Filled.Notifications else Icons.Outlined.NotificationsOff,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = if (chatUi.isMuted) "Activar notificaciones" else "Silenciar notificaciones",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 6.dp),
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showHeaderMenu = false
+                                        showClearChatConfirmDialog = true
+                                    }
+                                    .padding(horizontal = 20.dp, vertical = 13.dp)
+                                    .testTag("chat_menu_clear_chat"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Delete,
+                                    contentDescription = null,
+                                    tint = DangerRed,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = "Vaciar chat",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = DangerRed
+                                )
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showHeaderMenu = false
+                                        showBlockContactConfirmDialog = true
+                                    }
+                                    .padding(horizontal = 20.dp, vertical = 13.dp)
+                                    .testTag("chat_menu_block_contact"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Block,
+                                    contentDescription = null,
+                                    tint = DangerRed,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Text(
+                                    text = if (isContactBlocked) "Desbloquear contacto" else "Bloquear contacto",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = DangerRed
+                                )
                             }
                         }
                     }
