@@ -294,5 +294,26 @@ class ExampleRobolectricTest {
     val model2 = com.example.util.ImageCompressionHelper.resolveCoilModel("data:image/jpeg;base64,/9j/4AAQ=")
     org.junit.Assert.assertSame(model1, model2)
   }
+
+  @Test
+  fun `video media helper caches atomically finds legacy cache and cleans expired status videos`() = kotlinx.coroutines.test.runTest {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val sampleB64 = android.util.Base64.encodeToString(byteArrayOf(0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70), android.util.Base64.NO_WRAP)
+    val writeRes = com.example.util.VideoMediaHelper.writeAssembledVideoToCache(
+      context = context,
+      messageId = "st_test123",
+      fileName = "estado_st_test123.mp4",
+      fullDataUri = "data:video/mp4;base64,$sampleB64"
+    )
+    assertTrue(writeRes.isSuccess)
+    val cachedFile = writeRes.getOrNull()!!
+    assertTrue(cachedFile.exists())
+    assertEquals(cachedFile.absolutePath, com.example.util.VideoMediaHelper.findExistingCachedVideoFile(context, "st_test123", "estado_st_test123.mp4")?.absolutePath)
+
+    // Simulate expired status file > 26h old
+    cachedFile.setLastModified(System.currentTimeMillis() - (27L * 60L * 60L * 1000L))
+    com.example.util.VideoMediaHelper.cleanupExpiredStatusVideos(context)
+    assertFalse(cachedFile.exists())
+  }
 }
 

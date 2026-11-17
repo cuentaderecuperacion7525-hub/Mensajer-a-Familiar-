@@ -1437,6 +1437,10 @@ fun FullScreenVideoDialog(
                             mp.isLooping = true
                             start()
                         }
+                        setOnErrorListener { _, _, _ ->
+                            feedbackBanner = "No se pudo reproducir este archivo de video."
+                            true
+                        }
                     }
                 },
                 modifier = Modifier

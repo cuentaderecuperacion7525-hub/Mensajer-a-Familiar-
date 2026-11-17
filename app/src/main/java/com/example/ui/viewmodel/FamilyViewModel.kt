@@ -528,6 +528,9 @@ class FamilyViewModel(
 
     init {
         FamiChatNotificationHelper.ensureChannels(appContext)
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            VideoMediaHelper.cleanupExpiredStatusVideos(appContext)
+        }
         viewModelScope.launch {
             val savedFamilyId = prefs.activeFamilyIdFlow.first()
             val fams = runCatching {
@@ -1594,7 +1597,7 @@ class FamilyViewModel(
                         _activeUploadLabel.value = "Subiendo ${payload.fileName} (${DocumentMediaHelper.formatFileSize(payload.sizeBytes)})..."
                         for ((idx, chunkStr) in chunks.withIndex()) {
                             val chunkEntity = MediaChunkEntity(
-                                id = "${msgId}_$idx",
+                                id = "${msgId}_c$idx",
                                 messageId = msgId,
                                 chunkIndex = idx,
                                 totalChunks = chunks.size,
@@ -1670,7 +1673,7 @@ class FamilyViewModel(
                         _activeUploadLabel.value = "Subiendo video (${DocumentMediaHelper.formatFileSize(payload.sizeBytes)})..."
                         for ((idx, chunkStr) in chunks.withIndex()) {
                             val chunkEntity = MediaChunkEntity(
-                                id = "${msgId}_$idx",
+                                id = "${msgId}_c$idx",
                                 messageId = msgId,
                                 chunkIndex = idx,
                                 totalChunks = chunks.size,
@@ -1764,7 +1767,8 @@ class FamilyViewModel(
                 totalChunks = message.chunkCount,
                 onProgress = { prog ->
                     _mediaTransferProgress.value = _mediaTransferProgress.value + (message.id to prog)
-                }
+                },
+                callerUid = currentUserId
             )
             _mediaTransferProgress.value = _mediaTransferProgress.value - message.id
             fetched.fold(
@@ -1790,8 +1794,8 @@ class FamilyViewModel(
     fun openOrDownloadVideo(message: ChatMessageEntity, onReady: (File) -> Unit) {
         val famId = _activeFamilyId.value ?: return
         viewModelScope.launch {
-            val cached = VideoMediaHelper.getCachedVideoFile(appContext, message.id, message.fileName)
-            if (cached.exists() && cached.length() > 0L) {
+            val cached = VideoMediaHelper.findExistingCachedVideoFile(appContext, message.id, message.fileName)
+            if (cached != null && cached.exists() && cached.length() > 0L) {
                 onReady(cached)
                 return@launch
             }
@@ -1819,7 +1823,8 @@ class FamilyViewModel(
                 totalChunks = message.chunkCount,
                 onProgress = { prog ->
                     _mediaTransferProgress.value = _mediaTransferProgress.value + (message.id to prog)
-                }
+                },
+                callerUid = currentUserId
             )
             _mediaTransferProgress.value = _mediaTransferProgress.value - message.id
             fetched.fold(
@@ -2743,7 +2748,7 @@ class FamilyViewModel(
                     val pct = 0.15f + (idx + 1).toFloat() / chunks.size.toFloat() * 0.75f
                     _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to pct)
                     val chunkEntity = MediaChunkEntity(
-                        id = "${statusId}_$idx",
+                        id = "${statusId}_c$idx",
                         messageId = statusId,
                         chunkIndex = idx,
                         totalChunks = chunks.size,
@@ -2783,55 +2788,91 @@ class FamilyViewModel(
         }
     }
 
-    fun prepareStatusVideo(status: FamilyStatusEntity, onReady: (java.io.File) -> Unit) {
-        val famId = _activeFamilyId.value ?: return
+    fun prepareStatusVideo(
+        status: FamilyStatusEntity,
+        onReady: (java.io.File) -> Unit,
+        onError: (String) -> Unit = {}
+    ) {
+        val famId = _activeFamilyId.value
+        if (famId.isNullOrBlank()) {
+            onError("No hay una familia activa para cargar el video.")
+            return
+        }
         viewModelScope.launch {
-            val cached = VideoMediaHelper.getCachedVideoFile(appContext, status.id, "estado_${status.id}.mp4")
-            if (cached.exists() && cached.length() > 0L) {
+            val fileName = "estado_${status.id}.mp4"
+            val cached = VideoMediaHelper.findExistingCachedVideoFile(appContext, status.id, fileName)
+            if (cached != null && cached.exists() && cached.length() > 0L) {
                 onReady(cached)
                 return@launch
             }
-            if (status.chunkCount > 0) {
-                _mediaTransferProgress.value = _mediaTransferProgress.value + (status.id to 0.20f)
-                val chunksRes = cloudRepo.fetchMediaChunks(famId, status.id, status.chunkCount)
+            val isChunkedMedia = status.chunkCount > 0 || status.mediaUri?.startsWith("chunked:") == true
+            if (isChunkedMedia) {
+                _mediaTransferProgress.value = _mediaTransferProgress.value + (status.id to 0.08f)
+                val chunksRes = cloudRepo.fetchMediaChunks(
+                    familyId = famId,
+                    messageId = status.id,
+                    totalChunks = status.chunkCount,
+                    onProgress = { prog ->
+                        val scaled = (0.10f + prog * 0.80f).coerceIn(0.10f, 0.92f)
+                        _mediaTransferProgress.value = _mediaTransferProgress.value + (status.id to scaled)
+                    },
+                    callerUid = currentUserId
+                )
                 chunksRes.onSuccess { fullData ->
-                    _mediaTransferProgress.value = _mediaTransferProgress.value + (status.id to 0.85f)
+                    _mediaTransferProgress.value = _mediaTransferProgress.value + (status.id to 0.95f)
                     val writeRes = VideoMediaHelper.writeAssembledVideoToCache(
                         context = appContext,
                         messageId = status.id,
-                        fileName = "estado_${status.id}.mp4",
+                        fileName = fileName,
                         fullDataUri = fullData
                     )
                     _mediaTransferProgress.value = _mediaTransferProgress.value - status.id
                     writeRes.onSuccess(onReady).onFailure {
-                        showMessage("No se pudo preparar el video del estado")
+                        val msg = "No se pudo preparar el video del estado."
+                        showMessage(msg)
+                        onError(msg)
                     }
-                }.onFailure {
+                }.onFailure { err ->
                     _mediaTransferProgress.value = _mediaTransferProgress.value - status.id
-                    showMessage("No se pudo descargar el video del estado")
+                    val msg = err.localizedMessage?.takeIf { it.isNotBlank() }
+                        ?: "No se pudo descargar el video del estado."
+                    showMessage(msg)
+                    onError(msg)
                 }
             } else if (!status.mediaUri.isNullOrBlank() && status.mediaUri.startsWith("data:video")) {
+                _mediaTransferProgress.value = _mediaTransferProgress.value + (status.id to 0.50f)
                 val writeRes = VideoMediaHelper.writeAssembledVideoToCache(
                     context = appContext,
                     messageId = status.id,
-                    fileName = "estado_${status.id}.mp4",
+                    fileName = fileName,
                     fullDataUri = status.mediaUri
                 )
+                _mediaTransferProgress.value = _mediaTransferProgress.value - status.id
                 writeRes.onSuccess(onReady).onFailure {
-                    showMessage("No se pudo reproducir el video del estado")
+                    val msg = "No se pudo reproducir el video del estado."
+                    showMessage(msg)
+                    onError(msg)
                 }
+            } else {
+                val msg = "Este video ya no está disponible en la nube."
+                showMessage(msg)
+                onError(msg)
             }
         }
     }
 
     fun saveStatusMediaToGallery(status: FamilyStatusEntity) {
         if (status.isVideo) {
-            prepareStatusVideo(status) { file ->
-                viewModelScope.launch {
-                    val res = VideoMediaHelper.saveVideoToGallery(appContext, file)
-                    showMessage(res.getOrElse { it.localizedMessage ?: "No se pudo guardar el video" })
-                }
-            }
+            prepareStatusVideo(
+                status = status,
+                onReady = { file ->
+                    viewModelScope.launch {
+                        val res = VideoMediaHelper.saveVideoToGallery(appContext, file)
+                        showMessage(res.getOrElse { it.localizedMessage ?: "No se pudo guardar el video" })
+                    }
+                },
+                onError = { msg -> showMessage(msg) }
+            )
         } else if (!status.mediaUri.isNullOrBlank()) {
             viewModelScope.launch {
                 val res = com.example.util.ImageGalleryAndShareHelper.saveImageToGallery(appContext, status.mediaUri)
@@ -2853,6 +2894,7 @@ class FamilyViewModel(
     fun deleteStatus(statusId: String) {
         val famId = _activeFamilyId.value ?: return
         viewModelScope.launch {
+            VideoMediaHelper.deleteCachedVideoFile(appContext, statusId, "estado_${statusId}.mp4")
             cloudRepo.deleteStatus(famId, statusId)
             showMessage("Estado eliminado")
         }
@@ -2909,7 +2951,12 @@ class FamilyViewModel(
         )
         viewModelScope.launch {
             if (source.chunkCount > 0) {
-                val chunksRes = cloudRepo.fetchMediaChunks(famId, source.id, source.chunkCount)
+                val chunksRes = cloudRepo.fetchMediaChunks(
+                    familyId = famId,
+                    messageId = source.id,
+                    totalChunks = source.chunkCount,
+                    callerUid = currentUserId
+                )
                 chunksRes.onSuccess { fullData ->
                     val newChunks = DocumentMediaHelper.splitIntoChunks(fullData)
                     val uids = currentMemberUids()
@@ -2917,7 +2964,7 @@ class FamilyViewModel(
                         cloudRepo.uploadMediaChunk(
                             familyId = famId,
                             chunk = MediaChunkEntity(
-                                id = "${msgId}_$idx",
+                                id = "${msgId}_c$idx",
                                 messageId = msgId,
                                 chunkIndex = idx,
                                 totalChunks = newChunks.size,

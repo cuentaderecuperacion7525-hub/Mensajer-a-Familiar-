@@ -789,17 +789,77 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         familyId: String,
         messageId: String,
         totalChunks: Int,
-        onProgress: (Float) -> Unit = {}
+        onProgress: (Float) -> Unit = {},
+        callerUid: String? = null
     ): Result<String> {
         return try {
+            val chunksRef = familyRef(familyId).collection("media_chunks")
+
+            suspend fun fetchSingleChunk(docId: String): MediaChunkEntity? {
+                return try {
+                    val snap = chunksRef.document(docId).get().await()
+                    FirestoreMappers.toMediaChunk(snap)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
+            suspend fun fetchAllChunksByMemberQuery(): List<MediaChunkEntity> {
+                if (callerUid.isNullOrBlank()) return emptyList()
+                return try {
+                    val snap = chunksRef
+                        .whereArrayContains("memberUids", callerUid)
+                        .get()
+                        .await()
+                    snap.documents
+                        .mapNotNull(FirestoreMappers::toMediaChunk)
+                        .filter { it.messageId == messageId }
+                        .sortedBy { it.chunkIndex }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+
+            if (totalChunks <= 0) {
+                val queried = fetchAllChunksByMemberQuery()
+                if (queried.isEmpty()) {
+                    return Result.failure(IllegalStateException("Video o archivo no encontrado en la nube."))
+                }
+                val expectedTotal = queried.first().totalChunks.coerceIn(1, 25)
+                val byIdx = queried.associateBy { it.chunkIndex }
+                val sb = StringBuilder()
+                for (idx in 0 until expectedTotal) {
+                    val chunk = byIdx[idx]
+                        ?: return Result.failure(IllegalStateException("Fragmento #$idx no encontrado en la nube."))
+                    sb.append(chunk.data)
+                    onProgress((idx + 1).toFloat() / expectedTotal.toFloat())
+                }
+                return Result.success(sb.toString())
+            }
+
             val sb = StringBuilder()
             val safeTotal = totalChunks.coerceIn(1, 25)
+            var fallbackMap: Map<Int, MediaChunkEntity>? = null
+
             for (idx in 0 until safeTotal) {
-                val chunkId = "${messageId}_c$idx"
-                val docRef = familyRef(familyId).collection("media_chunks").document(chunkId)
-                val snap = docRef.get().await()
-                val chunk = FirestoreMappers.toMediaChunk(snap)
-                    ?: return Result.failure(IllegalStateException("Fragmento #$idx no encontrado en la nube."))
+                // Check both <messageId>_c<idx> (current standard & tests) and <messageId>_<idx> (legacy uploads)
+                var chunk = fetchSingleChunk("${messageId}_c$idx")
+                    ?: fetchSingleChunk("${messageId}_$idx")
+
+                if (chunk == null) {
+                    if (fallbackMap == null) {
+                        fallbackMap = fetchAllChunksByMemberQuery().associateBy { it.chunkIndex }
+                    }
+                    chunk = fallbackMap[idx]
+                }
+
+                if (chunk == null) {
+                    return Result.failure(IllegalStateException("Fragmento #$idx no encontrado en la nube."))
+                }
                 sb.append(chunk.data)
                 onProgress((idx + 1).toFloat() / safeTotal.toFloat())
             }

@@ -681,8 +681,42 @@ object VideoMediaHelper {
         val cleanName = (fileName ?: "video_$messageId.mp4")
             .replace(Regex("[^a-zA-Z0-9._\\-]"), "_")
             .let { if (it.contains('.')) it else "$it.mp4" }
-        val dir = File(context.cacheDir, "videos_cache").apply { mkdirs() }
+        val dir = File(context.filesDir, "videos_cache").apply { mkdirs() }
         return File(dir, "${messageId.takeLast(6)}_$cleanName")
+    }
+
+    fun findExistingCachedVideoFile(context: Context, messageId: String, fileName: String?): File? {
+        val primary = getCachedVideoFile(context, messageId, fileName)
+        if (primary.exists() && primary.length() > 0L) return primary
+        val legacyDir = File(context.cacheDir, "videos_cache")
+        val legacy = File(legacyDir, primary.name)
+        return if (legacy.exists() && legacy.length() > 0L) legacy else null
+    }
+
+    fun deleteCachedVideoFile(context: Context, messageId: String, fileName: String?) {
+        runCatching {
+            val primary = getCachedVideoFile(context, messageId, fileName)
+            if (primary.exists()) primary.delete()
+            val legacy = File(File(context.cacheDir, "videos_cache"), primary.name)
+            if (legacy.exists()) legacy.delete()
+        }
+    }
+
+    fun cleanupExpiredStatusVideos(context: Context, maxAgeMs: Long = 26L * 60L * 60L * 1000L) {
+        val now = System.currentTimeMillis()
+        listOf(
+            File(context.filesDir, "videos_cache"),
+            File(context.cacheDir, "videos_cache")
+        ).forEach { dir ->
+            if (!dir.exists()) return@forEach
+            dir.listFiles()?.forEach { f ->
+                if (f.isFile && (f.name.contains("_estado_") || f.name.endsWith(".tmp")) &&
+                    (now - f.lastModified() > maxAgeMs)
+                ) {
+                    runCatching { f.delete() }
+                }
+            }
+        }
     }
 
     suspend fun extractVideoPreview(context: Context, uri: Uri): VideoPreviewInfo = withContext(Dispatchers.IO) {
@@ -843,14 +877,27 @@ object VideoMediaHelper {
         fileName: String?,
         fullDataUri: String
     ): Result<File> = withContext(Dispatchers.IO) {
+        var tmpFile: File? = null
         try {
             val outFile = getCachedVideoFile(context, messageId, fileName)
             val commaIdx = fullDataUri.indexOf(',')
             val b64 = if (commaIdx > 0) fullDataUri.substring(commaIdx + 1) else fullDataUri
             val bytes = Base64.decode(b64, Base64.DEFAULT)
-            outFile.writeBytes(bytes)
+            if (bytes.isEmpty()) {
+                return@withContext Result.failure(IllegalStateException("El archivo de video descargado está vacío."))
+            }
+            val tmp = File(outFile.parentFile, "${outFile.name}.tmp")
+            tmpFile = tmp
+            tmp.writeBytes(bytes)
+            if (outFile.exists()) outFile.delete()
+            if (!tmp.renameTo(outFile)) {
+                tmp.copyTo(outFile, overwrite = true)
+                tmp.delete()
+            }
+            tmpFile = null
             Result.success(outFile)
         } catch (e: Exception) {
+            runCatching { tmpFile?.delete() }
             Result.failure(e)
         }
     }

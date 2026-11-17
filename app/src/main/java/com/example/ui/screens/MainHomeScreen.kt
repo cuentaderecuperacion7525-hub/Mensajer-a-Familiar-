@@ -70,7 +70,6 @@ import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -171,7 +170,7 @@ fun MainHomeScreen(
     onPublishTextStatus: (text: String, backgroundHex: String) -> Unit,
     onPublishPhotoStatus: (uri: Uri, caption: String) -> Unit,
     onPublishVideoStatus: (uri: Uri, caption: String) -> Unit = { _, _ -> },
-    onPrepareStatusVideo: (status: FamilyStatusEntity, onReady: (java.io.File) -> Unit) -> Unit = { _, _ -> },
+    onPrepareStatusVideo: (status: FamilyStatusEntity, onReady: (java.io.File) -> Unit, onError: (String) -> Unit) -> Unit = { _, _, _ -> },
     onSaveStatusMediaToGallery: (status: FamilyStatusEntity) -> Unit = {},
     mediaTransferProgress: Map<String, Float> = emptyMap(),
     onMarkStatusViewed: (String) -> Unit,
@@ -443,7 +442,6 @@ fun MainHomeScreen(
                                 ChatsListSection(
                                     chats = chatPreviews,
                                     isDarkTheme = isDarkTheme,
-                                    showWelcomeCard = true,
                                     searchQuery = searchQuery,
                                     onSearchChange = onSearchChange,
                                     onOpenChat = { targetChatId ->
@@ -454,20 +452,6 @@ fun MainHomeScreen(
                                             onOpenChat(targetChatId)
                                         }
                                     },
-                                    onGreetFamily = {
-                                        val firstDirect = chatPreviews.firstOrNull { it.chat.type == ChatType.DIRECT }
-                                        if (firstDirect != null) {
-                                            if (firstDirect.chat.id.startsWith("virtual_direct_")) {
-                                                onStartDirectChat(firstDirect.chat.id.removePrefix("virtual_direct_"))
-                                            } else {
-                                                onOpenChat(firstDirect.chat.id)
-                                            }
-                                        } else {
-                                            val general = chatPreviews.firstOrNull()
-                                            if (general != null) onOpenChat(general.chat.id)
-                                            else showNewChatDialog = true
-                                        }
-                                    },
                                     onTogglePinChat = onTogglePinChat,
                                     onToggleMuteChat = onToggleMuteChat,
                                     emptyTip = "No hay chats que coincidan con tu búsqueda."
@@ -476,11 +460,9 @@ fun MainHomeScreen(
                             MainTab.GROUPS -> ChatsListSection(
                                 chats = chatPreviews.filter { it.chat.type == ChatType.GROUP },
                                 isDarkTheme = isDarkTheme,
-                                showWelcomeCard = false,
                                 searchQuery = searchQuery,
                                 onSearchChange = onSearchChange,
                                 onOpenChat = onOpenChat,
-                                onGreetFamily = {},
                                 onTogglePinChat = onTogglePinChat,
                                 onToggleMuteChat = onToggleMuteChat,
                                 emptyTip = if (activeMember.isAdmin) {
@@ -1127,11 +1109,9 @@ private fun androidx.compose.foundation.layout.RowScope.MainNavBarItem(
 private fun ChatsListSection(
     chats: List<ChatThreadUi>,
     isDarkTheme: Boolean = false,
-    showWelcomeCard: Boolean = true,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     onOpenChat: (String) -> Unit,
-    onGreetFamily: () -> Unit = {},
     onTogglePinChat: (String) -> Unit = {},
     onToggleMuteChat: (String) -> Unit = {},
     emptyTip: String
@@ -1222,59 +1202,8 @@ private fun ChatsListSection(
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(bottom = 24.dp)
+                contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)
             ) {
-                if (showWelcomeCard && searchQuery.isBlank()) {
-                    item(key = "welcome_greeting_card") {
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = if (isDarkTheme) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                            else Color(0xFFEBF2FE),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 10.dp)
-                                .testTag("welcome_greeting_card")
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                                    Text(
-                                        text = "Escribe el primer mensaje",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(modifier = Modifier.height(3.dp))
-                                    Text(
-                                        text = "Saluda a tu familia para empezar.",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Button(
-                                    onClick = onGreetFamily,
-                                    shape = RoundedCornerShape(50),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-                                    modifier = Modifier.testTag("welcome_greet_button")
-                                ) {
-                                    Text(
-                                        text = "Saludar",
-                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
                 items(filtered, key = { it.chat.id }) { item ->
                     ChatRowItem(
                         item = item,

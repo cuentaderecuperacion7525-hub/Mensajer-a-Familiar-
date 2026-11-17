@@ -60,11 +60,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
@@ -89,6 +91,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -895,7 +898,7 @@ fun StatusViewerDialog(
     onMarkViewed: (statusId: String) -> Unit,
     onDeleteStatus: (statusId: String) -> Unit,
     onReplyStatus: (status: FamilyStatusEntity, replyText: String) -> Unit,
-    onPrepareStatusVideo: (status: FamilyStatusEntity, onReady: (File) -> Unit) -> Unit = { _, _ -> },
+    onPrepareStatusVideo: (status: FamilyStatusEntity, onReady: (File) -> Unit, onError: (String) -> Unit) -> Unit = { _, _, _ -> },
     onSaveStatusToGallery: (status: FamilyStatusEntity) -> Unit = {},
     onDismiss: () -> Unit
 ) {
@@ -917,6 +920,8 @@ fun StatusViewerDialog(
 
     // Video status state
     var readyVideoFile by remember(currentStatus.id) { mutableStateOf<File?>(null) }
+    var videoLoadError by remember(currentStatus.id) { mutableStateOf<String?>(null) }
+    var videoRetryNonce by remember(currentStatus.id) { mutableIntStateOf(0) }
     var videoViewRef by remember(currentStatus.id) { mutableStateOf<VideoView?>(null) }
     var mediaPlayerRef by remember(currentStatus.id) { mutableStateOf<android.media.MediaPlayer?>(null) }
     var isVideoPlaying by remember(currentStatus.id) { mutableStateOf(true) }
@@ -946,14 +951,28 @@ fun StatusViewerDialog(
 
     LaunchedEffect(currentStatus.id) {
         onMarkViewed(currentStatus.id)
+    }
+
+    LaunchedEffect(currentStatus.id, currentStatus.isVideo, videoRetryNonce) {
         if (currentStatus.isVideo) {
-            onPrepareStatusVideo(currentStatus) { file ->
-                readyVideoFile = file
-            }
+            readyVideoFile = null
+            videoLoadError = null
+            videoProgress = 0f
+            onPrepareStatusVideo(
+                currentStatus,
+                { file ->
+                    videoLoadError = null
+                    readyVideoFile = file
+                },
+                { errMsg ->
+                    readyVideoFile = null
+                    videoLoadError = errMsg
+                }
+            )
         }
     }
 
-    val isOverlayPaused = replyInput.isNotEmpty() || showViewersSheet || showOptionsMenu || photoScale > 1.05f
+    val isOverlayPaused = replyInput.isNotEmpty() || showViewersSheet || showOptionsMenu || photoScale > 1.05f || videoLoadError != null
 
     // Track video progress smoothly without recomposing photo statuses
     LaunchedEffect(currentStatus.id, readyVideoFile, isVideoPlaying, isOverlayPaused) {
@@ -1328,7 +1347,7 @@ fun StatusViewerDialog(
             when {
                 currentStatus.isVideo -> {
                     val file = readyVideoFile
-                    if (file != null && file.exists() && availW > 0.dp && availH > 0.dp) {
+                    if (file != null && file.exists() && videoLoadError == null && availW > 0.dp && availH > 0.dp) {
                         val safeRatio = videoAspectRatio.coerceIn(0.35f, 2.5f)
                         val containerRatio = availW / availH
                         val (fittedW, fittedH) = if (safeRatio > containerRatio) {
@@ -1343,40 +1362,52 @@ fun StatusViewerDialog(
                                 .clip(RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center
                         ) {
-                            AndroidView(
-                                factory = { ctx ->
-                                    FrameLayout(ctx).apply {
-                                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                                        val vv = VideoView(ctx).apply {
-                                            layoutParams = FrameLayout.LayoutParams(
-                                                FrameLayout.LayoutParams.MATCH_PARENT,
-                                                FrameLayout.LayoutParams.MATCH_PARENT,
-                                                Gravity.CENTER
-                                            )
-                                            setVideoPath(file.absolutePath)
-                                            setOnPreparedListener { mp ->
-                                                mediaPlayerRef = mp
-                                                if (mp.videoWidth > 0 && mp.videoHeight > 0) {
-                                                    videoAspectRatio = (mp.videoWidth.toFloat() / mp.videoHeight.toFloat())
-                                                        .coerceIn(0.35f, 2.5f)
+                            key(currentStatus.id, file.absolutePath, videoRetryNonce) {
+                                AndroidView(
+                                    factory = { ctx ->
+                                        FrameLayout(ctx).apply {
+                                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                            val vv = VideoView(ctx).apply {
+                                                layoutParams = FrameLayout.LayoutParams(
+                                                    FrameLayout.LayoutParams.MATCH_PARENT,
+                                                    FrameLayout.LayoutParams.MATCH_PARENT,
+                                                    Gravity.CENTER
+                                                )
+                                                setVideoPath(file.absolutePath)
+                                                setOnPreparedListener { mp ->
+                                                    mediaPlayerRef = mp
+                                                    if (mp.videoWidth > 0 && mp.videoHeight > 0) {
+                                                        videoAspectRatio = (mp.videoWidth.toFloat() / mp.videoHeight.toFloat())
+                                                            .coerceIn(0.35f, 2.5f)
+                                                    }
+                                                    mp.isLooping = false
+                                                    val vol = if (isVideoMuted) 0f else 1f
+                                                    mp.setVolume(vol, vol)
+                                                    start()
+                                                    isVideoPlaying = true
                                                 }
-                                                mp.isLooping = false
-                                                val vol = if (isVideoMuted) 0f else 1f
-                                                mp.setVolume(vol, vol)
-                                                start()
-                                                isVideoPlaying = true
+                                                setOnErrorListener { _, _, _ ->
+                                                    VideoMediaHelper.deleteCachedVideoFile(
+                                                        ctx,
+                                                        currentStatus.id,
+                                                        "estado_${currentStatus.id}.mp4"
+                                                    )
+                                                    readyVideoFile = null
+                                                    videoLoadError = "No se pudo reproducir el video. Intenta descargarlo de nuevo."
+                                                    true
+                                                }
+                                                setOnCompletionListener {
+                                                    videoProgress = 1f
+                                                    advanceNextOrDismiss()
+                                                }
                                             }
-                                            setOnCompletionListener {
-                                                videoProgress = 1f
-                                                advanceNextOrDismiss()
-                                            }
+                                            videoViewRef = vv
+                                            addView(vv)
                                         }
-                                        videoViewRef = vv
-                                        addView(vv)
-                                    }
-                                },
-                                modifier = Modifier.fillMaxSize()
-                            )
+                                    },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
                         }
                     } else {
                         if (thumbBitmap != null) {
@@ -1387,26 +1418,28 @@ fun StatusViewerDialog(
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
-                        val dlPct = mediaTransferProgress[currentStatus.id]?.let { (it * 100f).toInt().coerceIn(5, 100) }
-                        Surface(
-                            shape = RoundedCornerShape(18.dp),
-                            color = Color.Black.copy(alpha = 0.72f)
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                        if (videoLoadError == null) {
+                            val dlPct = mediaTransferProgress[currentStatus.id]?.let { (it * 100f).toInt().coerceIn(1, 99) }
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color.Black.copy(alpha = 0.72f)
                             ) {
-                                CircularProgressIndicator(
-                                    color = Color.White,
-                                    strokeWidth = 3.dp,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = if (dlPct != null) "Cargando video... $dlPct%" else "Preparando video...",
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = Color.White,
+                                        strokeWidth = 3.dp,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = if (dlPct != null) "Cargando video... $dlPct%" else "Preparando video...",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
                             }
                         }
                     }
@@ -1485,8 +1518,8 @@ fun StatusViewerDialog(
                 }
             }
 
-            // Left / Right navigation tap strips (only active when not zoomed in)
-            if (photoScale <= 1.05f) {
+            // Left / Right navigation tap strips (only active when not zoomed in and no error overlay)
+            if (photoScale <= 1.05f && videoLoadError == null) {
                 Row(modifier = Modifier.fillMaxSize()) {
                     Box(
                         modifier = Modifier
@@ -1520,6 +1553,54 @@ fun StatusViewerDialog(
                                 )
                             }
                     )
+                }
+            }
+
+            // Error + Retry overlay rendered above tap strips so Reintentar always receives taps
+            val errMessage = videoLoadError
+            if (currentStatus.isVideo && errMessage != null) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.Black.copy(alpha = 0.82f),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                    modifier = Modifier.padding(horizontal = 28.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.ErrorOutline,
+                            contentDescription = "Error de video",
+                            tint = Color(0xFFFCA5A5),
+                            modifier = Modifier.size(38.dp)
+                        )
+                        Text(
+                            text = errMessage,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center
+                        )
+                        Button(
+                            onClick = {
+                                videoLoadError = null
+                                videoRetryNonce++
+                            },
+                            shape = RoundedCornerShape(50),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("status_video_retry_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Reintentar")
+                        }
+                    }
                 }
             }
         }
