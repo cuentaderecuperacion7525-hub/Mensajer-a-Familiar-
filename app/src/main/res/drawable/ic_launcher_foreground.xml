@@ -1,8 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:width="66dp"
-        android:height="66dp"
-        android:drawable="@drawable/ic_famichat_fg_1794859959644"
-        android:gravity="center" />
-</layer-list>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="18"
+        android:translateY="18"
+        android:scaleX="0.8"
+        android:scaleY="0.8">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M32,14 H58 A16,16 0 0,1 74,30 V48 A16,16 0 0,1 58,64 H32 A16,16 0 0,1 16,48 V30 A16,16 0 0,1 32,14 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M26,58 L20,76 L42,62 Z" />
+        <path
+            android:pathData="M31,32 L45,21 L59,32"
+            android:strokeColor="#2F6FED"
+            android:strokeWidth="3"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:fillColor="#2F6FED"
+            android:pathData="M45,56 C30,46 32,32 40,32 C43,32 45,34 45,37 C45,34 47,32 50,32 C58,32 60,46 45,56 Z" />
+    </group>
+</vector>

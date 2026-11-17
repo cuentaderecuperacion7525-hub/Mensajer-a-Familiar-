@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -115,10 +116,12 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.data.model.CallDirection
 import com.example.data.model.CallRecordEntity
 import com.example.data.model.CallType
@@ -168,7 +171,7 @@ fun MainHomeScreen(
     onClearSnackbar: () -> Unit,
     onToggleTheme: () -> Unit,
     onToggleNotifications: (Boolean) -> Unit,
-    onUpdateOwnProfile: (isOnline: Boolean, statusText: String, bioText: String, newPhotoUri: Uri?, removePhoto: Boolean) -> Unit,
+    onUpdateOwnProfile: (nickname: String, avatarColorHex: String, isOnline: Boolean, statusText: String, bioText: String, newPhotoUri: Uri?, removePhoto: Boolean) -> Unit,
     onPublishTextStatus: (text: String, backgroundHex: String) -> Unit,
     onPublishPhotoStatus: (uri: Uri, caption: String) -> Unit,
     onPublishVideoStatus: (uri: Uri, caption: String) -> Unit = { _, _ -> },
@@ -274,12 +277,22 @@ fun MainHomeScreen(
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
-                                    Text(
-                                        text = "FamiChat",
-                                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Image(
+                                            painter = painterResource(id = R.drawable.ic_famichat_logo),
+                                            contentDescription = "Logo FamiChat",
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Text(
+                                            text = "FamiChat",
+                                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                     Text(
                                         text = "${activeMember.name} · ${activeMember.lastSeenText}",
                                         style = MaterialTheme.typography.bodySmall,
@@ -880,17 +893,10 @@ fun MainHomeScreen(
     if (showProfileOptionsDialog) {
         UserProfileOptionsDialog(
             member = activeMember,
-            userGroupsCount = userGroupsCount,
-            isDarkTheme = isDarkTheme,
-            notificationsEnabled = notificationsEnabled,
-            onToggleNotifications = onToggleNotifications,
-            onToggleTheme = onToggleTheme,
-            onUpdateProfile = { online, statusText, bioText, newPhotoUri, removePhoto ->
-                onUpdateOwnProfile(online, statusText, bioText, newPhotoUri, removePhoto)
+            onUpdateProfile = { nickname, avatarColorHex, online, statusText, bioText, newPhotoUri, removePhoto ->
+                onUpdateOwnProfile(nickname, avatarColorHex, online, statusText, bioText, newPhotoUri, removePhoto)
                 showProfileOptionsDialog = false
             },
-            onOpenAdminPanel = onOpenAdminPanel,
-            onRequestSwitchProfile = onSwitchProfile,
             onDismiss = { showProfileOptionsDialog = false }
         )
     }

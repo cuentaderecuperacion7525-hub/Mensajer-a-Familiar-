@@ -1,9 +1,13 @@
 package com.example.ui.components
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,11 +16,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,22 +51,30 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -79,10 +93,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -93,11 +109,13 @@ import com.example.data.model.MessageStatus
 import com.example.ui.theme.LocalDarkTheme
 import com.example.ui.theme.LocalThemeController
 import com.example.ui.theme.OnlineGreen
+import com.example.ui.theme.ProfileAvatarColors
 import com.example.ui.theme.ReadBlue
 import com.example.util.ApkInspectionResult
 import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateChecker
 import com.example.util.AppUpdateUiState
+import com.example.util.CameraCaptureHelper
 import com.example.util.ImageCompressionHelper
 import com.example.util.parseHexColor
 import kotlinx.coroutines.Dispatchers
@@ -221,26 +239,45 @@ fun MessageStatusIcon(
     )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun UserProfileOptionsDialog(
     member: FamilyMemberEntity,
-    userGroupsCount: Int,
-    isDarkTheme: Boolean,
-    notificationsEnabled: Boolean,
-    onToggleNotifications: (Boolean) -> Unit,
-    onToggleTheme: () -> Unit,
-    onUpdateProfile: (isOnline: Boolean, statusText: String, bioText: String, newPhotoUri: Uri?, removePhoto: Boolean) -> Unit,
-    onOpenAdminPanel: () -> Unit,
-    onRequestSwitchProfile: () -> Unit,
+    onUpdateProfile: (
+        nickname: String,
+        avatarColorHex: String,
+        isOnline: Boolean,
+        statusText: String,
+        bioText: String,
+        newPhotoUri: Uri?,
+        removePhoto: Boolean
+    ) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val effectiveDarkTheme = LocalDarkTheme.current
+    val context = LocalContext.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    var nicknameInput by remember(member.id, member.name) {
+        mutableStateOf(member.name.take(40))
+    }
+    var selectedColorHex by remember(member.id, member.avatarColorHex) {
+        mutableStateOf(member.avatarColorHex.ifBlank { ProfileAvatarColors.first() })
+    }
     var isOnlineInput by remember(member.id, member.isOnline) { mutableStateOf(member.isOnline) }
     var statusInput by remember(member.id, member.lastSeenText) { mutableStateOf(member.lastSeenText) }
-    var bioInput by remember(member.id, member.bioText) { mutableStateOf(member.bioText) }
+    var bioInput by remember(member.id, member.bioText) { mutableStateOf(member.bioText.take(80)) }
     var pendingPhotoUri by remember(member.id) { mutableStateOf<Uri?>(null) }
+    var pendingCameraPhotoUri by remember(member.id) { mutableStateOf<Uri?>(null) }
     var removeExistingPhoto by remember(member.id) { mutableStateOf(false) }
+
+    val colorSwatches = remember(member.avatarColorHex) {
+        val current = member.avatarColorHex.trim()
+        if (current.startsWith("#") && ProfileAvatarColors.none { it.equals(current, ignoreCase = true) }) {
+            listOf(current) + ProfileAvatarColors.take(5)
+        } else {
+            ProfileAvatarColors
+        }
+    }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -252,238 +289,507 @@ fun UserProfileOptionsDialog(
         }
     )
 
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+        onResult = { success ->
+            if (success && pendingCameraPhotoUri != null) {
+                pendingPhotoUri = pendingCameraPhotoUri
+                removeExistingPhoto = false
+            }
+        }
+    )
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted ->
+            if (granted) {
+                val uri = CameraCaptureHelper.createTempPhotoUri(context)
+                if (uri != null) {
+                    pendingCameraPhotoUri = uri
+                    takePictureLauncher.launch(uri)
+                }
+            }
+        }
+    )
+
+    fun launchCameraForPhoto() {
+        val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        if (hasPerm) {
+            val uri = CameraCaptureHelper.createTempPhotoUri(context)
+            if (uri != null) {
+                pendingCameraPhotoUri = uri
+                takePictureLauncher.launch(uri)
+            }
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     val previewPhotoData = when {
         pendingPhotoUri != null -> pendingPhotoUri.toString()
         removeExistingPhoto -> ""
         else -> member.avatarPhotoData
     }
 
+    val liveDisplayName = nicknameInput.trim().ifBlank { member.name }
+    val liveInitials = remember(liveDisplayName, member.avatarEmoji) {
+        extractAvatarInitials(liveDisplayName, member.avatarEmoji)
+    }
+    val squircleColor = parseHexColor(selectedColorHex)
     val quickStatuses = listOf("En línea", "En casa", "Ocupado", "En el trabajo", "En la escuela")
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(26.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = {
+            BottomSheetDefaults.DragHandle(
+                color = MaterialTheme.colorScheme.outline
+            )
+        },
+        modifier = Modifier.testTag("profile_options_dialog")
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 420.dp)
-                .testTag("profile_options_dialog")
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 22.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+            // Title bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                Text(
+                    text = "Mi perfil",
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 22.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.testTag("profile_close_button")
                 ) {
-                    MemberAvatar(
-                        emoji = member.avatarEmoji,
-                        colorHex = member.avatarColorHex,
-                        photoData = previewPhotoData,
-                        nameForInitials = member.name,
-                        size = 58.dp,
-                        isOnline = isOnlineInput,
-                        showOnlineDot = true
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Cerrar",
+                        tint = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = member.name,
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // Squircle avatar preview + Name & Role badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(squircleColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    when {
+                        previewPhotoData.isNotBlank() -> {
+                            AsyncImage(
+                                model = ImageCompressionHelper.resolveCoilModel(previewPhotoData),
+                                contentDescription = "Foto de perfil",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
                             )
-                            if (member.isAdmin) {
-                                Icon(
-                                    imageVector = Icons.Filled.Shield,
-                                    contentDescription = "Administrador",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
                         }
-                        Text(
-                            text = if (member.isAdmin) "${member.roleLabel} · Administrador" else member.roleLabel,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.testTag("profile_close_button")
-                    ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Cerrar")
+                        liveInitials.isNotEmpty() -> {
+                            Text(
+                                text = liveInitials,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = if (liveInitials.length > 1) 26.sp else 30.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                        else -> {
+                            Text(
+                                text = member.avatarEmoji.ifBlank { "👤" },
+                                color = Color.White,
+                                fontSize = 30.sp
+                            )
+                        }
                     }
                 }
 
-                // Gallery profile photo buttons
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = liveDisplayName,
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 19.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Text(
+                            text = if (member.isAdmin) "Administrador" else member.roleLabel,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            // Photo action buttons: Tomar foto | Galería + discrete Quitar foto when photo present
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    OutlinedButton(
+                        onClick = { launchCameraForPhoto() },
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.4.dp, MaterialTheme.colorScheme.primary),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("profile_take_photo_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.PhotoCamera,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Tomar foto",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
                     OutlinedButton(
                         onClick = {
                             photoPickerLauncher.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                             )
                         },
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.4.dp, MaterialTheme.colorScheme.primary),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
                         modifier = Modifier
                             .weight(1f)
+                            .height(48.dp)
                             .testTag("profile_change_photo_button")
                     ) {
-                        Icon(Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (previewPhotoData.isBlank()) "Foto de galería" else "Cambiar foto")
+                        Icon(
+                            imageVector = Icons.Outlined.PhotoLibrary,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Galería",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                    if (previewPhotoData.isNotBlank()) {
+                }
+
+                AnimatedVisibility(visible = previewPhotoData.isNotBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
                         TextButton(
                             onClick = {
                                 pendingPhotoUri = null
                                 removeExistingPhoto = true
                             },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                             modifier = Modifier.testTag("profile_remove_photo_button")
                         ) {
-                            Text("Quitar foto", color = MaterialTheme.colorScheme.error)
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Quitar foto",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
                         }
                     }
                 }
+            }
 
-                // Características del usuario
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                    modifier = Modifier.fillMaxWidth()
+            // Color del avatar
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Color del avatar",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "Características del perfil",
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                    colorSwatches.forEachIndexed { idx, hex ->
+                        val isSelected = selectedColorHex.equals(hex, ignoreCase = true)
+                        val swatchColor = parseHexColor(hex)
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .clickable { selectedColorHex = hex }
+                                .testTag("profile_color_swatch_$idx"),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text("Rol familiar", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(member.roleLabel, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium))
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(Icons.Filled.Groups, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("Grupos familiares", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Text("$userGroupsCount activos", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium))
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Acceso", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                text = if (member.isAdmin) "Protegido con contraseña" else "Acceso directo",
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium)
-                            )
-                        }
-                    }
-                }
-
-                // Estado y disponibilidad
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Mostrarme en línea", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                text = if (isOnlineInput) "Visible para la familia" else "Apareces como desconectado",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = isOnlineInput,
-                            onCheckedChange = { checked ->
-                                isOnlineInput = checked
-                                if (checked && (statusInput == "Desconectado" || statusInput == "No se ha conectado")) {
-                                    statusInput = "En línea"
-                                } else if (!checked && statusInput == "En línea") {
-                                    statusInput = "Desconectado"
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .then(
+                                        if (isSelected) {
+                                            Modifier
+                                                .border(
+                                                    width = 2.5.dp,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    shape = CircleShape
+                                                )
+                                                .padding(4.dp)
+                                        } else {
+                                            Modifier.padding(2.dp)
+                                        }
+                                    )
+                                    .clip(CircleShape)
+                                    .background(swatchColor),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Check,
+                                        contentDescription = "Color seleccionado",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                 }
-                            },
-                            modifier = Modifier.testTag("profile_online_switch")
-                        )
-                    }
-
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        quickStatuses.forEach { preset ->
-                            FilterChip(
-                                selected = statusInput == preset,
-                                onClick = {
-                                    statusInput = preset
-                                    isOnlineInput = preset == "En línea" || preset == "En casa"
-                                },
-                                label = { Text(preset, style = MaterialTheme.typography.labelSmall) }
-                            )
+                            }
                         }
                     }
+                }
+            }
 
-                    OutlinedTextField(
-                        value = statusInput,
-                        onValueChange = { statusInput = it },
-                        label = { Text("Estado personalizado") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("profile_status_input")
+            // Apodo
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Apodo",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = nicknameInput,
+                    onValueChange = { if (it.length <= 40) nicknameInput = it },
+                    placeholder = { Text("Tu nombre o apodo") },
+                    singleLine = true,
+                    isError = nicknameInput.isBlank(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("profile_nickname_input")
+                )
+            }
+
+            // Bio with 0/80 counter
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Bio",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-
-                    OutlinedTextField(
-                        value = bioInput,
-                        onValueChange = { if (it.length <= 120) bioInput = it },
-                        label = { Text("Bio / frase personal (opcional)") },
-                        placeholder = { Text("Ej. Disponible después de las 5pm") },
-                        maxLines = 2,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("profile_bio_input")
+                    Text(
+                        text = "${bioInput.length}/80",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                OutlinedTextField(
+                    value = bioInput,
+                    onValueChange = { if (it.length <= 80) bioInput = it },
+                    placeholder = { Text("Frase personal (opcional)") },
+                    maxLines = 2,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("profile_bio_input")
+                )
+            }
 
-                    Button(
-                        onClick = {
-                            onUpdateProfile(
-                                isOnlineInput,
-                                statusInput,
-                                bioInput,
-                                pendingPhotoUri,
-                                removeExistingPhoto
-                            )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("profile_save_status_button")
-                    ) {
-                        Text("Guardar perfil")
+            // Estado (5 pill chips)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Estado",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    quickStatuses.forEach { preset ->
+                        val selected = statusInput == preset
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                            border = if (selected) null else BorderStroke(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outline
+                            ),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable {
+                                    statusInput = preset
+                                    if (preset == "En línea") {
+                                        isOnlineInput = true
+                                    }
+                                }
+                                .testTag("profile_status_chip_$preset")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (selected) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = preset,
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.onPrimary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
+            }
+
+            // Mostrar mi última vez
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Mostrar mi última vez",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (isOnlineInput) "Visible para la familia" else "Apareces como desconectado",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = isOnlineInput,
+                    onCheckedChange = { checked ->
+                        isOnlineInput = checked
+                        if (checked && (statusInput == "Desconectado" || statusInput == "No se ha conectado")) {
+                            statusInput = "En línea"
+                        } else if (!checked && statusInput == "En línea") {
+                            statusInput = "Desconectado"
+                        }
+                    },
+                    modifier = Modifier.testTag("profile_online_switch")
+                )
+            }
+
+            // Guardar cambios CTA
+            Button(
+                onClick = {
+                    onUpdateProfile(
+                        nicknameInput.trim(),
+                        selectedColorHex,
+                        isOnlineInput,
+                        statusInput,
+                        bioInput,
+                        pendingPhotoUri,
+                        removeExistingPhoto
+                    )
+                },
+                enabled = nicknameInput.trim().isNotEmpty(),
+                shape = RoundedCornerShape(50),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .testTag("profile_save_status_button")
+            ) {
+                Text(
+                    text = "Guardar cambios",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                )
             }
         }
     }

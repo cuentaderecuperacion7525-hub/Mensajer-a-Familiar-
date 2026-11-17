@@ -77,6 +77,16 @@ val AvatarColors = listOf(
     "#0F766E", // Turquesa
 )
 
+// Curated 6-swatch palette for Mi perfil bottom sheet (anchored by FamiChat primary blue)
+val ProfileAvatarColors = listOf(
+    "#1A73E8", // Azul FamiChat
+    "#B82864", // Frambuesa
+    "#0F766E", // Esmeralda / Turquesa
+    "#A15A00", // Ámbar tostado
+    "#6350E0", // Índigo violeta
+    "#D14624", // Terracota
+)
+
 // Board Note Card Colors
 val NoteColors = listOf(
     "#FFF9DB", // Amarillo suave

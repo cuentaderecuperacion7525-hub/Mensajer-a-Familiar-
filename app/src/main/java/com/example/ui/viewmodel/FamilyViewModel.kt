@@ -1176,6 +1176,8 @@ class FamilyViewModel(
     }
 
     fun updateOwnProfileDetails(
+        nickname: String,
+        avatarColorHex: String,
         isOnline: Boolean,
         statusText: String,
         bioText: String,
@@ -1186,6 +1188,11 @@ class FamilyViewModel(
         val memberId = _activeMemberId.value ?: return
         _manualOffline.value = !isOnline
         val now = System.currentTimeMillis()
+        val currentMember = rawMembers.value.find { it.id == memberId }
+        val cleanNickname = nickname.trim().take(40).ifBlank { currentMember?.name.orEmpty().ifBlank { "Familiar" } }
+        val cleanColor = avatarColorHex.trim().takeIf { it.startsWith("#") && it.length in 4..9 }
+            ?: currentMember?.avatarColorHex?.ifBlank { "#1A73E8" }
+            ?: "#1A73E8"
         val cleanStatus = statusText.trim().ifEmpty { if (isOnline) "En línea" else "Desconectado" }
         val finalLabel = if (isOnline && (cleanStatus == "Desconectado" || cleanStatus == "No se ha conectado")) {
             "En línea"
@@ -1195,7 +1202,7 @@ class FamilyViewModel(
             cleanStatus
         }
         viewModelScope.launch {
-            val existingPhoto = rawMembers.value.find { it.id == memberId }?.avatarPhotoData.orEmpty()
+            val existingPhoto = currentMember?.avatarPhotoData.orEmpty()
             val resolvedPhoto = when {
                 removePhoto -> ""
                 newPhotoUri != null -> ImageCompressionHelper.compressToDataUri(appContext, newPhotoUri) ?: existingPhoto
@@ -1215,7 +1222,9 @@ class FamilyViewModel(
                 familyId = famId,
                 memberId = memberId,
                 fields = mapOf(
-                    "bioText" to bioText.trim().take(120),
+                    "name" to cleanNickname,
+                    "avatarColorHex" to cleanColor,
+                    "bioText" to bioText.trim().take(80),
                     "avatarPhotoData" to resolvedPhoto.take(750_000)
                 )
             )
