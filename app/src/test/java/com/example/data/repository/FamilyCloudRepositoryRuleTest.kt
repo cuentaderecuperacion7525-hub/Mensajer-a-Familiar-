@@ -496,6 +496,31 @@ class FamilyCloudRepositoryRuleTest : FirestoreEmulatorTestBase() {
       repo.markMessageVoicePlayedByMember(familyId, vidMsgId, "member_mama")
     }
     assertTrue("markMessageVoicePlayedByMember failed", playedRes.isSuccess)
+
+    // Create 24h video status with mediaType VIDEO and chunkCount
+    val vidStatusId = "st_vid_${UUID.randomUUID().toString().replace("-", "").take(8)}"
+    val vidStatusRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      repo.createStatus(
+        familyId = familyId,
+        status = com.example.data.model.FamilyStatusEntity(
+          id = vidStatusId,
+          memberId = adminMemberId,
+          text = "Estado en video",
+          mediaUri = "chunked:video/mp4",
+          mediaType = "VIDEO",
+          videoThumbnailData = "data:image/jpeg;base64,/9j/4AAQ=",
+          videoDurationSec = 7,
+          chunkCount = 2,
+          backgroundHex = "#0B141A",
+          createdAt = now,
+          expiresAt = now + 86_400_000L,
+          authorUid = aliceUid
+        ),
+        memberUids = listOf(aliceUid),
+        callerUid = aliceUid
+      )
+    }
+    assertTrue("Video createStatus failed: ${vidStatusRes.exceptionOrNull()}", vidStatusRes.isSuccess)
   }
 
   private companion object {

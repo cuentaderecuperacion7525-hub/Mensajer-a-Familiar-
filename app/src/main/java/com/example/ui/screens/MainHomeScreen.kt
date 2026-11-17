@@ -151,6 +151,10 @@ fun MainHomeScreen(
     onUpdateOwnProfile: (isOnline: Boolean, statusText: String, bioText: String, newPhotoUri: Uri?, removePhoto: Boolean) -> Unit,
     onPublishTextStatus: (text: String, backgroundHex: String) -> Unit,
     onPublishPhotoStatus: (uri: Uri, caption: String) -> Unit,
+    onPublishVideoStatus: (uri: Uri, caption: String) -> Unit = { _, _ -> },
+    onPrepareStatusVideo: (status: FamilyStatusEntity, onReady: (java.io.File) -> Unit) -> Unit = { _, _ -> },
+    onSaveStatusMediaToGallery: (status: FamilyStatusEntity) -> Unit = {},
+    mediaTransferProgress: Map<String, Float> = emptyMap(),
     onMarkStatusViewed: (String) -> Unit,
     onDeleteStatus: (String) -> Unit,
     onReplyToStatus: (FamilyStatusEntity, String) -> Unit,
@@ -471,6 +475,40 @@ fun MainHomeScreen(
                                         viewingStatusMemberId = group.member.id
                                     }
                                 )
+                                val statusUploadEntry = mediaTransferProgress.entries.firstOrNull { it.key.startsWith("st_") }
+                                if (statusUploadEntry != null) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "🎬 Subiendo estado en video...",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            val pctInt = (statusUploadEntry.value * 100f).toInt().coerceIn(5, 100)
+                                            Text(
+                                                text = "$pctInt%",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        androidx.compose.material3.LinearProgressIndicator(
+                                            progress = { statusUploadEntry.value.coerceIn(0.05f, 1f) },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(4.dp)
+                                                .clip(RoundedCornerShape(2.dp))
+                                        )
+                                    }
+                                }
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                                 ChatsListSection(
                                     chats = chatPreviews,
@@ -609,6 +647,10 @@ fun MainHomeScreen(
             onPublishPhoto = { uri, caption ->
                 onPublishPhotoStatus(uri, caption)
                 showCreateStatusDialog = false
+            },
+            onPublishVideo = { uri, caption ->
+                onPublishVideoStatus(uri, caption)
+                showCreateStatusDialog = false
             }
         )
     }
@@ -618,9 +660,12 @@ fun MainHomeScreen(
             group = group,
             activeMemberId = activeMember.id,
             allMembers = allMembers,
+            mediaTransferProgress = mediaTransferProgress,
             onMarkViewed = onMarkStatusViewed,
             onDeleteStatus = onDeleteStatus,
             onReplyStatus = onReplyToStatus,
+            onPrepareStatusVideo = onPrepareStatusVideo,
+            onSaveStatusToGallery = onSaveStatusMediaToGallery,
             onDismiss = { viewingStatusMemberId = null }
         )
     }

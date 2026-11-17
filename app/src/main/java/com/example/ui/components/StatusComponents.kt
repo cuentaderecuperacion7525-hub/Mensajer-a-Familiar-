@@ -3,14 +3,19 @@ package com.example.ui.components
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.view.Gravity
+import android.widget.FrameLayout
+import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,14 +38,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -53,6 +66,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -63,8 +77,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -73,17 +90,24 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.JsonHelpers
 import com.example.util.CameraCaptureHelper
+import com.example.util.DocumentMediaHelper
 import com.example.util.ImageCompressionHelper
 import com.example.util.TimeFormatters
+import com.example.util.VideoMediaHelper
+import com.example.util.VideoPreviewInfo
 import com.example.util.parseHexColor
 import kotlinx.coroutines.delay
+import java.io.File
 
 val StatusBackgroundColors = listOf(
     "#128C7E",
@@ -135,6 +159,7 @@ fun FamilyStatusStrip(
     ) {
         // My Status item
         item(key = "my_status") {
+            val hasVideo = myStatuses.any { it.isVideo }
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
@@ -172,6 +197,24 @@ fun FamilyStatusStrip(
                             size = 50.dp
                         )
                     }
+                    if (hasVideo) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF1A73E8))
+                                .border(1.5.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Videocam,
+                                contentDescription = "Estado con video",
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
@@ -204,6 +247,7 @@ fun FamilyStatusStrip(
 
         // Other family members' statuses
         items(otherGroups, key = { it.member.id }) { group ->
+            val hasVideo = group.items.any { it.isVideo }
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
@@ -218,19 +262,39 @@ fun FamilyStatusStrip(
                 } else {
                     MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                 }
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .border(2.5.dp, ringColor, CircleShape)
-                        .padding(3.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    MemberAvatar(
-                        emoji = group.member.avatarEmoji,
-                        colorHex = group.member.avatarColorHex,
-                        photoData = group.member.avatarPhotoData,
-                        size = 50.dp
-                    )
+                Box(modifier = Modifier.size(58.dp), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .border(2.5.dp, ringColor, CircleShape)
+                            .padding(3.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        MemberAvatar(
+                            emoji = group.member.avatarEmoji,
+                            colorHex = group.member.avatarColorHex,
+                            photoData = group.member.avatarPhotoData,
+                            size = 50.dp
+                        )
+                    }
+                    if (hasVideo) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF1A73E8))
+                                .border(1.5.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Videocam,
+                                contentDescription = "Estado en video",
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -252,51 +316,107 @@ fun FamilyStatusStrip(
 fun CreateStatusDialog(
     onDismiss: () -> Unit,
     onPublishText: (text: String, backgroundHex: String) -> Unit,
-    onPublishPhoto: (imageUri: Uri, caption: String) -> Unit
+    onPublishPhoto: (imageUri: Uri, caption: String) -> Unit,
+    onPublishVideo: (videoUri: Uri, caption: String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
-    var modeTab by remember { mutableIntStateOf(0) } // 0 = Text, 1 = Photo
+    var modeTab by remember { mutableIntStateOf(0) } // 0 = Text, 1 = Photo, 2 = Video
     var text by remember { mutableStateOf("") }
     var selectedHex by remember { mutableStateOf(StatusBackgroundColors.first()) }
-    var pickedPhotoUri by remember { mutableStateOf<Uri?>(null) }
-    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
-    var caption by remember { mutableStateOf("") }
 
-    val pickerLauncher = rememberLauncherForActivityResult(
+    var pickedPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingCameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var photoCaption by remember { mutableStateOf("") }
+
+    var pickedVideoUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingCameraVideoUri by remember { mutableStateOf<Uri?>(null) }
+    var videoPreview by remember { mutableStateOf<VideoPreviewInfo?>(null) }
+    var videoCaption by remember { mutableStateOf("") }
+
+    LaunchedEffect(pickedVideoUri) {
+        val uri = pickedVideoUri
+        if (uri == null) {
+            videoPreview = null
+        } else {
+            videoPreview = VideoMediaHelper.extractVideoPreview(context, uri)
+        }
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
         onResult = { uri -> if (uri != null) pickedPhotoUri = uri }
+    )
+
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri -> if (uri != null) pickedVideoUri = uri }
     )
 
     val takePictureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture(),
         onResult = { success ->
-            if (success && pendingCameraUri != null) {
-                pickedPhotoUri = pendingCameraUri
+            if (success && pendingCameraPhotoUri != null) {
+                pickedPhotoUri = pendingCameraPhotoUri
             }
         }
     )
+
+    val captureVideoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CaptureVideo(),
+        onResult = { success ->
+            if (success && pendingCameraVideoUri != null) {
+                pickedVideoUri = pendingCameraVideoUri
+            }
+        }
+    )
+
+    var pendingCameraMode by remember { mutableIntStateOf(1) } // 1 = Photo, 2 = Video
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { granted ->
             if (granted) {
-                val uri = CameraCaptureHelper.createTempPhotoUri(context)
-                if (uri != null) {
-                    pendingCameraUri = uri
-                    takePictureLauncher.launch(uri)
+                if (pendingCameraMode == 2) {
+                    val uri = CameraCaptureHelper.createTempVideoUri(context)
+                    if (uri != null) {
+                        pendingCameraVideoUri = uri
+                        captureVideoLauncher.launch(uri)
+                    }
+                } else {
+                    val uri = CameraCaptureHelper.createTempPhotoUri(context)
+                    if (uri != null) {
+                        pendingCameraPhotoUri = uri
+                        takePictureLauncher.launch(uri)
+                    }
                 }
             }
         }
     )
 
-    fun launchCameraForStatus() {
+    fun launchCameraForPhoto() {
+        pendingCameraMode = 1
         val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
         if (hasPerm) {
             val uri = CameraCaptureHelper.createTempPhotoUri(context)
             if (uri != null) {
-                pendingCameraUri = uri
+                pendingCameraPhotoUri = uri
                 takePictureLauncher.launch(uri)
+            }
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    fun launchCameraForVideo() {
+        pendingCameraMode = 2
+        val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        if (hasPerm) {
+            val uri = CameraCaptureHelper.createTempVideoUri(context)
+            if (uri != null) {
+                pendingCameraVideoUri = uri
+                captureVideoLauncher.launch(uri)
             }
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
@@ -312,167 +432,333 @@ fun CreateStatusDialog(
                     Tab(
                         selected = modeTab == 0,
                         onClick = { modeTab = 0 },
-                        text = { Text("Texto") }
+                        text = { Text("Texto") },
+                        modifier = Modifier.testTag("status_tab_text")
                     )
                     Tab(
                         selected = modeTab == 1,
                         onClick = { modeTab = 1 },
-                        text = { Text("Foto") }
+                        text = { Text("Foto") },
+                        modifier = Modifier.testTag("status_tab_photo")
+                    )
+                    Tab(
+                        selected = modeTab == 2,
+                        onClick = { modeTab = 2 },
+                        text = { Text("Video") },
+                        modifier = Modifier.testTag("status_tab_video")
                     )
                 }
 
-                if (modeTab == 0) {
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = parseHexColor(selectedHex),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(140.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = text.ifBlank { "Tu estado aparecerá aquí..." },
-                                color = Color.White.copy(alpha = if (text.isBlank()) 0.65f else 1f),
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                                textAlign = TextAlign.Center,
-                                maxLines = 4,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        StatusBackgroundColors.forEach { hex ->
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(CircleShape)
-                                    .background(parseHexColor(hex))
-                                    .border(
-                                        width = if (selectedHex == hex) 3.dp else 1.dp,
-                                        color = if (selectedHex == hex) MaterialTheme.colorScheme.onSurface
-                                        else Color.White.copy(alpha = 0.4f),
-                                        shape = CircleShape
-                                    )
-                                    .clickable { selectedHex = hex }
-                            )
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { if (it.length <= 280) text = it },
-                        label = { Text("¿Qué quieres compartir hoy?") },
-                        minLines = 2,
-                        maxLines = 4,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("status_text_input")
-                    )
-                } else {
-                    if (pickedPhotoUri != null) {
-                        AsyncImage(
-                            model = pickedPhotoUri,
-                            contentDescription = "Foto para estado",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(180.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                        )
-                    } else {
+                when (modeTab) {
+                    0 -> {
                         Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(18.dp),
+                            color = parseHexColor(selectedHex),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(140.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable {
-                                    pickerLauncher.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                    )
-                                }
                         ) {
-                            Column(
-                                modifier = Modifier.fillMaxSize(),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Image,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(34.dp)
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "Toca para elegir una foto de galería",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = text.ifBlank { "Tu estado aparecerá aquí..." },
+                                    color = Color.White.copy(alpha = if (text.isBlank()) 0.65f else 1f),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 4,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
-                    }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { launchCameraForStatus() },
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("status_take_photo_button")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Cámara")
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                pickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            StatusBackgroundColors.forEach { hex ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(parseHexColor(hex))
+                                        .border(
+                                            width = if (selectedHex == hex) 3.dp else 1.dp,
+                                            color = if (selectedHex == hex) MaterialTheme.colorScheme.onSurface
+                                            else Color.White.copy(alpha = 0.4f),
+                                            shape = CircleShape
+                                        )
+                                        .clickable { selectedHex = hex }
                                 )
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("status_pick_gallery_button")
-                        ) {
-                            Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Galería")
+                            }
                         }
+
+                        OutlinedTextField(
+                            value = text,
+                            onValueChange = { if (it.length <= 280) text = it },
+                            label = { Text("¿Qué quieres compartir hoy?") },
+                            minLines = 2,
+                            maxLines = 4,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("status_text_input")
+                        )
                     }
 
-                    OutlinedTextField(
-                        value = caption,
-                        onValueChange = { if (it.length <= 200) caption = it },
-                        label = { Text("Comentario (opcional)") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("status_photo_caption_input")
-                    )
+                    1 -> {
+                        if (pickedPhotoUri != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(220.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0xFF0B141A)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val photoRequest = remember(pickedPhotoUri) {
+                                    ImageRequest.Builder(context)
+                                        .data(pickedPhotoUri)
+                                        .crossfade(false)
+                                        .build()
+                                }
+                                AsyncImage(
+                                    model = photoRequest,
+                                    contentDescription = "Foto completa para estado",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        } else {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(140.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable {
+                                        photoPickerLauncher.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                        )
+                                    }
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Image,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(34.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Toca para elegir una foto de galería",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { launchCameraForPhoto() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("status_take_photo_button")
+                            ) {
+                                Icon(Icons.Filled.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Cámara")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    photoPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("status_pick_gallery_button")
+                            ) {
+                                Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Galería")
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = photoCaption,
+                            onValueChange = { if (it.length <= 200) photoCaption = it },
+                            label = { Text("Comentario (opcional)") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("status_photo_caption_input")
+                        )
+                    }
+
+                    2 -> {
+                        if (pickedVideoUri != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(210.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0xFF0B141A)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val thumbBmp = videoPreview?.thumbnailBitmap
+                                if (thumbBmp != null && !thumbBmp.isRecycled) {
+                                    val imgBmp = remember(thumbBmp) { thumbBmp.asImageBitmap() }
+                                    Image(
+                                        bitmap = imgBmp,
+                                        contentDescription = "Vista previa de video",
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.6f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                                val previewInfo = videoPreview
+                                if (previewInfo != null) {
+                                    val sizeLabel = if (previewInfo.sizeBytes > 0L) {
+                                        " · ${DocumentMediaHelper.formatFileSize(previewInfo.sizeBytes)}"
+                                    } else ""
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = Color.Black.copy(alpha = 0.72f),
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .padding(10.dp)
+                                    ) {
+                                        Text(
+                                            text = "🎬 ${TimeFormatters.formatDuration(previewInfo.durationSec)}$sizeLabel",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(140.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable {
+                                        videoPickerLauncher.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                                        )
+                                    }
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Videocam,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Toca para elegir un video corto (hasta 5 MB)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 12.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { launchCameraForVideo() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("status_record_video_button")
+                            ) {
+                                Icon(Icons.Filled.Videocam, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Grabar")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    videoPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("status_pick_video_button")
+                            ) {
+                                Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Galería")
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = videoCaption,
+                            onValueChange = { if (it.length <= 200) videoCaption = it },
+                            label = { Text("Comentario del video (opcional)") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("status_video_caption_input")
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
+            val isEnabled = when (modeTab) {
+                0 -> text.isNotBlank()
+                1 -> pickedPhotoUri != null
+                else -> pickedVideoUri != null
+            }
             Button(
                 onClick = {
-                    if (modeTab == 0) onPublishText(text, selectedHex)
-                    else pickedPhotoUri?.let { onPublishPhoto(it, caption) }
+                    when (modeTab) {
+                        0 -> onPublishText(text, selectedHex)
+                        1 -> pickedPhotoUri?.let { onPublishPhoto(it, photoCaption) }
+                        2 -> pickedVideoUri?.let { onPublishVideo(it, videoCaption) }
+                    }
                 },
-                enabled = if (modeTab == 0) text.isNotBlank() else pickedPhotoUri != null,
+                enabled = isEnabled,
                 modifier = Modifier.testTag("publish_status_button")
             ) {
                 Text("Publicar")
@@ -485,15 +771,69 @@ fun CreateStatusDialog(
 }
 
 @Composable
+private fun StatusSegmentedProgressRow(
+    itemCount: Int,
+    activeIndex: Int,
+    currentStatusId: String,
+    isVideo: Boolean,
+    videoProgress: Float,
+    isPaused: Boolean,
+    onAutoAdvance: () -> Unit
+) {
+    var timerProgress by remember(currentStatusId) { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(currentStatusId, isVideo, isPaused) {
+        if (isVideo || isPaused) return@LaunchedEffect
+        val totalMs = 6000L
+        val stepMs = 50L
+        val steps = (totalMs / stepMs).toInt()
+        val startStep = (timerProgress * steps).toInt()
+        for (i in startStep..steps) {
+            timerProgress = i.toFloat() / steps.toFloat()
+            delay(stepMs)
+        }
+        onAutoAdvance()
+    }
+
+    val activeProgress = if (isVideo) videoProgress.coerceIn(0f, 1f) else timerProgress.coerceIn(0f, 1f)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        for (idx in 0 until itemCount) {
+            val prog = when {
+                idx < activeIndex -> 1f
+                idx == activeIndex -> activeProgress
+                else -> 0f
+            }
+            LinearProgressIndicator(
+                progress = { prog },
+                color = Color.White,
+                trackColor = Color.White.copy(alpha = 0.3f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp))
+            )
+        }
+    }
+}
+
+@Composable
 fun StatusViewerDialog(
     group: MemberStatusGroup,
     activeMemberId: String,
     allMembers: List<FamilyMemberEntity>,
+    mediaTransferProgress: Map<String, Float> = emptyMap(),
     onMarkViewed: (statusId: String) -> Unit,
     onDeleteStatus: (statusId: String) -> Unit,
     onReplyStatus: (status: FamilyStatusEntity, replyText: String) -> Unit,
+    onPrepareStatusVideo: (status: FamilyStatusEntity, onReady: (File) -> Unit) -> Unit = { _, _ -> },
+    onSaveStatusToGallery: (status: FamilyStatusEntity) -> Unit = {},
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val membersMap = remember(allMembers) { allMembers.associateBy { it.id } }
     var currentIndex by remember(group.member.id) { mutableIntStateOf(0) }
     val items = group.items
@@ -506,23 +846,70 @@ fun StatusViewerDialog(
     val isMine = group.member.id == activeMemberId
 
     var replyInput by remember(currentStatus.id) { mutableStateOf("") }
-    var showViewersSheet by remember { mutableStateOf(false) }
-    var segmentProgress by remember(currentStatus.id) { mutableFloatStateOf(0f) }
+    var showViewersSheet by remember(currentStatus.id) { mutableStateOf(false) }
+
+    // Video status state
+    var readyVideoFile by remember(currentStatus.id) { mutableStateOf<File?>(null) }
+    var videoViewRef by remember(currentStatus.id) { mutableStateOf<VideoView?>(null) }
+    var isVideoPlaying by remember(currentStatus.id) { mutableStateOf(true) }
+    var isVideoMuted by remember(currentStatus.id) { mutableStateOf(false) }
+    var videoProgress by remember(currentStatus.id) { mutableFloatStateOf(0f) }
+
+    // Photo zoom state (reset per status)
+    var photoScale by remember(currentStatus.id) { mutableFloatStateOf(1f) }
+    var photoOffset by remember(currentStatus.id) { mutableStateOf(Offset.Zero) }
 
     LaunchedEffect(currentStatus.id) {
         onMarkViewed(currentStatus.id)
+        if (currentStatus.isVideo) {
+            onPrepareStatusVideo(currentStatus) { file ->
+                readyVideoFile = file
+            }
+        }
     }
 
-    LaunchedEffect(currentStatus.id, replyInput.isNotEmpty(), showViewersSheet) {
-        if (replyInput.isNotEmpty() || showViewersSheet) return@LaunchedEffect
-        val totalMs = 5500L
-        val stepMs = 50L
-        val steps = (totalMs / stepMs).toInt()
-        val startStep = (segmentProgress * steps).toInt()
-        for (i in startStep..steps) {
-            segmentProgress = i.toFloat() / steps.toFloat()
-            delay(stepMs)
+    // Track video progress smoothly without recomposing photo statuses
+    LaunchedEffect(currentStatus.id, readyVideoFile, isVideoPlaying, replyInput.isNotEmpty(), showViewersSheet) {
+        if (!currentStatus.isVideo || readyVideoFile == null) return@LaunchedEffect
+        val vv = videoViewRef
+        if (replyInput.isNotEmpty() || showViewersSheet) {
+            try {
+                if (vv?.isPlaying == true) vv.pause()
+            } catch (_: Exception) {
+            }
+            return@LaunchedEffect
+        } else if (isVideoPlaying) {
+            try {
+                if (vv != null && !vv.isPlaying) vv.start()
+            } catch (_: Exception) {
+            }
         }
+        while (true) {
+            val activeVv = videoViewRef
+            if (activeVv != null) {
+                try {
+                    val dur = activeVv.duration.coerceAtLeast(1)
+                    val pos = activeVv.currentPosition.coerceAtLeast(0)
+                    if (dur > 0) {
+                        videoProgress = (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            delay(80L)
+        }
+    }
+
+    DisposableEffect(currentStatus.id) {
+        onDispose {
+            try {
+                videoViewRef?.stopPlayback()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun advanceNextOrDismiss() {
         if (safeIdx < items.lastIndex) {
             currentIndex = safeIdx + 1
         } else {
@@ -530,106 +917,45 @@ fun StatusViewerDialog(
         }
     }
 
+    fun goPrevious() {
+        if (safeIdx > 0) {
+            currentIndex = safeIdx - 1
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
-        val bgColor = if (!currentStatus.mediaUri.isNullOrBlank()) {
-            Color.Black
+        val hasMedia = currentStatus.isVideo || !currentStatus.mediaUri.isNullOrBlank()
+        val bgColor = if (hasMedia) {
+            Color(0xFF0B141A)
         } else {
             parseHexColor(currentStatus.backgroundHex)
         }
 
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(bgColor)
+                .systemBarsPadding()
         ) {
-            // Content
-            if (!currentStatus.mediaUri.isNullOrBlank()) {
-                AsyncImage(
-                    model = ImageCompressionHelper.resolveCoilModel(currentStatus.mediaUri),
-                    contentDescription = "Foto de estado",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 28.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = currentStatus.text,
-                        color = Color.White,
-                        fontSize = 26.sp,
-                        lineHeight = 34.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            // Left / Right invisible tap zones (below header, above footer)
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 96.dp, bottom = 96.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clickable {
-                            if (safeIdx > 0) currentIndex = safeIdx - 1
-                            else segmentProgress = 0f
-                        }
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(2f)
-                        .fillMaxHeight()
-                        .clickable {
-                            if (safeIdx < items.lastIndex) currentIndex = safeIdx + 1
-                            else onDismiss()
-                        }
-                )
-            }
-
-            // Top gradient + progress segments + author bar
+            // 1. TOP HEADER BAR (Never covers the photo/video viewport!)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Black.copy(alpha = 0.65f), Color.Transparent)
-                        )
-                    )
-                    .padding(horizontal = 14.dp, vertical = 14.dp)
-                    .align(Alignment.TopCenter)
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    items.forEachIndexed { idx, _ ->
-                        val prog = when {
-                            idx < safeIdx -> 1f
-                            idx == safeIdx -> segmentProgress
-                            else -> 0f
-                        }
-                        LinearProgressIndicator(
-                            progress = { prog },
-                            color = Color.White,
-                            trackColor = Color.White.copy(alpha = 0.3f),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(3.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                        )
-                    }
-                }
+                StatusSegmentedProgressRow(
+                    itemCount = items.size,
+                    activeIndex = safeIdx,
+                    currentStatusId = currentStatus.id,
+                    isVideo = currentStatus.isVideo,
+                    videoProgress = videoProgress,
+                    isPaused = replyInput.isNotEmpty() || showViewersSheet || photoScale > 1.05f,
+                    onAutoAdvance = ::advanceNextOrDismiss
+                )
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -648,12 +974,43 @@ fun StatusViewerDialog(
                             color = Color.White,
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                         )
+                        val typePrefix = if (currentStatus.isVideo) "🎬 Video · " else ""
                         Text(
-                            text = TimeFormatters.formatLastSeen(currentStatus.createdAt)
+                            text = typePrefix + TimeFormatters.formatLastSeen(currentStatus.createdAt)
                                 .replace("Últ. vez ", "Publicado "),
                             color = Color.White.copy(alpha = 0.85f),
                             style = MaterialTheme.typography.labelSmall
                         )
+                    }
+                    if (currentStatus.isVideo && readyVideoFile != null) {
+                        IconButton(
+                            onClick = {
+                                val nextPlay = !isVideoPlaying
+                                isVideoPlaying = nextPlay
+                                try {
+                                    if (nextPlay) videoViewRef?.start() else videoViewRef?.pause()
+                                } catch (_: Exception) {
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = if (isVideoPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                contentDescription = if (isVideoPlaying) "Pausar video" else "Reproducir video",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                    if (hasMedia) {
+                        IconButton(
+                            onClick = { onSaveStatusToGallery(currentStatus) },
+                            modifier = Modifier.testTag("save_status_media_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Download,
+                                contentDescription = "Guardar en galería",
+                                tint = Color.White
+                            )
+                        }
                     }
                     if (isMine) {
                         IconButton(onClick = {
@@ -671,26 +1028,212 @@ fun StatusViewerDialog(
                 }
             }
 
-            // Bottom area: Photo caption + Reply bar or Viewers button
+            // 2. CENTER FULL MEDIA VIEWPORT (100% of photo/video visible without cropping or flicker)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                when {
+                    currentStatus.isVideo -> {
+                        val file = readyVideoFile
+                        if (file != null && file.exists()) {
+                            AndroidView(
+                                factory = { ctx ->
+                                    FrameLayout(ctx).apply {
+                                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                        val vv = VideoView(ctx).apply {
+                                            layoutParams = FrameLayout.LayoutParams(
+                                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                                Gravity.CENTER
+                                            )
+                                            setVideoPath(file.absolutePath)
+                                            setOnPreparedListener { mp ->
+                                                mp.isLooping = false
+                                                val vol = if (isVideoMuted) 0f else 1f
+                                                mp.setVolume(vol, vol)
+                                                start()
+                                                isVideoPlaying = true
+                                            }
+                                            setOnCompletionListener {
+                                                videoProgress = 1f
+                                                advanceNextOrDismiss()
+                                            }
+                                        }
+                                        videoViewRef = vv
+                                        addView(vv)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            // Show full video thumbnail while loading/assembling chunks
+                            val thumbBitmap = remember(currentStatus.id, currentStatus.videoThumbnailData) {
+                                ImageCompressionHelper.decodeToBitmap(currentStatus.videoThumbnailData)?.asImageBitmap()
+                            }
+                            if (thumbBitmap != null) {
+                                Image(
+                                    bitmap = thumbBitmap,
+                                    contentDescription = "Miniatura de video de estado",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                            val dlPct = mediaTransferProgress[currentStatus.id]?.let { (it * 100f).toInt().coerceIn(5, 100) }
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color.Black.copy(alpha = 0.72f)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = Color.White,
+                                        strokeWidth = 3.dp,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = if (dlPct != null) "Cargando video... $dlPct%" else "Preparando video...",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    !currentStatus.mediaUri.isNullOrBlank() -> {
+                        // Synchronous bitmap rendering for data:image URIs — zero flicker, full Fit
+                        val decodedBitmap = remember(currentStatus.id, currentStatus.mediaUri) {
+                            ImageCompressionHelper.decodeToBitmap(currentStatus.mediaUri)?.asImageBitmap()
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(currentStatus.id) {
+                                    detectTransformGestures { _, pan, zoom, _ ->
+                                        val nextScale = (photoScale * zoom).coerceIn(1f, 4f)
+                                        photoScale = nextScale
+                                        photoOffset = if (nextScale > 1f) photoOffset + pan else Offset.Zero
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (decodedBitmap != null) {
+                                Image(
+                                    bitmap = decodedBitmap,
+                                    contentDescription = "Foto de estado",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer(
+                                            scaleX = photoScale,
+                                            scaleY = photoScale,
+                                            translationX = photoOffset.x,
+                                            translationY = photoOffset.y
+                                        )
+                                )
+                            } else {
+                                val fallbackRequest = remember(currentStatus.id, currentStatus.mediaUri) {
+                                    ImageRequest.Builder(context)
+                                        .data(ImageCompressionHelper.resolveCoilModel(currentStatus.mediaUri))
+                                        .crossfade(false)
+                                        .build()
+                                }
+                                AsyncImage(
+                                    model = fallbackRequest,
+                                    contentDescription = "Foto de estado",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer(
+                                            scaleX = photoScale,
+                                            scaleY = photoScale,
+                                            translationX = photoOffset.x,
+                                            translationY = photoOffset.y
+                                        )
+                                )
+                            }
+                        }
+                    }
+
+                    else -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 28.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = currentStatus.text,
+                                color = Color.White,
+                                fontSize = 26.sp,
+                                lineHeight = 34.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+
+                // Left / Right navigation tap strips (only active when not zoomed in)
+                if (photoScale <= 1.05f) {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .pointerInput(currentStatus.id, safeIdx) {
+                                    detectTapGestures(
+                                        onTap = { goPrevious() },
+                                        onDoubleTap = {
+                                            if (!currentStatus.isVideo && !currentStatus.mediaUri.isNullOrBlank()) {
+                                                photoScale = if (photoScale > 1.2f) 1f else 2.2f
+                                                photoOffset = Offset.Zero
+                                            }
+                                        }
+                                    )
+                                }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(2f)
+                                .fillMaxHeight()
+                                .pointerInput(currentStatus.id, safeIdx) {
+                                    detectTapGestures(
+                                        onTap = { advanceNextOrDismiss() },
+                                        onDoubleTap = {
+                                            if (!currentStatus.isVideo && !currentStatus.mediaUri.isNullOrBlank()) {
+                                                photoScale = if (photoScale > 1.2f) 1f else 2.2f
+                                                photoOffset = Offset.Zero
+                                            }
+                                        }
+                                    )
+                                }
+                        )
+                    }
+                }
+            }
+
+            // 3. BOTTOM FOOTER BAR (Caption + Viewers Pill or Reply Input)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))
-                        )
-                    )
-                    .padding(horizontal = 16.dp, vertical = 18.dp)
-                    .align(Alignment.BottomCenter),
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (!currentStatus.mediaUri.isNullOrBlank() && currentStatus.text.isNotBlank()) {
+                if (hasMedia && currentStatus.text.isNotBlank()) {
                     Text(
                         text = currentStatus.text,
                         color = Color.White,
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 12.dp)
+                        modifier = Modifier.padding(bottom = 10.dp)
                     )
                 }
 
@@ -765,44 +1308,44 @@ fun StatusViewerDialog(
                     }
                 }
             }
+        }
 
-            if (showViewersSheet) {
-                val viewerIds = JsonHelpers.decodeStringList(currentStatus.viewedByMemberIdsJson)
-                    .filterNot { it == activeMemberId }
-                AlertDialog(
-                    onDismissRequest = { showViewersSheet = false },
-                    title = { Text("Visto por (${viewerIds.size})") },
-                    text = {
-                        if (viewerIds.isEmpty()) {
-                            Text("Nadie más ha visto este estado todavía.")
-                        } else {
-                            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items(viewerIds) { id ->
-                                    val viewer = membersMap[id]
-                                    if (viewer != null) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            MemberAvatar(
-                                                emoji = viewer.avatarEmoji,
-                                                colorHex = viewer.avatarColorHex,
-                                                photoData = viewer.avatarPhotoData,
-                                                size = 36.dp
-                                            )
-                                            Spacer(modifier = Modifier.width(10.dp))
-                                            Column {
-                                                Text(viewer.name, style = MaterialTheme.typography.titleSmall)
-                                                Text(viewer.roleLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            }
+        if (showViewersSheet) {
+            val viewerIds = JsonHelpers.decodeStringList(currentStatus.viewedByMemberIdsJson)
+                .filterNot { it == activeMemberId }
+            AlertDialog(
+                onDismissRequest = { showViewersSheet = false },
+                title = { Text("Visto por (${viewerIds.size})") },
+                text = {
+                    if (viewerIds.isEmpty()) {
+                        Text("Nadie más ha visto este estado todavía.")
+                    } else {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(viewerIds) { id ->
+                                val viewer = membersMap[id]
+                                if (viewer != null) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        MemberAvatar(
+                                            emoji = viewer.avatarEmoji,
+                                            colorHex = viewer.avatarColorHex,
+                                            photoData = viewer.avatarPhotoData,
+                                            size = 36.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(viewer.name, style = MaterialTheme.typography.titleSmall)
+                                            Text(viewer.roleLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
                                 }
                             }
                         }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { showViewersSheet = false }) { Text("Cerrar") }
                     }
-                )
-            }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showViewersSheet = false }) { Text("Cerrar") }
+                }
+            )
         }
     }
 }

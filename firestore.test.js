@@ -610,6 +610,28 @@ test("Messages support VIDEO type, chunkCount, playedByMemberIds, and media_chun
 
   const eveDb = testEnv.authenticatedContext(EVE_UID).firestore();
   await assertFails(eveDb.collection("families").doc("fam_1").collection("media_chunks").doc("msg_vid_1_c0").get());
+
+  // Video status creation with mediaType VIDEO, thumbnail, duration, and chunkCount succeeds
+  const statusVidRef = aliceDb.collection("families").doc("fam_1").collection("statuses").doc("st_vid_1");
+  await assertSucceeds(
+    statusVidRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      memberId: "member_papa",
+      text: "Saludos en video",
+      mediaData: "chunked:video/mp4",
+      mediaType: "VIDEO",
+      videoThumbnailData: "data:image/jpeg;base64,/9j/4AAQ=",
+      videoDurationSec: 9,
+      chunkCount: 2,
+      backgroundHex: "#0B141A",
+      timestamp: now,
+      expiresAt: now + 86400000,
+      viewedByMemberIds: ["member_papa"],
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
 });
 
 

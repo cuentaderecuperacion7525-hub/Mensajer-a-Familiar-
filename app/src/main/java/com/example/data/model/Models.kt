@@ -143,12 +143,21 @@ data class FamilyStatusEntity(
     val memberId: String,
     val text: String = "",
     val mediaUri: String? = null,
+    val mediaType: String = "TEXT",
+    val videoThumbnailData: String? = null,
+    val videoDurationSec: Int = 0,
+    val chunkCount: Int = 0,
     val backgroundHex: String = "#128C7E",
     val createdAt: Long = System.currentTimeMillis(),
     val expiresAt: Long = System.currentTimeMillis() + STATUS_TTL_MS,
     val viewedByMemberIdsJson: String = "[]",
     val authorUid: String = ""
 ) {
+    val isVideo: Boolean
+        get() = mediaType == "VIDEO" ||
+            mediaUri?.startsWith("data:video") == true ||
+            mediaUri?.startsWith("chunked:video") == true
+
     companion object {
         const val STATUS_TTL_MS = 24L * 60L * 60L * 1000L
     }

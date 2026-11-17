@@ -2616,6 +2616,7 @@ class FamilyViewModel(
             memberId = currentId,
             text = clean.take(400),
             mediaUri = null,
+            mediaType = "TEXT",
             backgroundHex = backgroundHex,
             createdAt = now,
             expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
@@ -2643,7 +2644,8 @@ class FamilyViewModel(
                 memberId = currentId,
                 text = caption.trim().take(200),
                 mediaUri = dataUri,
-                backgroundHex = "#111827",
+                mediaType = "IMAGE",
+                backgroundHex = "#0B141A",
                 createdAt = now,
                 expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
                 viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
@@ -2651,6 +2653,131 @@ class FamilyViewModel(
             )
             val res = cloudRepo.createStatus(famId, status, currentMemberUids(), currentUserId)
             showMessage(if (res.isSuccess) "Foto de estado publicada por 24h" else "No se pudo subir el estado")
+        }
+    }
+
+    fun publishVideoStatus(pickedUri: Uri, caption: String) {
+        val famId = _activeFamilyId.value ?: return
+        val currentId = _activeMemberId.value ?: return
+        val statusId = "st_${UUID.randomUUID().toString().replace("-", "").take(10)}"
+        viewModelScope.launch {
+            _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to 0.08f)
+            val encodedRes = VideoMediaHelper.readAndEncodeVideo(appContext, pickedUri)
+            val payload = encodedRes.getOrElse { err ->
+                _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
+                showMessage(err.localizedMessage ?: "No se pudo procesar el video del estado")
+                return@launch
+            }
+
+            // Cache assembled video locally for instant playback on this device
+            VideoMediaHelper.writeAssembledVideoToCache(
+                context = appContext,
+                messageId = statusId,
+                fileName = "estado_${statusId}.mp4",
+                fullDataUri = payload.dataUri
+            )
+
+            val uids = currentMemberUids()
+            val chunks = payload.chunks
+            if (chunks.isNotEmpty()) {
+                for ((idx, chunkData) in chunks.withIndex()) {
+                    val pct = 0.15f + (idx + 1).toFloat() / chunks.size.toFloat() * 0.75f
+                    _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to pct)
+                    val chunkEntity = MediaChunkEntity(
+                        id = "${statusId}_$idx",
+                        messageId = statusId,
+                        chunkIndex = idx,
+                        totalChunks = chunks.size,
+                        data = chunkData,
+                        authorUid = currentUserId
+                    )
+                    val chunkRes = cloudRepo.uploadMediaChunk(famId, chunkEntity, uids, currentUserId)
+                    if (chunkRes.isFailure) {
+                        _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
+                        showMessage("Error al subir fragmento de video (${idx + 1}/${chunks.size})")
+                        return@launch
+                    }
+                }
+            } else {
+                _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to 0.85f)
+            }
+
+            val now = System.currentTimeMillis()
+            val status = FamilyStatusEntity(
+                id = statusId,
+                memberId = currentId,
+                text = caption.trim().take(200),
+                mediaUri = if (chunks.isEmpty()) payload.dataUri else "chunked:${payload.mimeType}",
+                mediaType = "VIDEO",
+                videoThumbnailData = payload.thumbnailDataUri,
+                videoDurationSec = payload.durationSec,
+                chunkCount = chunks.size,
+                backgroundHex = "#0B141A",
+                createdAt = now,
+                expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
+                viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
+                authorUid = currentUserId
+            )
+            val res = cloudRepo.createStatus(famId, status, uids, currentUserId)
+            _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
+            showMessage(if (res.isSuccess) "Video de estado publicado por 24h" else "No se pudo subir el video de estado")
+        }
+    }
+
+    fun prepareStatusVideo(status: FamilyStatusEntity, onReady: (java.io.File) -> Unit) {
+        val famId = _activeFamilyId.value ?: return
+        viewModelScope.launch {
+            val cached = VideoMediaHelper.getCachedVideoFile(appContext, status.id, "estado_${status.id}.mp4")
+            if (cached.exists() && cached.length() > 0L) {
+                onReady(cached)
+                return@launch
+            }
+            if (status.chunkCount > 0) {
+                _mediaTransferProgress.value = _mediaTransferProgress.value + (status.id to 0.20f)
+                val chunksRes = cloudRepo.fetchMediaChunks(famId, status.id, status.chunkCount)
+                chunksRes.onSuccess { fullData ->
+                    _mediaTransferProgress.value = _mediaTransferProgress.value + (status.id to 0.85f)
+                    val writeRes = VideoMediaHelper.writeAssembledVideoToCache(
+                        context = appContext,
+                        messageId = status.id,
+                        fileName = "estado_${status.id}.mp4",
+                        fullDataUri = fullData
+                    )
+                    _mediaTransferProgress.value = _mediaTransferProgress.value - status.id
+                    writeRes.onSuccess(onReady).onFailure {
+                        showMessage("No se pudo preparar el video del estado")
+                    }
+                }.onFailure {
+                    _mediaTransferProgress.value = _mediaTransferProgress.value - status.id
+                    showMessage("No se pudo descargar el video del estado")
+                }
+            } else if (!status.mediaUri.isNullOrBlank() && status.mediaUri.startsWith("data:video")) {
+                val writeRes = VideoMediaHelper.writeAssembledVideoToCache(
+                    context = appContext,
+                    messageId = status.id,
+                    fileName = "estado_${status.id}.mp4",
+                    fullDataUri = status.mediaUri
+                )
+                writeRes.onSuccess(onReady).onFailure {
+                    showMessage("No se pudo reproducir el video del estado")
+                }
+            }
+        }
+    }
+
+    fun saveStatusMediaToGallery(status: FamilyStatusEntity) {
+        if (status.isVideo) {
+            prepareStatusVideo(status) { file ->
+                viewModelScope.launch {
+                    val res = VideoMediaHelper.saveVideoToGallery(appContext, file)
+                    showMessage(res.getOrElse { it.localizedMessage ?: "No se pudo guardar el video" })
+                }
+            }
+        } else if (!status.mediaUri.isNullOrBlank()) {
+            viewModelScope.launch {
+                val res = com.example.util.ImageGalleryAndShareHelper.saveImageToGallery(appContext, status.mediaUri)
+                showMessage(res.getOrElse { it.localizedMessage ?: "No se pudo guardar la foto" })
+            }
         }
     }
 
@@ -2675,7 +2802,8 @@ class FamilyViewModel(
     fun replyToStatus(status: FamilyStatusEntity, replyText: String, onOpenChat: (String) -> Unit) {
         val clean = replyText.trim()
         if (clean.isEmpty()) return
-        val quoteLabel = status.text.trim().ifBlank { "Foto de estado" }.take(60)
+        val fallbackLabel = if (status.isVideo) "🎬 Video de estado" else "📷 Foto de estado"
+        val quoteLabel = status.text.trim().ifBlank { fallbackLabel }.take(60)
         createOrOpenDirectChat(status.memberId, openAfter = true) { chatId ->
             sendTextMessage(chatId, "_Sobre tu estado \"$quoteLabel\":_\n$clean")
             onOpenChat(chatId)

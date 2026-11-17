@@ -411,11 +411,23 @@ internal object FirestoreMappers {
     fun toFamilyStatus(doc: DocumentSnapshot): FamilyStatusEntity? {
         if (!doc.exists()) return null
         val viewed = (doc.get("viewedByMemberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+        val mediaData = doc.getString("mediaData")
+        val rawType = doc.getString("mediaType")
+        val resolvedType = when {
+            !rawType.isNullOrBlank() -> rawType
+            mediaData?.startsWith("data:video") == true || mediaData?.startsWith("chunked:video") == true -> "VIDEO"
+            !mediaData.isNullOrBlank() -> "IMAGE"
+            else -> "TEXT"
+        }
         return FamilyStatusEntity(
             id = doc.id,
             memberId = doc.getString("memberId") ?: return null,
             text = doc.getString("text") ?: "",
-            mediaUri = doc.getString("mediaData"),
+            mediaUri = mediaData,
+            mediaType = resolvedType,
+            videoThumbnailData = doc.getString("videoThumbnailData"),
+            videoDurationSec = (doc.getLong("videoDurationSec") ?: 0L).toInt(),
+            chunkCount = (doc.getLong("chunkCount") ?: 0L).toInt(),
             backgroundHex = doc.getString("backgroundHex") ?: "#128C7E",
             createdAt = doc.getLong("timestamp") ?: 0L,
             expiresAt = doc.getLong("expiresAt") ?: 0L,
@@ -437,6 +449,10 @@ internal object FirestoreMappers {
             "memberId" to status.memberId,
             "text" to status.text.take(400),
             "mediaData" to status.mediaUri?.take(750_000),
+            "mediaType" to status.mediaType.take(16).ifBlank { null },
+            "videoThumbnailData" to status.videoThumbnailData?.take(150_000),
+            "videoDurationSec" to if (status.videoDurationSec > 0) status.videoDurationSec else null,
+            "chunkCount" to if (status.chunkCount > 0) status.chunkCount else null,
             "backgroundHex" to status.backgroundHex.take(16),
             "timestamp" to status.createdAt,
             "expiresAt" to status.expiresAt,

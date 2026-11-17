@@ -6,9 +6,11 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.location.Address
 import android.location.Geocoder
 import android.media.AudioManager
+import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.media.MediaRecorder
@@ -20,6 +22,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Base64
+import android.util.LruCache
 import androidx.core.content.FileProvider
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -43,8 +46,14 @@ data class GpsLocationResult(
 )
 
 object ImageCompressionHelper {
-    private const val MAX_DIM_PX = 960
-    private const val MAX_BYTES = 320 * 1024
+    private const val MAX_DIM_PX = 1280
+    private const val MAX_BYTES = 420 * 1024
+
+    private val byteArrayCache = object : LruCache<String, ByteArray>(36) {}
+    private val bitmapCache = object : LruCache<String, Bitmap>(24) {}
+
+    private fun cacheKeyFor(mediaData: String): String =
+        "${mediaData.length}_${mediaData.hashCode()}_${mediaData.takeLast(24)}"
 
     suspend fun compressToDataUri(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
         try {
@@ -54,6 +63,31 @@ object ImageCompressionHelper {
             }
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
 
+            var rotationDegrees = 0f
+            var flipHorizontal = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { exifStream ->
+                        val exif = ExifInterface(exifStream)
+                        when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                            ExifInterface.ORIENTATION_ROTATE_90 -> rotationDegrees = 90f
+                            ExifInterface.ORIENTATION_ROTATE_180 -> rotationDegrees = 180f
+                            ExifInterface.ORIENTATION_ROTATE_270 -> rotationDegrees = 270f
+                            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> flipHorizontal = true
+                            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                                rotationDegrees = 90f
+                                flipHorizontal = true
+                            }
+                            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                                rotationDegrees = 270f
+                                flipHorizontal = true
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+
             var sampleSize = 1
             val maxSide = max(bounds.outWidth, bounds.outHeight)
             while (maxSide / sampleSize > MAX_DIM_PX * 2) {
@@ -61,29 +95,40 @@ object ImageCompressionHelper {
             }
 
             val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-            val decoded = context.contentResolver.openInputStream(uri)?.use {
+            val rawDecoded = context.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, decodeOpts)
             } ?: return@withContext null
 
-            val scale = MAX_DIM_PX.toFloat() / max(decoded.width, decoded.height).coerceAtLeast(1)
-            val scaled = if (scale < 1f) {
-                Bitmap.createScaledBitmap(
-                    decoded,
-                    (decoded.width * scale).toInt().coerceAtLeast(1),
-                    (decoded.height * scale).toInt().coerceAtLeast(1),
-                    true
-                ).also { if (it != decoded) decoded.recycle() }
+            val oriented = if (rotationDegrees != 0f || flipHorizontal) {
+                val matrix = Matrix().apply {
+                    if (flipHorizontal) preScale(-1f, 1f)
+                    if (rotationDegrees != 0f) postRotate(rotationDegrees)
+                }
+                Bitmap.createBitmap(rawDecoded, 0, 0, rawDecoded.width, rawDecoded.height, matrix, true)
+                    .also { if (it != rawDecoded) rawDecoded.recycle() }
             } else {
-                decoded
+                rawDecoded
             }
 
-            var quality = 78
+            val scale = MAX_DIM_PX.toFloat() / max(oriented.width, oriented.height).coerceAtLeast(1)
+            val scaled = if (scale < 1f) {
+                Bitmap.createScaledBitmap(
+                    oriented,
+                    (oriented.width * scale).toInt().coerceAtLeast(1),
+                    (oriented.height * scale).toInt().coerceAtLeast(1),
+                    true
+                ).also { if (it != oriented) oriented.recycle() }
+            } else {
+                oriented
+            }
+
+            var quality = 82
             val baos = ByteArrayOutputStream()
             do {
                 baos.reset()
                 scaled.compress(Bitmap.CompressFormat.JPEG, quality, baos)
-                quality -= 12
-            } while (baos.size() > MAX_BYTES && quality >= 30)
+                quality -= 10
+            } while (baos.size() > MAX_BYTES && quality >= 32)
 
             scaled.recycle()
             val encoded = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
@@ -96,16 +141,44 @@ object ImageCompressionHelper {
     fun resolveCoilModel(mediaData: String?): Any? {
         if (mediaData.isNullOrBlank()) return null
         if (mediaData.startsWith("data:image")) {
+            val key = cacheKeyFor(mediaData)
+            synchronized(byteArrayCache) {
+                byteArrayCache.get(key)?.let { return it }
+            }
             val commaIdx = mediaData.indexOf(',')
             if (commaIdx <= 0) return null
             val b64 = mediaData.substring(commaIdx + 1)
             return try {
-                Base64.decode(b64, Base64.DEFAULT)
+                val bytes = Base64.decode(b64, Base64.DEFAULT)
+                synchronized(byteArrayCache) {
+                    byteArrayCache.put(key, bytes)
+                }
+                bytes
             } catch (_: Exception) {
                 null
             }
         }
         return mediaData
+    }
+
+    fun decodeToBitmap(mediaData: String?): Bitmap? {
+        if (mediaData.isNullOrBlank()) return null
+        if (!mediaData.startsWith("data:image")) return null
+        val key = cacheKeyFor(mediaData)
+        synchronized(bitmapCache) {
+            val cached = bitmapCache.get(key)
+            if (cached != null && !cached.isRecycled) return cached
+        }
+        val bytes = resolveCoilModel(mediaData) as? ByteArray ?: return null
+        return try {
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+            synchronized(bitmapCache) {
+                bitmapCache.put(key, bmp)
+            }
+            bmp
+        } catch (_: Exception) {
+            null
+        }
     }
 }
 
@@ -423,6 +496,16 @@ object CameraCaptureHelper {
             null
         }
     }
+
+    fun createTempVideoUri(context: Context): Uri? {
+        return try {
+            val dir = File(context.cacheDir, "videos_cache").apply { mkdirs() }
+            val file = File(dir, "vid_cam_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.mp4")
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        } catch (_: Exception) {
+            null
+        }
+    }
 }
 
 data class EncodedDocumentPayload(
@@ -585,8 +668,14 @@ data class EncodedVideoPayload(
     val chunks: List<String>
 )
 
+data class VideoPreviewInfo(
+    val thumbnailBitmap: Bitmap?,
+    val durationSec: Int,
+    val sizeBytes: Long
+)
+
 object VideoMediaHelper {
-    const val MAX_VIDEO_BYTES = 5 * 1024 * 1024 // Up to 5 MB for short chat videos
+    const val MAX_VIDEO_BYTES = 5 * 1024 * 1024 // Up to 5 MB for short chat/status videos
 
     fun getCachedVideoFile(context: Context, messageId: String, fileName: String?): File {
         val cleanName = (fileName ?: "video_$messageId.mp4")
@@ -594,6 +683,50 @@ object VideoMediaHelper {
             .let { if (it.contains('.')) it else "$it.mp4" }
         val dir = File(context.cacheDir, "videos_cache").apply { mkdirs() }
         return File(dir, "${messageId.takeLast(6)}_$cleanName")
+    }
+
+    suspend fun extractVideoPreview(context: Context, uri: Uri): VideoPreviewInfo = withContext(Dispatchers.IO) {
+        var sizeBytes = 0L
+        try {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (idx >= 0 && !cursor.isNull(idx)) sizeBytes = cursor.getLong(idx)
+                }
+            }
+        } catch (_: Exception) {
+        }
+        var durationSec = 1
+        var thumb: Bitmap? = null
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, uri)
+            val durMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 1000L
+            durationSec = (durMs / 1000L).toInt().coerceAtLeast(1)
+            val frame = retriever.getFrameAtTime(200_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: retriever.getFrameAtTime()
+            if (frame != null) {
+                val maxSide = max(frame.width, frame.height).coerceAtLeast(1)
+                val scale = (640f / maxSide).coerceAtMost(1f)
+                thumb = if (scale < 1f) {
+                    Bitmap.createScaledBitmap(
+                        frame,
+                        (frame.width * scale).toInt().coerceAtLeast(1),
+                        (frame.height * scale).toInt().coerceAtLeast(1),
+                        true
+                    ).also { if (it != frame) frame.recycle() }
+                } else {
+                    frame
+                }
+            }
+        } catch (_: Exception) {
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
+        VideoPreviewInfo(thumbnailBitmap = thumb, durationSec = durationSec, sizeBytes = sizeBytes)
     }
 
     suspend fun readAndEncodeVideo(context: Context, uri: Uri): Result<EncodedVideoPayload> =

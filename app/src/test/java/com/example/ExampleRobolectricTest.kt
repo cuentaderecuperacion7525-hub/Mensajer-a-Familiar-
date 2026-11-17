@@ -275,6 +275,24 @@ class ExampleRobolectricTest {
     )
     assertEquals(0, chunkEntity.chunkIndex)
     assertTrue(com.example.data.local.PreferencesManager.DEFAULT_TURN_URL.contains("turn:openrelay.metered.ca"))
+
+    val videoStatus = com.example.data.model.FamilyStatusEntity(
+      id = "st_vid_1",
+      memberId = "m_papa",
+      text = "Video de estado",
+      mediaUri = "chunked:video/mp4",
+      mediaType = "VIDEO",
+      videoThumbnailData = "data:image/jpeg;base64,/9j/4AAQ=",
+      videoDurationSec = 9,
+      chunkCount = 2
+    )
+    assertTrue(videoStatus.isVideo)
+    assertEquals(9, videoStatus.videoDurationSec)
+    assertEquals(2, videoStatus.chunkCount)
+
+    val model1 = com.example.util.ImageCompressionHelper.resolveCoilModel("data:image/jpeg;base64,/9j/4AAQ=")
+    val model2 = com.example.util.ImageCompressionHelper.resolveCoilModel("data:image/jpeg;base64,/9j/4AAQ=")
+    org.junit.Assert.assertSame(model1, model2)
   }
 }
 

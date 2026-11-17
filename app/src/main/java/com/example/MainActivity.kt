@@ -405,6 +405,10 @@ fun FamiChatApp(
                         onUpdateOwnProfile = vm::updateOwnProfileDetails,
                         onPublishTextStatus = vm::publishTextStatus,
                         onPublishPhotoStatus = vm::publishPhotoStatus,
+                        onPublishVideoStatus = vm::publishVideoStatus,
+                        onPrepareStatusVideo = vm::prepareStatusVideo,
+                        onSaveStatusMediaToGallery = vm::saveStatusMediaToGallery,
+                        mediaTransferProgress = mediaTransferProgress,
                         onMarkStatusViewed = vm::markStatusViewed,
                         onDeleteStatus = vm::deleteStatus,
                         onReplyToStatus = { st, replyText ->
