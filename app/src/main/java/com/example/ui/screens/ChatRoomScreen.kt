@@ -51,9 +51,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -97,6 +99,7 @@ import androidx.compose.material.icons.outlined.SentimentSatisfied
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -105,6 +108,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -117,6 +121,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -285,6 +290,7 @@ fun ChatRoomScreen(
     var viewerImageUri by remember { mutableStateOf<String?>(null) }
     var viewerVideoFile by remember { mutableStateOf<File?>(null) }
     var viewerVideoCaption by remember { mutableStateOf("") }
+    var showPrivacyInfoSheet by remember { mutableStateOf(false) }
 
     // Capture initial unread incoming messages snapshot upon opening this chat (before they are marked read)
     var initialUnreadMessageId by remember(chatUi.chat.id) { mutableStateOf<String?>(null) }
@@ -428,6 +434,7 @@ fun ChatRoomScreen(
                 keyboardController?.hide()
                 focusManager.clearFocus()
             }
+            showPrivacyInfoSheet -> showPrivacyInfoSheet = false
             showHeaderMenu -> showHeaderMenu = false
             showAttachmentMenu -> showAttachmentMenu = false
             showEmojiDrawer -> showEmojiDrawer = false
@@ -751,51 +758,109 @@ fun ChatRoomScreen(
                                 .fillMaxSize()
                                 .padding(horizontal = 24.dp)
                                 .testTag("empty_chat_greeting_state"),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            MemberAvatar(
-                                emoji = chatUi.displayEmoji,
-                                colorHex = chatUi.displayColorHex,
-                                photoData = chatUi.displayPhotoData,
-                                size = 88.dp,
-                                isOnline = chatUi.isOnline,
-                                showOnlineDot = false,
-                                nameForInitials = chatUi.displayTitle,
-                                isGroupAvatar = chatUi.chat.type == ChatType.GROUP
-                            )
-                            Spacer(modifier = Modifier.height(18.dp))
-                            Text(
-                                text = "Aún no hay mensajes con ${chatUi.displayTitle}",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "Envíale un saludo para empezar.",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(22.dp))
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                listOf("¡Hola!", "¿Cómo estás?", "Te quiero").forEach { greeting ->
-                                    OutlinedButton(
-                                        onClick = { onSendText(greeting, null) },
-                                        shape = RoundedCornerShape(50),
-                                        border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary),
-                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-                                        modifier = Modifier.testTag("quick_greeting_${greeting.hashCode()}")
+                            if (messages.isEmpty()) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = Color(0xFFE4EDFC),
+                                    modifier = Modifier
+                                        .widthIn(max = 300.dp)
+                                        .testTag("empty_chat_privacy_notice")
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
-                                        Text(
-                                            text = greeting,
-                                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.primary
+                                        Icon(
+                                            imageVector = Icons.Filled.Lock,
+                                            contentDescription = "Chat privado",
+                                            tint = Color(0xFF1A5FD4),
+                                            modifier = Modifier.size(16.dp)
                                         )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = "Los mensajes y las llamadas de este chat son privados. Solo las personas de tu familia en este chat pueden acceder a ellos.",
+                                            fontSize = 12.sp,
+                                            lineHeight = 16.sp,
+                                            color = Color(0xFF1B1F2A),
+                                            textAlign = TextAlign.Center
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Más información",
+                                            fontSize = 12.sp,
+                                            lineHeight = 16.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF1A5FD4),
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { showPrivacyInfoSheet = true }
+                                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                                .testTag("empty_chat_privacy_learn_more")
+                                        )
+                                    }
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(vertical = 16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    MemberAvatar(
+                                        emoji = chatUi.displayEmoji,
+                                        colorHex = chatUi.displayColorHex,
+                                        photoData = chatUi.displayPhotoData,
+                                        size = 88.dp,
+                                        isOnline = chatUi.isOnline,
+                                        showOnlineDot = false,
+                                        nameForInitials = chatUi.displayTitle,
+                                        isGroupAvatar = chatUi.chat.type == ChatType.GROUP
+                                    )
+                                    Spacer(modifier = Modifier.height(18.dp))
+                                    Text(
+                                        text = "Aún no hay mensajes con ${chatUi.displayTitle}",
+                                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Envíale un saludo para empezar.",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(22.dp))
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        listOf("¡Hola!", "¿Cómo estás?", "Te quiero").forEach { greeting ->
+                                            OutlinedButton(
+                                                onClick = { onSendText(greeting, null) },
+                                                shape = RoundedCornerShape(50),
+                                                border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary),
+                                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                                                modifier = Modifier.testTag("quick_greeting_${greeting.hashCode()}")
+                                            ) {
+                                                Text(
+                                                    text = greeting,
+                                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1711,6 +1776,58 @@ fun ChatRoomScreen(
             onSelectWallpaper = onSelectWallpaper,
             onDismiss = { showWallpaperDialog = false }
         )
+    }
+
+    if (showPrivacyInfoSheet) {
+        val privacySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showPrivacyInfoSheet = false },
+            sheetState = privacySheetState,
+            modifier = Modifier.testTag("empty_chat_privacy_sheet")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 8.dp)
+                    .padding(bottom = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFFE4EDFC),
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Filled.Lock,
+                            contentDescription = null,
+                            tint = Color(0xFF1A5FD4),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = "Privacidad en FamiChat",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "FamiChat es un espacio solo para tu familia. Los mensajes y las llamadas están protegidos mientras viajan por internet y solo pueden verlos las personas que forman parte de este chat.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Button(
+                    onClick = { showPrivacyInfoSheet = false },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("empty_chat_privacy_sheet_close")
+                ) {
+                    Text("Entendido")
+                }
+            }
+        }
     }
 
     if (showClearChatConfirmDialog) {

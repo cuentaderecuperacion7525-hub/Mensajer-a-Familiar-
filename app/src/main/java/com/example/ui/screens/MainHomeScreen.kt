@@ -1279,7 +1279,8 @@ private fun ChatsListSection(
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(top = 4.dp, bottom = 84.dp)
+                contentPadding = PaddingValues(top = 4.dp, bottom = 84.dp),
+                modifier = Modifier.testTag("chats_lazy_column")
             ) {
                 items(filtered, key = { it.chat.id }) { item ->
                     ChatRowItem(
@@ -1320,19 +1321,21 @@ private fun ChatRowItem(
         item.lastMessagePreview.isBlank()
 
     val cleanStatus = item.subtitleStatus.trim()
-    val hasExplicitMemberStatus = !isGroup && (
-        cleanStatus.equals("En línea", ignoreCase = true) ||
-            cleanStatus.equals("En casa", ignoreCase = true) ||
-            cleanStatus.equals("Ocupado", ignoreCase = true) ||
-            cleanStatus.equals("En el trabajo", ignoreCase = true) ||
-            cleanStatus.equals("En la escuela", ignoreCase = true) ||
-            cleanStatus.startsWith("Escribiendo", ignoreCase = true) ||
+    val rightPresenceText = if (!isGroup) {
+        item.rightStatusText.trim().ifBlank {
+            cleanStatus.ifBlank { "No se ha conectado" }
+        }
+    } else {
+        ""
+    }
+    val isLiveChatTyping = !isGroup && (
+        cleanStatus.startsWith("Escribiendo", ignoreCase = true) ||
             cleanStatus.startsWith("Grabando", ignoreCase = true)
         )
 
     val secondaryLineText = when {
+        isLiveChatTyping -> cleanStatus
         !isEmptyThread -> item.lastMessagePreview
-        hasExplicitMemberStatus -> cleanStatus
         else -> "Toca para saludar"
     }
 
@@ -1344,6 +1347,13 @@ private fun ChatRowItem(
             cleanStatus.equals("En la escuela", ignoreCase = true) -> amberStatus
         item.isOnline -> OnlineGreen
         else -> Color(0xFF9AA0A6)
+    }
+
+    val rightPresenceColor = when {
+        item.isOnline && rightPresenceText.equals("En línea", ignoreCase = true) -> OnlineGreen
+        item.isOnline -> brandBlue
+        rightPresenceText.equals("No se ha conectado", ignoreCase = true) -> textSecondary.copy(alpha = 0.75f)
+        else -> textSecondary
     }
 
     Box {
@@ -1377,23 +1387,27 @@ private fun ChatRowItem(
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .alignByBaseline(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = item.displayTitle,
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontFamily = InterFontFamily,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 20.sp
                             ),
                             color = textPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .alignByBaseline()
                         )
                         if (item.isMuted) {
                             Spacer(modifier = Modifier.width(5.dp))
@@ -1405,33 +1419,60 @@ private fun ChatRowItem(
                             )
                         }
                     }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        if (item.isPinned) {
-                            Text(
-                                text = "Fijado",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = InterFontFamily,
-                                    fontWeight = FontWeight.Medium
-                                ),
-                                color = textSecondary
-                            )
-                        }
-                        if (rightTimeText.isNotBlank()) {
-                            Text(
-                                text = rightTimeText,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = InterFontFamily,
-                                    fontWeight = if (item.unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal
-                                ),
-                                color = if (item.unreadCount > 0) brandBlue else textSecondary
-                            )
+                    if (item.isPinned || rightTimeText.isNotBlank()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.alignByBaseline()
+                        ) {
+                            if (item.isPinned) {
+                                Text(
+                                    text = "Fijado",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = InterFontFamily,
+                                        fontWeight = FontWeight.Medium,
+                                        lineHeight = 14.sp
+                                    ),
+                                    color = textSecondary,
+                                    modifier = Modifier.alignByBaseline()
+                                )
+                            }
+                            if (rightTimeText.isNotBlank()) {
+                                Text(
+                                    text = rightTimeText,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = InterFontFamily,
+                                        fontWeight = if (item.unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal,
+                                        lineHeight = 14.sp
+                                    ),
+                                    color = if (item.unreadCount > 0) brandBlue else textSecondary,
+                                    modifier = Modifier.alignByBaseline()
+                                )
+                            }
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(2.dp))
+                if (rightPresenceText.isNotBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Text(
+                            text = rightPresenceText,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = InterFontFamily,
+                                fontWeight = if (item.isOnline) FontWeight.SemiBold else FontWeight.Normal,
+                                lineHeight = 14.sp
+                            ),
+                            color = rightPresenceColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag("chat_presence_${item.chat.id}")
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(1.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -1446,7 +1487,11 @@ private fun ChatRowItem(
                             fontFamily = InterFontFamily,
                             fontWeight = if (item.unreadCount > 0 && !isEmptyThread) FontWeight.Bold else FontWeight.Normal
                         ),
-                        color = if (item.unreadCount > 0 && !isEmptyThread) textPrimary else textSecondary,
+                        color = when {
+                            isLiveChatTyping -> brandBlue
+                            item.unreadCount > 0 && !isEmptyThread -> textPrimary
+                            else -> textSecondary
+                        },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)

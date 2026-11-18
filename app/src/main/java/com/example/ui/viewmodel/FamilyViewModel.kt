@@ -85,7 +85,8 @@ data class ChatThreadUi(
     val isLastMessageFromMe: Boolean,
     val participants: List<FamilyMemberEntity>,
     val isPinned: Boolean = false,
-    val isMuted: Boolean = false
+    val isMuted: Boolean = false,
+    val rightStatusText: String = ""
 )
 
 data class ActiveCallUiState(
@@ -470,18 +471,6 @@ class FamilyViewModel(
     private var lastSentPresenceAt: Long = 0L
     private var lastSyncedMemberUids: Set<String> = emptySet()
 
-    private fun formatCompactMemberTime(isOnline: Boolean, liveStatusAt: Long, nowMs: Long): String {
-        if (isOnline) return "ahora"
-        if (liveStatusAt <= 0L) return ""
-        val diffMin = ((nowMs - liveStatusAt).coerceAtLeast(0L) / 60_000L).toInt()
-        return when {
-            diffMin < 1 -> "ahora"
-            diffMin < 60 -> "$diffMin min"
-            diffMin < 1440 -> "${diffMin / 60} h"
-            else -> "${diffMin / 1440} d"
-        }
-    }
-
     private val baseChatPreviews: Flow<List<ChatThreadUi>> = combine(
         rawChats,
         allMessages,
@@ -564,11 +553,15 @@ class FamilyViewModel(
             }
 
             val preview = buildLastMessagePreview(lastMsg, membersMap, currentId, chat.type)
-            val timeLabel = when {
-                lastMsg != null -> TimeFormatters.formatHourMinute(lastMsg.timestamp)
-                chat.type == ChatType.DIRECT && otherMember != null ->
-                    formatCompactMemberTime(isOnline, otherMember.liveStatusAt, now)
-                else -> ""
+            val timeLabel = if (lastMsg != null) {
+                TimeFormatters.formatHourMinute(lastMsg.timestamp)
+            } else {
+                ""
+            }
+            val directRightPresence = if (chat.type == ChatType.DIRECT) {
+                otherMember?.lastSeenText?.trim().orEmpty().ifBlank { "No se ha conectado" }
+            } else {
+                ""
             }
 
             ChatThreadUi(
@@ -585,7 +578,8 @@ class FamilyViewModel(
                 unreadCount = unreadCount,
                 lastMessageStatus = lastMsg?.status,
                 isLastMessageFromMe = lastMsg?.senderId == currentId,
-                participants = participants
+                participants = participants,
+                rightStatusText = directRightPresence
             )
         }
 
@@ -602,6 +596,7 @@ class FamilyViewModel(
                     participantIdsJson = JsonHelpers.encodeStringList(listOf(currentId, other.id)),
                     updatedAt = other.liveStatusAt.coerceAtLeast(1L)
                 )
+                val resolvedPresenceText = other.lastSeenText.trim().ifBlank { "No se ha conectado" }
                 ChatThreadUi(
                     chat = virtualChat,
                     displayTitle = other.name,
@@ -610,13 +605,14 @@ class FamilyViewModel(
                     displayPhotoData = other.avatarPhotoData,
                     partnerBioText = other.bioText,
                     isOnline = other.isOnline,
-                    subtitleStatus = other.lastSeenText,
+                    subtitleStatus = resolvedPresenceText,
                     lastMessagePreview = "Sin mensajes aún",
-                    lastMessageTime = formatCompactMemberTime(other.isOnline, other.liveStatusAt, now),
+                    lastMessageTime = "",
                     unreadCount = 0,
                     lastMessageStatus = null,
                     isLastMessageFromMe = false,
-                    participants = listOfNotNull(meMember, other)
+                    participants = listOfNotNull(meMember, other),
+                    rightStatusText = resolvedPresenceText
                 )
             }
 

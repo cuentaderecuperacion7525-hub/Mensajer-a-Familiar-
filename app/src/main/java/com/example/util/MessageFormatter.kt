@@ -82,6 +82,22 @@ object TimeFormatters {
     fun formatDateTime(timestamp: Long): String =
         SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(timestamp))
 
+    fun formatShortDayMonth(timestamp: Long, nowMs: Long = System.currentTimeMillis()): String {
+        val spanish = Locale.forLanguageTag("es-ES")
+        val calNow = Calendar.getInstance().apply { timeInMillis = nowMs }
+        val calThen = Calendar.getInstance().apply { timeInMillis = timestamp }
+        val monthShort = SimpleDateFormat("MMM", spanish).format(Date(timestamp))
+            .lowercase(spanish)
+            .replace(".", "")
+            .trim()
+        val day = calThen.get(Calendar.DAY_OF_MONTH)
+        return if (calNow.get(Calendar.YEAR) == calThen.get(Calendar.YEAR)) {
+            "$day $monthShort ${formatHourMinute(timestamp)}"
+        } else {
+            "$day $monthShort ${calThen.get(Calendar.YEAR)}"
+        }
+    }
+
     fun formatLastSeen(timestamp: Long, nowMs: Long = System.currentTimeMillis()): String {
         if (timestamp <= 0L) return "No se ha conectado"
         val diffMs = (nowMs - timestamp).coerceAtLeast(0L)
@@ -105,8 +121,7 @@ object TimeFormatters {
         if (isYesterday) {
             return "Últ. vez ayer ${formatHourMinute(timestamp)}"
         }
-        val datePart = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(timestamp))
-        return "Últ. vez $datePart"
+        return "Últ. vez ${formatShortDayMonth(timestamp, nowMs)}"
     }
 
     fun formatDuration(seconds: Int): String {

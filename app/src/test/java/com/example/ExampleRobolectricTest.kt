@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -739,6 +740,292 @@ class ExampleRobolectricTest {
     // 3. Back directly from chat -> calls onBack()
     dispatchSystemBack()
     assertTrue(leftChat)
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `chats list displays online, short-date last seen, and never connected on the right side of direct rows`() {
+    val me = sampleMember(id = "m_me", name = "José Manuel", isAdmin = true)
+    val mama = sampleMember(id = "m_mama", name = "Mamá")
+    val hijo1 = sampleMember(id = "m_h1", name = "Cristian Fernando")
+    val hijo2 = sampleMember(id = "m_h2", name = "Cristopher")
+
+    val groupPreview = com.example.ui.viewmodel.ChatThreadUi(
+      chat = com.example.data.model.ChatThreadEntity(
+        id = "chat_general",
+        type = com.example.data.model.ChatType.GROUP,
+        title = "Mi Familia",
+        avatarColorHex = "#1A5FD4",
+        avatarEmoji = "🏠",
+        participantIdsJson = "[\"${me.id}\",\"${mama.id}\"]"
+      ),
+      displayTitle = "Mi Familia",
+      displayEmoji = "🏠",
+      displayColorHex = "#1A5FD4",
+      isOnline = false,
+      subtitleStatus = "2 miembros",
+      lastMessagePreview = "Sin mensajes aún",
+      lastMessageTime = "",
+      unreadCount = 0,
+      lastMessageStatus = null,
+      isLastMessageFromMe = false,
+      participants = listOf(me, mama),
+      rightStatusText = ""
+    )
+
+    val onlineWithMessage = com.example.ui.viewmodel.ChatThreadUi(
+      chat = com.example.data.model.ChatThreadEntity(
+        id = "direct_mama",
+        type = com.example.data.model.ChatType.DIRECT,
+        title = "Mamá",
+        avatarColorHex = "#6B4FD8",
+        avatarEmoji = "👩🏽",
+        participantIdsJson = "[\"${me.id}\",\"${mama.id}\"]"
+      ),
+      displayTitle = "Mamá",
+      displayEmoji = "👩🏽",
+      displayColorHex = "#6B4FD8",
+      isOnline = true,
+      subtitleStatus = "En línea",
+      lastMessagePreview = "Ya llegué a la casa",
+      lastMessageTime = "12:04",
+      unreadCount = 1,
+      lastMessageStatus = null,
+      isLastMessageFromMe = false,
+      participants = listOf(me, mama),
+      rightStatusText = "En línea"
+    )
+
+    val oldLastSeenEmpty = com.example.ui.viewmodel.ChatThreadUi(
+      chat = com.example.data.model.ChatThreadEntity(
+        id = "virtual_direct_${hijo1.id}",
+        type = com.example.data.model.ChatType.DIRECT,
+        title = hijo1.name,
+        avatarColorHex = "#C94521",
+        avatarEmoji = "🧑🏽",
+        participantIdsJson = "[\"${me.id}\",\"${hijo1.id}\"]"
+      ),
+      displayTitle = hijo1.name,
+      displayEmoji = "🧑🏽",
+      displayColorHex = "#C94521",
+      isOnline = false,
+      subtitleStatus = "Últ. vez 15 nov 14:30",
+      lastMessagePreview = "Sin mensajes aún",
+      lastMessageTime = "",
+      unreadCount = 0,
+      lastMessageStatus = null,
+      isLastMessageFromMe = false,
+      participants = listOf(me, hijo1),
+      rightStatusText = "Últ. vez 15 nov 14:30"
+    )
+
+    val neverConnectedEmpty = com.example.ui.viewmodel.ChatThreadUi(
+      chat = com.example.data.model.ChatThreadEntity(
+        id = "virtual_direct_${hijo2.id}",
+        type = com.example.data.model.ChatType.DIRECT,
+        title = hijo2.name,
+        avatarColorHex = "#B0306A",
+        avatarEmoji = "🧑🏽",
+        participantIdsJson = "[\"${me.id}\",\"${hijo2.id}\"]"
+      ),
+      displayTitle = hijo2.name,
+      displayEmoji = "🧑🏽",
+      displayColorHex = "#B0306A",
+      isOnline = false,
+      subtitleStatus = "No se ha conectado",
+      lastMessagePreview = "Sin mensajes aún",
+      lastMessageTime = "",
+      unreadCount = 0,
+      lastMessageStatus = null,
+      isLastMessageFromMe = false,
+      participants = listOf(me, hijo2),
+      rightStatusText = "No se ha conectado"
+    )
+
+    composeTestRule.setContent {
+      MainHomeScreen(
+        activeMember = me,
+        allMembers = listOf(me, mama, hijo1, hijo2),
+        userGroupsCount = 1,
+        isDarkTheme = false,
+        notificationsEnabled = true,
+        updateRepoSlug = "",
+        updateState = AppUpdateUiState.Idle,
+        selectedTab = MainTab.CHATS,
+        searchQuery = "",
+        chatPreviews = listOf(groupPreview, onlineWithMessage, oldLastSeenEmpty, neverConnectedEmpty),
+        statuses = emptyList(),
+        calls = emptyList(),
+        shoppingItems = emptyList(),
+        events = emptyList(),
+        notes = emptyList(),
+        snackbarMessage = null,
+        onClearSnackbar = {},
+        onToggleTheme = {},
+        onToggleNotifications = {},
+        onUpdateOwnProfile = { _, _, _, _, _, _, _ -> },
+        onPublishTextStatus = { _, _ -> },
+        onPublishPhotoStatus = { _, _ -> },
+        onMarkStatusViewed = {},
+        onDeleteStatus = {},
+        onReplyToStatus = { _, _ -> },
+        onCheckForUpdate = {},
+        onSaveUpdateRepoSlug = {},
+        onDownloadUpdate = {},
+        onResetUpdateState = {},
+        onSelectTab = {},
+        onSearchChange = {},
+        onOpenChat = {},
+        onStartDirectChat = {},
+        onSwitchProfile = {},
+        onOpenAdminPanel = {},
+        onStartCall = { _, _, _, _, _ -> },
+        onAddShoppingItem = { _, _, _ -> },
+        onToggleShoppingItem = {},
+        onDeleteShoppingItem = {},
+        onClearCheckedShopping = {},
+        onAddEvent = { _, _, _, _, _, _ -> },
+        onDeleteEvent = {},
+        onSaveNote = { _, _, _, _, _ -> },
+        onDeleteNote = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    // Group row should not render direct presence badge
+    composeTestRule.onNodeWithTag("chat_presence_chat_general", useUnmergedTree = true).assertDoesNotExist()
+    // Direct with messages shows both message time, message preview, and right-aligned "En línea"
+    composeTestRule.onNodeWithTag("chats_lazy_column").performScrollToIndex(1)
+    composeTestRule.waitForIdle()
+    val nameBounds = composeTestRule.onNodeWithText("Mamá", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+    val timeBounds = composeTestRule.onNodeWithText("12:04", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    val previewBounds = composeTestRule.onNodeWithText("Ya llegué a la casa", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    val presenceBounds = composeTestRule.onNodeWithTag("chat_presence_direct_mama", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    composeTestRule.onNodeWithText("En línea", useUnmergedTree = true).assertIsDisplayed()
+    assertTrue("La hora debe estar alineada verticalmente con el nombre", kotlin.math.abs(timeBounds.top - nameBounds.top) < 12f)
+    assertTrue("La conexión debe mostrarse debajo de la hora", presenceBounds.top >= timeBounds.bottom - 2f)
+    assertTrue("La conexión debe quedar arriba del avance de mensaje", presenceBounds.bottom <= previewBounds.top + 2f)
+    assertTrue("La conexión debe quedar al lado derecho", presenceBounds.right >= timeBounds.right - 8f)
+    // Older last-seen date formatted with short month
+    composeTestRule.onNodeWithTag("chats_lazy_column").performScrollToIndex(2)
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("chat_presence_virtual_direct_${hijo1.id}", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Últ. vez 15 nov 14:30", useUnmergedTree = true).assertIsDisplayed()
+    // Never connected contact shows discrete label on right while keeping "Toca para saludar"
+    composeTestRule.onNodeWithTag("chats_lazy_column").performScrollToIndex(3)
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("chat_presence_virtual_direct_${hijo2.id}", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("No se ha conectado", useUnmergedTree = true).assertIsDisplayed()
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `empty chat displays privacy notice with learn more sheet, closes sheet on back, and hides once messages exist`() {
+    val me = sampleMember(id = "m_me", name = "José Manuel", isAdmin = true)
+    val mama = sampleMember(id = "m_mama", name = "Mamá")
+    val chatUi = com.example.ui.viewmodel.ChatThreadUi(
+      chat = com.example.data.model.ChatThreadEntity(
+        id = "direct_mama",
+        type = com.example.data.model.ChatType.DIRECT,
+        title = "Mamá",
+        avatarColorHex = "#6B4FD8",
+        avatarEmoji = "👩🏽",
+        participantIdsJson = "[\"${me.id}\",\"${mama.id}\"]"
+      ),
+      displayTitle = "Mamá",
+      displayEmoji = "👩🏽",
+      displayColorHex = "#6B4FD8",
+      isOnline = true,
+      subtitleStatus = "En línea",
+      lastMessagePreview = "Sin mensajes aún",
+      lastMessageTime = "",
+      unreadCount = 0,
+      lastMessageStatus = null,
+      isLastMessageFromMe = false,
+      participants = listOf(me, mama),
+      rightStatusText = "En línea"
+    )
+    val messagesState = androidx.compose.runtime.mutableStateOf<List<com.example.data.model.ChatMessageEntity>>(emptyList())
+    var leftChat = false
+
+    composeTestRule.setContent {
+      com.example.ui.screens.ChatRoomScreen(
+        chatUi = chatUi,
+        activeMember = me,
+        allMembers = listOf(me, mama),
+        messages = messagesState.value,
+        voiceRecording = com.example.ui.viewmodel.VoiceRecordingState(),
+        playingVoiceMessageId = null,
+        playingVoiceProgress = 0f,
+        snackbarMessage = null,
+        onClearSnackbar = {},
+        onBack = { leftChat = true },
+        onSendText = { _, _ -> },
+        onSendImage = { _, _, _ -> },
+        onSendLocation = { _, _, _, _, _, _ -> },
+        onSendPoll = { _, _ -> },
+        onVotePoll = { _, _ -> },
+        onEditMessage = { _, _ -> },
+        onToggleReaction = { _, _ -> },
+        onTogglePin = {},
+        onDeleteForMe = {},
+        onDeleteForEveryone = {},
+        onStartVoiceRecording = {},
+        onCancelVoiceRecording = {},
+        onSendVoiceRecording = {},
+        onToggleVoicePlay = {},
+        onStartCall = {},
+        onTypingChange = {},
+        onToggleTheme = {},
+        onGoToHomePanel = {},
+        onSwitchProfile = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    // 1. Empty chat shows notice and exact copy (without prohibited wording)
+    composeTestRule.onNodeWithTag("empty_chat_privacy_notice").assertIsDisplayed()
+    composeTestRule.onNodeWithText(
+      "Los mensajes y las llamadas de este chat son privados. Solo las personas de tu familia en este chat pueden acceder a ellos."
+    ).assertIsDisplayed()
+    assertEquals(
+      0,
+      composeTestRule.onAllNodesWithText("extremo a extremo", substring = true, ignoreCase = true)
+        .fetchSemanticsNodes().size
+    )
+
+    // 2. Tap "Más información" -> opens bottom sheet
+    composeTestRule.onNodeWithTag("empty_chat_privacy_learn_more").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("empty_chat_privacy_sheet").assertIsDisplayed()
+    composeTestRule.onNodeWithText(
+      "FamiChat es un espacio solo para tu familia. Los mensajes y las llamadas están protegidos mientras viajan por internet y solo pueden verlos las personas que forman parte de este chat."
+    ).assertIsDisplayed()
+    assertEquals(
+      0,
+      composeTestRule.onAllNodesWithText("extremo a extremo", substring = true, ignoreCase = true)
+        .fetchSemanticsNodes().size
+    )
+
+    // 3. System back closes the bottom sheet without leaving the chat
+    dispatchSystemBack()
+    composeTestRule.onNodeWithTag("empty_chat_privacy_sheet").assertDoesNotExist()
+    assertFalse(leftChat)
+
+    // 4. First message arrives/is sent -> privacy notice disappears immediately
+    composeTestRule.runOnUiThread {
+      messagesState.value = listOf(
+        com.example.data.model.ChatMessageEntity(
+          id = "msg_first",
+          chatId = "direct_mama",
+          senderId = mama.id,
+          text = "Hola!",
+          timestamp = 1_700_000_000_000L
+        )
+      )
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("empty_chat_privacy_notice").assertDoesNotExist()
   }
 }
 

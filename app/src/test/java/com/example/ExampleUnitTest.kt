@@ -245,4 +245,33 @@ class ExampleUnitTest {
     // Editing same member keeps passing
     assertTrue(validateMemberBeforeSave(all, "m_mama", "Mamá", "Mamá", isCallerAdmin = true) == null)
   }
+
+  @Test
+  fun `formatLastSeen shows short Spanish day and month when older than yesterday`() {
+    val calNow = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 18, 15, 10, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val calSameYearOlder = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 15, 14, 30, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val calPrevYear = java.util.Calendar.getInstance().apply {
+      set(2025, java.util.Calendar.OCTOBER, 9, 8, 5, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+
+    assertEquals(
+      "Últ. vez 15 nov 14:30",
+      TimeFormatters.formatLastSeen(calSameYearOlder.timeInMillis, calNow.timeInMillis)
+    )
+    assertEquals(
+      "Últ. vez 9 oct 2025",
+      TimeFormatters.formatLastSeen(calPrevYear.timeInMillis, calNow.timeInMillis)
+    )
+    assertEquals(
+      "No se ha conectado",
+      TimeFormatters.formatLastSeen(0L, calNow.timeInMillis)
+    )
+  }
 }
