@@ -19,7 +19,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.MenuItemCompat
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,11 +50,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -109,7 +106,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -760,108 +756,46 @@ fun ChatRoomScreen(
                                 .testTag("empty_chat_greeting_state"),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            if (messages.isEmpty()) {
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = Color(0xFFE4EDFC),
-                                    modifier = Modifier
-                                        .widthIn(max = 300.dp)
-                                        .testTag("empty_chat_privacy_notice")
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(12.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Lock,
-                                            contentDescription = "Chat privado",
-                                            tint = Color(0xFF1A5FD4),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            text = "Los mensajes y las llamadas de este chat son privados. Solo las personas de tu familia en este chat pueden acceder a ellos.",
-                                            fontSize = 12.sp,
-                                            lineHeight = 16.sp,
-                                            color = Color(0xFF1B1F2A),
-                                            textAlign = TextAlign.Center
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = "Más información",
-                                            fontSize = 12.sp,
-                                            lineHeight = 16.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Color(0xFF1A5FD4),
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable { showPrivacyInfoSheet = true }
-                                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                                                .testTag("empty_chat_privacy_learn_more")
-                                        )
-                                    }
-                                }
-                            }
-                            Box(
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color(0xFFE4EDFC),
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxWidth(),
-                                contentAlignment = Alignment.Center
+                                    .widthIn(max = 300.dp)
+                                    .testTag("empty_chat_privacy_notice")
                             ) {
                                 Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(vertical = 16.dp),
+                                    modifier = Modifier.padding(12.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    MemberAvatar(
-                                        emoji = chatUi.displayEmoji,
-                                        colorHex = chatUi.displayColorHex,
-                                        photoData = chatUi.displayPhotoData,
-                                        size = 88.dp,
-                                        isOnline = chatUi.isOnline,
-                                        showOnlineDot = false,
-                                        nameForInitials = chatUi.displayTitle,
-                                        isGroupAvatar = chatUi.chat.type == ChatType.GROUP
-                                    )
-                                    Spacer(modifier = Modifier.height(18.dp))
-                                    Text(
-                                        text = "Aún no hay mensajes con ${chatUi.displayTitle}",
-                                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        textAlign = TextAlign.Center
+                                    Icon(
+                                        imageVector = Icons.Filled.Lock,
+                                        contentDescription = "Chat privado",
+                                        tint = Color(0xFF1A5FD4),
+                                        modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
-                                        text = "Envíale un saludo para empezar.",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        text = "Los mensajes y las llamadas de este chat son privados. Solo las personas de tu familia en este chat pueden acceder a ellos.",
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp,
+                                        color = Color(0xFF1B1F2A),
                                         textAlign = TextAlign.Center
                                     )
-                                    Spacer(modifier = Modifier.height(22.dp))
-                                    FlowRow(
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        listOf("¡Hola!", "¿Cómo estás?", "Te quiero").forEach { greeting ->
-                                            OutlinedButton(
-                                                onClick = { onSendText(greeting, null) },
-                                                shape = RoundedCornerShape(50),
-                                                border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary),
-                                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-                                                modifier = Modifier.testTag("quick_greeting_${greeting.hashCode()}")
-                                            ) {
-                                                Text(
-                                                    text = greeting,
-                                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-                                            }
-                                        }
-                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Más información",
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF1A5FD4),
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { showPrivacyInfoSheet = true }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                            .testTag("empty_chat_privacy_learn_more")
+                                    )
                                 }
                             }
                         }

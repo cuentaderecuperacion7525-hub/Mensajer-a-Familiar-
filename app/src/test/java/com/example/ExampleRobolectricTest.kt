@@ -983,8 +983,13 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
 
-    // 1. Empty chat shows notice and exact copy (without prohibited wording)
+    // 1. Empty chat shows notice and exact copy (without prohibited wording or old greeting elements)
     composeTestRule.onNodeWithTag("empty_chat_privacy_notice").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Aún no hay mensajes con Mamá").assertDoesNotExist()
+    composeTestRule.onNodeWithText("Envíale un saludo para empezar.").assertDoesNotExist()
+    composeTestRule.onNodeWithText("¡Hola!").assertDoesNotExist()
+    composeTestRule.onNodeWithText("¿Cómo estás?").assertDoesNotExist()
+    composeTestRule.onNodeWithText("Te quiero").assertDoesNotExist()
     composeTestRule.onNodeWithText(
       "Los mensajes y las llamadas de este chat son privados. Solo las personas de tu familia en este chat pueden acceder a ellos."
     ).assertIsDisplayed()
@@ -1026,6 +1031,22 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("empty_chat_privacy_notice").assertDoesNotExist()
+
+    // 5. Message is deleted/hidden for current member -> chat is empty again and privacy notice reappears
+    composeTestRule.runOnUiThread {
+      messagesState.value = listOf(
+        com.example.data.model.ChatMessageEntity(
+          id = "msg_first",
+          chatId = "direct_mama",
+          senderId = mama.id,
+          text = "Hola!",
+          timestamp = 1_700_000_000_000L,
+          hiddenForMemberIdsJson = "[\"${me.id}\"]"
+        )
+      )
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("empty_chat_privacy_notice").assertIsDisplayed()
   }
 }
 
