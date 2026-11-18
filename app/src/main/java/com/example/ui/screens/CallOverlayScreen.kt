@@ -35,14 +35,19 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,7 +81,8 @@ fun CallOverlayScreen(
     onSwitchCamera: () -> Unit = {},
     onEndCall: () -> Unit
 ) {
-    BackHandler { onEndCall() }
+    var showEndCallConfirm by remember { mutableStateOf(false) }
+    BackHandler(enabled = !showEndCallConfirm) { showEndCallConfirm = true }
     val context = LocalContext.current
 
     val hasRemoteVideo by (webRtcCallManager?.hasRemoteVideo ?: MutableStateFlow(false)).collectAsState()
@@ -368,6 +374,33 @@ fun CallOverlayScreen(
                     }
                 }
             }
+        }
+
+        if (showEndCallConfirm) {
+            AlertDialog(
+                onDismissRequest = { showEndCallConfirm = false },
+                title = { Text("¿Salir de la llamada?") },
+                text = { Text("Si sales ahora, finalizará la llamada en curso.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showEndCallConfirm = false
+                            onEndCall()
+                        },
+                        modifier = Modifier.testTag("confirm_end_call_button")
+                    ) {
+                        Text("Colgar", color = DangerRed)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showEndCallConfirm = false },
+                        modifier = Modifier.testTag("cancel_end_call_button")
+                    ) {
+                        Text("Seguir en llamada")
+                    }
+                }
+            )
         }
     }
 }

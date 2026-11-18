@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -515,6 +516,7 @@ fun IncomingCallOverlay(
     onAccept: () -> Unit,
     onDecline: () -> Unit
 ) {
+    BackHandler(enabled = true) {}
     val pulse = rememberInfiniteTransition(label = "incoming_pulse")
     val ringScale by pulse.animateFloat(
         initialValue = 1f,

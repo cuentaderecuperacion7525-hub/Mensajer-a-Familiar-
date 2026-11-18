@@ -70,6 +70,7 @@ import com.example.ui.screens.ProfileSelectorScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.FamiChatTheme
 import com.example.ui.viewmodel.FamilyViewModel
+import com.example.ui.viewmodel.MainTab
 import com.example.util.FamiChatNotificationHelper
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
@@ -361,11 +362,38 @@ fun FamiChatApp(
         }
     }
 
+    fun navigateSingleTop(route: String) {
+        val currentRoute = navController.currentBackStackEntry?.destination?.route
+        if (currentRoute == route) return
+        navController.navigate(route) {
+            launchSingleTop = true
+        }
+    }
+
+    fun navigateToChatSingleTop(chatId: String) {
+        val currentEntry = navController.currentBackStackEntry
+        val isSameChat = currentEntry?.destination?.route == Routes.CHAT &&
+            currentEntry.arguments?.getString("chatId") == chatId
+        if (isSameChat) return
+        navController.navigate(Routes.chat(chatId)) {
+            launchSingleTop = true
+        }
+    }
+
+    fun safePopBack(expectedRoute: String) {
+        val currentRoute = navController.currentBackStackEntry?.destination?.route
+        if (currentRoute == expectedRoute && navController.previousBackStackEntry != null) {
+            navController.popBackStack()
+        }
+    }
+
     LaunchedEffect(pendingNotificationChatId, activeMember?.id, chatPreviews.size) {
         val targetChatId = pendingNotificationChatId ?: return@LaunchedEffect
         if (activeMember != null && chatPreviews.any { it.chat.id == targetChatId }) {
+            vm.selectTab(MainTab.CHATS)
             vm.openChat(targetChatId)
             navController.navigate(Routes.chat(targetChatId)) {
+                popUpTo(Routes.HOME) { inclusive = false }
                 launchSingleTop = true
             }
             vm.consumePendingNotificationChatId()
@@ -390,6 +418,7 @@ fun FamiChatApp(
                             vm.selectProfile(member.id)
                             navController.navigate(Routes.HOME) {
                                 popUpTo(Routes.SELECTOR) { inclusive = true }
+                                launchSingleTop = true
                             }
                         }
                     },
@@ -440,7 +469,7 @@ fun FamiChatApp(
                         onDeleteStatus = vm::deleteStatus,
                         onReplyToStatus = { st, replyText ->
                             vm.replyToStatus(st, replyText) { chatId ->
-                                navController.navigate(Routes.chat(chatId))
+                                navigateToChatSingleTop(chatId)
                             }
                         },
                         onCheckForUpdate = vm::checkForAppUpdate,
@@ -451,13 +480,13 @@ fun FamiChatApp(
                         onSearchChange = vm::updateSearchQuery,
                         onOpenChat = { chatId ->
                             vm.openChat(chatId)
-                            navController.navigate(Routes.chat(chatId))
+                            navigateToChatSingleTop(chatId)
                         },
                         onTogglePinChat = vm::togglePinChat,
                         onToggleMuteChat = vm::toggleMuteChat,
                         onStartDirectChat = { otherId ->
                             vm.createOrOpenDirectChat(otherId) { chatId ->
-                                navController.navigate(Routes.chat(chatId))
+                                navigateToChatSingleTop(chatId)
                             }
                         },
                         onSwitchProfile = {
@@ -472,7 +501,7 @@ fun FamiChatApp(
                         },
                         onOpenAdminPanel = {
                             if (member.isAdmin) {
-                                navController.navigate(Routes.ADMIN)
+                                navigateSingleTop(Routes.ADMIN)
                             }
                         },
                         onStartCall = { chatId, title, emoji, colorHex, callType ->
@@ -488,8 +517,8 @@ fun FamiChatApp(
                         onDeleteEvent = vm::deleteFamilyEvent,
                         onSaveNote = vm::saveFamilyNote,
                         onDeleteNote = vm::deleteFamilyNote,
-                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                        onOpenNotifications = { navController.navigate(Routes.NOTIFICATIONS) }
+                        onOpenSettings = { navigateSingleTop(Routes.SETTINGS) },
+                        onOpenNotifications = { navigateSingleTop(Routes.NOTIFICATIONS) }
                     )
                 }
             }
@@ -497,7 +526,7 @@ fun FamiChatApp(
             composable(Routes.SETTINGS) {
                 val member = activeMember
                 if (member == null) {
-                    LaunchedEffect(Unit) { navController.popBackStack() }
+                    LaunchedEffect(Unit) { safePopBack(Routes.SETTINGS) }
                 } else {
                     SettingsScreen(
                         isAdmin = member.isAdmin,
@@ -505,8 +534,8 @@ fun FamiChatApp(
                         notificationsEnabled = notificationsEnabled,
                         updateRepoSlug = updateRepoSlug,
                         updateState = updateState,
-                        onBack = { navController.popBackStack() },
-                        onOpenNotifications = { navController.navigate(Routes.NOTIFICATIONS) },
+                        onBack = { safePopBack(Routes.SETTINGS) },
+                        onOpenNotifications = { navigateSingleTop(Routes.NOTIFICATIONS) },
                         onToggleTheme = vm::toggleTheme,
                         onCheckForUpdate = vm::checkForAppUpdate,
                         onSaveUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = true) },
@@ -514,7 +543,7 @@ fun FamiChatApp(
                         onResetUpdateState = vm::resetUpdateState,
                         onOpenAdvanced = {
                             if (member.isAdmin) {
-                                navController.navigate(Routes.ADMIN_ADVANCED)
+                                navigateSingleTop(Routes.ADMIN_ADVANCED)
                             }
                         }
                     )
@@ -528,7 +557,7 @@ fun FamiChatApp(
                     onClearSnackbar = vm::clearSnackbar,
                     onToggleNotifications = vm::setNotificationsEnabled,
                     onSendTestNotification = vm::sendTestPushNotification,
-                    onBack = { navController.popBackStack() }
+                    onBack = { safePopBack(Routes.NOTIFICATIONS) }
                 )
             }
 
@@ -536,10 +565,10 @@ fun FamiChatApp(
                 val isAdmin = activeMember?.isAdmin == true
                 AdminAdvancedSettingsScreen(
                     isAdmin = isAdmin,
-                    onBack = { navController.popBackStack() },
+                    onBack = { safePopBack(Routes.ADMIN_ADVANCED) },
                     onOpenDiagnostics = {
                         if (isAdmin) {
-                            navController.navigate(Routes.ADMIN_DIAGNOSTICS)
+                            navigateSingleTop(Routes.ADMIN_DIAGNOSTICS)
                         }
                     }
                 )
@@ -560,7 +589,7 @@ fun FamiChatApp(
                     onClearSnackbar = vm::clearSnackbar,
                     onSendTestNotification = vm::sendTestPushNotification,
                     onSaveTurnConfig = vm::saveTurnConfig,
-                    onBack = { navController.popBackStack() }
+                    onBack = { safePopBack(Routes.ADMIN_DIAGNOSTICS) }
                 )
             }
 
@@ -572,7 +601,7 @@ fun FamiChatApp(
                 val member = activeMember
                 val chatUi = chatPreviews.find { it.chat.id == chatId }
                 if (member == null || chatUi == null) {
-                    LaunchedEffect(Unit) { navController.popBackStack() }
+                    LaunchedEffect(Unit) { safePopBack(Routes.CHAT) }
                 } else {
                     val chatMessages = remember(allMessages, chatId) {
                         allMessages.filter { it.chatId == chatId }
@@ -594,7 +623,7 @@ fun FamiChatApp(
                         onClearSnackbar = vm::clearSnackbar,
                         onBack = {
                             vm.closeChat()
-                            navController.popBackStack()
+                            safePopBack(Routes.CHAT)
                         },
                         onSendText = { text, replyId -> vm.sendTextMessage(chatId, text, replyId) },
                         onSendImage = { uri, caption, replyId -> vm.sendImageMessage(chatId, uri, caption, replyId) },
@@ -676,7 +705,7 @@ fun FamiChatApp(
                     currentMasterPin = masterPin,
                     currentSwitchPin = switchPin,
                     currentUpdateRepo = updateRepoSlug,
-                    onBack = { navController.popBackStack() },
+                    onBack = { safePopBack(Routes.ADMIN) },
                     onSaveMember = vm::saveFamilyMember,
                     onDeleteMember = vm::deleteFamilyMember,
                     onSaveGroup = vm::saveGroup,
@@ -700,6 +729,7 @@ fun FamiChatApp(
                     vm.selectProfile(protectedMember.id)
                     navController.navigate(Routes.HOME) {
                         popUpTo(Routes.SELECTOR) { inclusive = true }
+                        launchSingleTop = true
                     }
                 },
                 onDismiss = {

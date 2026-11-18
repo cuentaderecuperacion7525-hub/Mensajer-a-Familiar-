@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
@@ -113,6 +115,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -860,6 +864,7 @@ private fun StatusSegmentedProgressRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StatusViewerDialog(
     group: MemberStatusGroup,
@@ -874,6 +879,9 @@ fun StatusViewerDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val isImeVisible = WindowInsets.isImeVisible
     val membersMap = remember(allMembers) { allMembers.associateBy { it.id } }
     var currentIndex by remember(group.member.id) { mutableIntStateOf(0) }
     val items = group.items
@@ -1001,7 +1009,14 @@ fun StatusViewerDialog(
         }
     }
 
-    BackHandler(onBack = onDismiss)
+    BackHandler {
+        if (isImeVisible) {
+            keyboardController?.hide()
+            focusManager.clearFocus()
+        } else {
+            onDismiss()
+        }
+    }
 
     val hasMedia = currentStatus.isVideo || !currentStatus.mediaUri.isNullOrBlank()
     val bgColor = if (hasMedia) {

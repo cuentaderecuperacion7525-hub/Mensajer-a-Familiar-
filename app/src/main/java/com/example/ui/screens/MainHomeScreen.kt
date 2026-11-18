@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.Manifest
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -103,6 +106,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -113,6 +117,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -144,8 +150,9 @@ import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateUiState
 import com.example.util.FamiChatNotificationHelper
 import com.example.util.TimeFormatters
+import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MainHomeScreen(
     activeMember: FamilyMemberEntity,
@@ -202,6 +209,9 @@ fun MainHomeScreen(
     onOpenNotifications: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val isImeVisible = WindowInsets.isImeVisible
     val snackbarHostState = remember { SnackbarHostState() }
     var showNewChatDialog by remember { mutableStateOf(false) }
     var showProfileOptionsDialog by remember { mutableStateOf(false) }
@@ -209,6 +219,64 @@ fun MainHomeScreen(
     var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
     var showCreateStatusDialog by remember { mutableStateOf(false) }
     var viewingStatusMemberId by remember { mutableStateOf<String?>(null) }
+
+    var isExitArmed by remember { mutableStateOf(false) }
+    var exitArmToken by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(exitArmToken) {
+        if (exitArmToken > 0) {
+            delay(3_000L)
+            isExitArmed = false
+        }
+    }
+
+    LaunchedEffect(
+        selectedTab,
+        showOverflowMenu,
+        showNewChatDialog,
+        showProfileOptionsDialog,
+        showCreateStatusDialog,
+        showUpdateDialog,
+        viewingStatusMemberId,
+        isImeVisible
+    ) {
+        if (selectedTab != MainTab.CHATS ||
+            showOverflowMenu ||
+            showNewChatDialog ||
+            showProfileOptionsDialog ||
+            showCreateStatusDialog ||
+            showUpdateDialog ||
+            viewingStatusMemberId != null ||
+            isImeVisible
+        ) {
+            isExitArmed = false
+        }
+    }
+
+    val canExitDirectly = isExitArmed &&
+        selectedTab == MainTab.CHATS &&
+        !showOverflowMenu &&
+        !showNewChatDialog &&
+        !showProfileOptionsDialog &&
+        !showCreateStatusDialog &&
+        !showUpdateDialog &&
+        viewingStatusMemberId == null &&
+        !isImeVisible
+
+    BackHandler(enabled = !canExitDirectly) {
+        when {
+            isImeVisible -> {
+                keyboardController?.hide()
+                focusManager.clearFocus()
+            }
+            showOverflowMenu -> showOverflowMenu = false
+            selectedTab != MainTab.CHATS -> onSelectTab(MainTab.CHATS)
+            else -> {
+                isExitArmed = true
+                exitArmToken++
+            }
+        }
+    }
 
     var hasNotifPermission by remember {
         mutableStateOf(FamiChatNotificationHelper.canPostNotifications(context))

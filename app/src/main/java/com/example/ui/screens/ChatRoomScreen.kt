@@ -141,6 +141,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.LocalView
@@ -241,6 +242,7 @@ fun ChatRoomScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -420,14 +422,21 @@ fun ChatRoomScreen(
         }
     }
 
-    BackHandler(enabled = isMultiSelectMode || isSearchOpen || showEmojiDrawer) {
+    BackHandler {
         when {
-            isMultiSelectMode -> selectedIds.clear()
+            isImeVisible -> {
+                keyboardController?.hide()
+                focusManager.clearFocus()
+            }
+            showHeaderMenu -> showHeaderMenu = false
+            showAttachmentMenu -> showAttachmentMenu = false
+            showEmojiDrawer -> showEmojiDrawer = false
             isSearchOpen -> {
                 isSearchOpen = false
                 inChatQuery = ""
             }
-            showEmojiDrawer -> showEmojiDrawer = false
+            isMultiSelectMode -> selectedIds.clear()
+            else -> onBack()
         }
     }
 
@@ -623,7 +632,14 @@ fun ChatRoomScreen(
                                 }
                             },
                             navigationIcon = {
-                                IconButton(onClick = onBack, modifier = Modifier.testTag("chat_back_button")) {
+                                IconButton(
+                                    onClick = {
+                                        keyboardController?.hide()
+                                        focusManager.clearFocus()
+                                        onBack()
+                                    },
+                                    modifier = Modifier.testTag("chat_back_button")
+                                ) {
                                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
                                 }
                             },

@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -11,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -80,6 +83,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -99,7 +104,7 @@ import com.example.util.parseHexColor
 private val MemberEmojis = listOf("👨🏽", "👩🏽", "🧑🏽‍🎓", "👧🏽", "👴🏽", "👵🏽", "🧑🏽", "🐶")
 private val GroupEmojis = listOf("🏡", "⚽", "🛒", "🎉", "✈️", "📚", "🍽️", "❤️")
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AdminPanelScreen(
     members: List<FamilyMemberEntity>,
@@ -120,6 +125,15 @@ fun AdminPanelScreen(
     onUpdateRepoSlug: (String) -> Unit,
     onChangeFamilySpace: () -> Unit
 ) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val isImeVisible = WindowInsets.isImeVisible
+
+    BackHandler(enabled = isImeVisible) {
+        keyboardController?.hide()
+        focusManager.clearFocus()
+    }
+
     var selectedSection by remember { mutableIntStateOf(0) }
     var editingMember by remember { mutableStateOf<FamilyMemberEntity?>(null) }
     var showMemberDialog by remember { mutableStateOf(false) }
