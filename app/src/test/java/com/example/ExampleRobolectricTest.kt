@@ -1,12 +1,24 @@
 package com.example
 
 import android.content.Context
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
+import com.example.ui.screens.AdminDiagnosticsScreen
+import com.example.ui.screens.NotificationSettingsScreen
+import com.example.ui.screens.SettingsScreen
 import com.example.util.AppUpdateChecker
+import com.example.util.AppUpdateUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -15,6 +27,9 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class ExampleRobolectricTest {
+
+  @get:Rule
+  val composeTestRule = createComposeRule()
 
   @Test
   fun `read string from context`() {
@@ -156,6 +171,96 @@ class ExampleRobolectricTest {
     cachedFile.setLastModified(System.currentTimeMillis() - (27L * 60L * 60L * 1000L))
     com.example.util.VideoMediaHelper.cleanupExpiredStatusVideos(context)
     assertFalse(cachedFile.exists())
+  }
+
+  @Test
+  fun `settings hides Avanzado for non admin and shows it for admin`() {
+    val isAdminState = androidx.compose.runtime.mutableStateOf(false)
+    composeTestRule.setContent {
+      SettingsScreen(
+        isAdmin = isAdminState.value,
+        isDarkTheme = false,
+        notificationsEnabled = true,
+        updateRepoSlug = "",
+        updateState = AppUpdateUiState.Idle,
+        onBack = {},
+        onOpenNotifications = {},
+        onToggleTheme = {},
+        onCheckForUpdate = {},
+        onSaveUpdateRepoSlug = {},
+        onDownloadUpdate = {},
+        onResetUpdateState = {},
+        onOpenAdvanced = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("settings_notifications_row").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("settings_advanced_row").assertDoesNotExist()
+
+    composeTestRule.runOnUiThread { isAdminState.value = true }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("settings_advanced_row").performScrollTo().assertIsDisplayed()
+  }
+
+  @Test
+  fun `notifications screen avoids technical terms and triggers test alert`() {
+    var tested = false
+    composeTestRule.setContent {
+      NotificationSettingsScreen(
+        notificationsEnabled = false,
+        snackbarMessage = null,
+        onClearSnackbar = {},
+        onToggleNotifications = {},
+        onSendTestNotification = { tested = true },
+        onBack = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Notificaciones desactivadas").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("notifications_activate_button").assertIsDisplayed()
+    assertEquals(0, composeTestRule.onAllNodesWithText("FCM", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
+    assertEquals(0, composeTestRule.onAllNodesWithText("WorkManager", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
+    assertEquals(0, composeTestRule.onAllNodesWithText("token", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
+    assertEquals(0, composeTestRule.onAllNodesWithText("tópico", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
+
+    composeTestRule.onNodeWithTag("notifications_test_button").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(tested)
+  }
+
+  @Test
+  fun `admin diagnostics removes quick guide and hides token and channel until expanded`() {
+    val fakeToken = "fcm_test_token_1234567890"
+    composeTestRule.setContent {
+      AdminDiagnosticsScreen(
+        isAdmin = true,
+        familyId = "fam_123",
+        memberName = "José Manuel Martínez",
+        notificationsEnabled = true,
+        fcmToken = fakeToken,
+        turnUrl = "turn:openrelay.metered.ca:80",
+        turnUsername = "openrelayproject",
+        turnCredential = "openrelayproject",
+        snackbarMessage = null,
+        onClearSnackbar = {},
+        onSendTestNotification = {},
+        onSaveTurnConfig = { _, _, _ -> },
+        onBack = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    // No Guía rápida anywhere
+    assertEquals(0, composeTestRule.onAllNodesWithText("Guía rápida", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
+    // Token and channel hidden initially
+    assertEquals(0, composeTestRule.onAllNodesWithText("famichat_fam_123").fetchSemanticsNodes().size)
+    assertEquals(0, composeTestRule.onAllNodesWithText(fakeToken).fetchSemanticsNodes().size)
+
+    // Tap "Ver detalles técnicos" -> reveals channel and token
+    composeTestRule.onNodeWithTag("toggle_technical_details_button").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("famichat_fam_123").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText(fakeToken).performScrollTo().assertIsDisplayed()
   }
 }
 

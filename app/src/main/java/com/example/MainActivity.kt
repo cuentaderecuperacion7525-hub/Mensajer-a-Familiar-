@@ -57,13 +57,17 @@ import com.example.data.remote.FamilyCloudRepository
 import com.example.data.remote.GoogleAuthHelper
 import com.example.data.remote.authStateFlow
 import com.example.ui.components.PinVerificationDialog
+import com.example.ui.screens.AdminAdvancedSettingsScreen
+import com.example.ui.screens.AdminDiagnosticsScreen
 import com.example.ui.screens.AdminPanelScreen
 import com.example.ui.screens.CallOverlayScreen
 import com.example.ui.screens.ChatRoomScreen
 import com.example.ui.screens.FamilySetupScreen
 import com.example.ui.screens.IncomingCallOverlay
 import com.example.ui.screens.MainHomeScreen
+import com.example.ui.screens.NotificationSettingsScreen
 import com.example.ui.screens.ProfileSelectorScreen
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.FamiChatTheme
 import com.example.ui.viewmodel.FamilyViewModel
 import com.example.util.FamiChatNotificationHelper
@@ -76,6 +80,10 @@ import kotlinx.coroutines.tasks.await
 object Routes {
     const val SELECTOR = "selector"
     const val HOME = "home"
+    const val SETTINGS = "settings"
+    const val NOTIFICATIONS = "notifications"
+    const val ADMIN_ADVANCED = "admin_advanced"
+    const val ADMIN_DIAGNOSTICS = "admin_diagnostics"
     const val ADMIN = "admin"
     const val CHAT = "chat/{chatId}"
     fun chat(chatId: String) = "chat/$chatId"
@@ -480,15 +488,80 @@ fun FamiChatApp(
                         onDeleteEvent = vm::deleteFamilyEvent,
                         onSaveNote = vm::saveFamilyNote,
                         onDeleteNote = vm::deleteFamilyNote,
-                        familyId = activeFamilyId.orEmpty(),
-                        fcmToken = fcmToken.orEmpty(),
-                        turnUrl = turnUrl,
-                        turnUsername = turnUsername,
-                        turnCredential = turnCredential,
-                        onSendTestPushNotification = vm::sendTestPushNotification,
-                        onSaveTurnConfig = vm::saveTurnConfig
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                        onOpenNotifications = { navController.navigate(Routes.NOTIFICATIONS) }
                     )
                 }
+            }
+
+            composable(Routes.SETTINGS) {
+                val member = activeMember
+                if (member == null) {
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                } else {
+                    SettingsScreen(
+                        isAdmin = member.isAdmin,
+                        isDarkTheme = isDarkTheme,
+                        notificationsEnabled = notificationsEnabled,
+                        updateRepoSlug = updateRepoSlug,
+                        updateState = updateState,
+                        onBack = { navController.popBackStack() },
+                        onOpenNotifications = { navController.navigate(Routes.NOTIFICATIONS) },
+                        onToggleTheme = vm::toggleTheme,
+                        onCheckForUpdate = vm::checkForAppUpdate,
+                        onSaveUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = true) },
+                        onDownloadUpdate = vm::downloadAndInstallUpdate,
+                        onResetUpdateState = vm::resetUpdateState,
+                        onOpenAdvanced = {
+                            if (member.isAdmin) {
+                                navController.navigate(Routes.ADMIN_ADVANCED)
+                            }
+                        }
+                    )
+                }
+            }
+
+            composable(Routes.NOTIFICATIONS) {
+                NotificationSettingsScreen(
+                    notificationsEnabled = notificationsEnabled,
+                    snackbarMessage = snackbarMessage,
+                    onClearSnackbar = vm::clearSnackbar,
+                    onToggleNotifications = vm::setNotificationsEnabled,
+                    onSendTestNotification = vm::sendTestPushNotification,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(Routes.ADMIN_ADVANCED) {
+                val isAdmin = activeMember?.isAdmin == true
+                AdminAdvancedSettingsScreen(
+                    isAdmin = isAdmin,
+                    onBack = { navController.popBackStack() },
+                    onOpenDiagnostics = {
+                        if (isAdmin) {
+                            navController.navigate(Routes.ADMIN_DIAGNOSTICS)
+                        }
+                    }
+                )
+            }
+
+            composable(Routes.ADMIN_DIAGNOSTICS) {
+                val member = activeMember
+                AdminDiagnosticsScreen(
+                    isAdmin = member?.isAdmin == true,
+                    familyId = activeFamilyId.orEmpty(),
+                    memberName = member?.name.orEmpty(),
+                    notificationsEnabled = notificationsEnabled,
+                    fcmToken = fcmToken.orEmpty(),
+                    turnUrl = turnUrl,
+                    turnUsername = turnUsername,
+                    turnCredential = turnCredential,
+                    snackbarMessage = snackbarMessage,
+                    onClearSnackbar = vm::clearSnackbar,
+                    onSendTestNotification = vm::sendTestPushNotification,
+                    onSaveTurnConfig = vm::saveTurnConfig,
+                    onBack = { navController.popBackStack() }
+                )
             }
 
             composable(

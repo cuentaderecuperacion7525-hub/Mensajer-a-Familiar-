@@ -70,6 +70,7 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material3.AlertDialog
@@ -106,17 +107,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.Canvas
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -139,7 +134,6 @@ import com.example.ui.components.FamilyStatusStrip
 import com.example.ui.components.MemberAvatar
 import com.example.ui.components.MemberStatusGroup
 import com.example.ui.components.MessageStatusIcon
-import com.example.ui.components.PushAndCallDiagnosticsDialog
 import com.example.ui.components.StatusViewerDialog
 import com.example.ui.components.UserProfileOptionsDialog
 import com.example.ui.theme.InterFontFamily
@@ -204,13 +198,8 @@ fun MainHomeScreen(
     onDeleteEvent: (String) -> Unit,
     onSaveNote: (String?, String, String, String, Boolean) -> Unit,
     onDeleteNote: (String) -> Unit,
-    familyId: String = "",
-    fcmToken: String = "",
-    turnUrl: String = "",
-    turnUsername: String = "",
-    turnCredential: String = "",
-    onSendTestPushNotification: () -> Unit = {},
-    onSaveTurnConfig: (url: String, username: String, credential: String) -> Unit = { _, _, _ -> }
+    onOpenSettings: () -> Unit = {},
+    onOpenNotifications: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -218,7 +207,6 @@ fun MainHomeScreen(
     var showProfileOptionsDialog by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
-    var showDiagnosticsDialog by rememberSaveable { mutableStateOf(false) }
     var showCreateStatusDialog by remember { mutableStateOf(false) }
     var viewingStatusMemberId by remember { mutableStateOf<String?>(null) }
 
@@ -538,17 +526,6 @@ fun MainHomeScreen(
                     }
 
                     if (showOverflowMenu) {
-                        val toggleNotifsAction = {
-                            val nextState = !notificationsEnabled
-                            if (nextState &&
-                                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                !hasNotifPermission
-                            ) {
-                                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            } else {
-                                onToggleNotifications(nextState)
-                            }
-                        }
                         val updateSubtitle = when (updateState) {
                             is AppUpdateUiState.UpdateAvailable -> "Nueva versión v${updateState.release.versionName}"
                             is AppUpdateUiState.Downloading -> "Descargando ${updateState.progressPercent.coerceAtLeast(0)}%"
@@ -656,7 +633,10 @@ fun MainHomeScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { toggleNotifsAction() }
+                                            .clickable {
+                                                showOverflowMenu = false
+                                                onOpenNotifications()
+                                            }
                                             .padding(horizontal = 20.dp, vertical = 10.dp)
                                             .testTag("menu_toggle_push_notifications"),
                                         verticalAlignment = Alignment.CenterVertically
@@ -675,15 +655,11 @@ fun MainHomeScreen(
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                             Text(
-                                                text = if (notificationsEnabled) "Activas" else "Silenciadas",
+                                                text = if (hasNotifPermission && notificationsEnabled) "Activadas" else "Desactivadas",
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = if (hasNotifPermission && notificationsEnabled) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
-                                        MenuPillSwitch(
-                                            checked = notificationsEnabled,
-                                            onCheckedChange = { toggleNotifsAction() }
-                                        )
                                     }
                                     Row(
                                         modifier = Modifier
@@ -709,6 +685,30 @@ fun MainHomeScreen(
                                         MenuPillSwitch(
                                             checked = isDarkTheme,
                                             onCheckedChange = { onToggleTheme() }
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                showOverflowMenu = false
+                                                onOpenSettings()
+                                            }
+                                            .padding(horizontal = 20.dp, vertical = 12.dp)
+                                            .testTag("menu_settings"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Settings,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Text(
+                                            text = "Ajustes",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
 
@@ -781,28 +781,6 @@ fun MainHomeScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp)
                                     )
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                showOverflowMenu = false
-                                                showDiagnosticsDialog = true
-                                            }
-                                            .padding(horizontal = 20.dp, vertical = 10.dp)
-                                            .testTag("menu_push_diagnostics"),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        EcgPulseIcon(
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(16.dp))
-                                        Text(
-                                            text = "Diagnóstico de llamadas y\navisos",
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -960,21 +938,6 @@ fun MainHomeScreen(
             }
         )
     }
-
-    if (showDiagnosticsDialog) {
-        PushAndCallDiagnosticsDialog(
-            familyId = familyId,
-            memberName = activeMember.name,
-            notificationsEnabled = notificationsEnabled,
-            fcmToken = fcmToken,
-            turnUrl = turnUrl,
-            turnUsername = turnUsername,
-            turnCredential = turnCredential,
-            onSendTestNotification = onSendTestPushNotification,
-            onSaveTurnConfig = onSaveTurnConfig,
-            onDismiss = { showDiagnosticsDialog = false }
-        )
-    }
 }
 
 @Composable
@@ -998,35 +961,6 @@ private fun MenuPillSwitch(
                 .size(20.dp)
                 .clip(CircleShape)
                 .background(Color.White)
-        )
-    }
-}
-
-@Composable
-private fun EcgPulseIcon(
-    tint: Color,
-    modifier: Modifier = Modifier
-) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val cy = h * 0.52f
-        val path = Path().apply {
-            moveTo(w * 0.08f, cy)
-            lineTo(w * 0.30f, cy)
-            lineTo(w * 0.42f, h * 0.16f)
-            lineTo(w * 0.58f, h * 0.84f)
-            lineTo(w * 0.70f, cy)
-            lineTo(w * 0.92f, cy)
-        }
-        drawPath(
-            path = path,
-            color = tint,
-            style = Stroke(
-                width = 2.dp.toPx(),
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round
-            )
         )
     }
 }

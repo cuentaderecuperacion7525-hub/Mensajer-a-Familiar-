@@ -27,25 +27,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,16 +52,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
-import com.example.data.local.PreferencesManager
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ChatType
 import com.example.data.model.FamilyMemberEntity
@@ -644,286 +633,4 @@ fun ChatWallpaperPickerDialog(
             }
         }
     )
-}
-
-@Composable
-fun PushAndCallDiagnosticsDialog(
-    familyId: String,
-    memberName: String,
-    notificationsEnabled: Boolean,
-    fcmToken: String,
-    turnUrl: String,
-    turnUsername: String,
-    turnCredential: String,
-    onSendTestNotification: () -> Unit,
-    onSaveTurnConfig: (url: String, username: String, credential: String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
-    val systemNotifGranted = remember { FamiChatNotificationHelper.canPostNotifications(context) }
-    val sanitizedTopic = remember(familyId) {
-        val clean = familyId.replace(Regex("[^a-zA-Z0-9-_.~%]"), "_").take(48)
-        "famichat_${clean.ifBlank { "default" }}"
-    }
-
-    var editTurnUrl by remember(turnUrl) { mutableStateOf(turnUrl) }
-    var editTurnUser by remember(turnUsername) { mutableStateOf(turnUsername) }
-    var editTurnCred by remember(turnCredential) { mutableStateOf(turnCredential) }
-    var copiedBanner by remember { mutableStateOf<String?>(null) }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(26.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 460.dp)
-                .testTag("push_call_diagnostics_dialog")
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.NotificationsActive,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(26.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Diagnóstico Push y Llamadas",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                        )
-                        Text(
-                            text = "Estado de entregas ✓✓, FCM y servidores TURN 4G/5G",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Filled.Close, contentDescription = "Cerrar")
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        DiagnosticStatusRow(
-                            label = "Permiso de notificaciones del sistema",
-                            ok = systemNotifGranted && notificationsEnabled,
-                            detail = if (systemNotifGranted && notificationsEnabled) "Activo" else "Desactivado"
-                        )
-                        DiagnosticStatusRow(
-                            label = "Doble palomita gris (✓✓) en 2º plano",
-                            ok = true,
-                            detail = "Automática (FCM + WorkManager)"
-                        )
-                        DiagnosticStatusRow(
-                            label = "Canal Push FCM familiar",
-                            ok = familyId.isNotBlank(),
-                            detail = sanitizedTopic
-                        )
-                        DiagnosticStatusRow(
-                            label = "Token FCM del dispositivo ($memberName)",
-                            ok = fcmToken.isNotBlank(),
-                            detail = if (fcmToken.isNotBlank()) "${fcmToken.take(16)}..." else "Pendiente de Google Play Services"
-                        )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = onSendTestNotification,
-                        modifier = Modifier.weight(1f).testTag("test_push_notification_button")
-                    ) {
-                        Icon(Icons.Filled.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Probar alerta")
-                    }
-                    if (fcmToken.isNotBlank()) {
-                        OutlinedButton(
-                            onClick = {
-                                clipboard.setText(AnnotatedString(fcmToken))
-                                copiedBanner = "Token FCM copiado al portapapeles"
-                            },
-                            modifier = Modifier.testTag("copy_fcm_token_button")
-                        ) {
-                            Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Token")
-                        }
-                    }
-                }
-
-                if (copiedBanner != null) {
-                    Text(
-                        text = copiedBanner!!,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = OnlineGreen
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = "Guía rápida: Push instantáneo con app cerrada",
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "1. FamiChat ya sincroniza tu token FCM en Firestore (members.fcmTokens) y se suscribe al tema '$sanitizedTopic' + ejecuta WorkManager cada 15 min.\n" +
-                                "2. Cuando un mensaje llega en segundo plano, marca automáticamente Entregado (✓✓ gris) en la nube.\n" +
-                                "3. Para disparo instantáneo (<1 seg) tras cierre forzoso del sistema, puedes activar un trigger Cloud Function en 'families/{familyId}/messages/{msgId}' que envíe un data message al tópico '$sanitizedTopic'.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                HorizontalDivider()
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Router,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Column {
-                        Text(
-                            text = "Servidores TURN de respaldo (Datos móviles 4G/5G)",
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
-                        )
-                        Text(
-                            text = "Permite que las llamadas de voz y video crucen redes móviles con NAT estricto.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                OutlinedTextField(
-                    value = editTurnUrl,
-                    onValueChange = { editTurnUrl = it },
-                    label = { Text("Servidores TURN (separados por coma)") },
-                    singleLine = false,
-                    maxLines = 2,
-                    modifier = Modifier.fillMaxWidth().testTag("turn_url_input")
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = editTurnUser,
-                        onValueChange = { editTurnUser = it },
-                        label = { Text("Usuario TURN") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f).testTag("turn_user_input")
-                    )
-                    OutlinedTextField(
-                        value = editTurnCred,
-                        onValueChange = { editTurnCred = it },
-                        label = { Text("Clave TURN") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f).testTag("turn_cred_input")
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(
-                        onClick = {
-                            editTurnUrl = PreferencesManager.DEFAULT_TURN_URL
-                            editTurnUser = PreferencesManager.DEFAULT_TURN_USERNAME
-                            editTurnCred = PreferencesManager.DEFAULT_TURN_CREDENTIAL
-                            onSaveTurnConfig(editTurnUrl, editTurnUser, editTurnCred)
-                        }
-                    ) {
-                        Text("Restaurar OpenRelay")
-                    }
-                    Button(
-                        onClick = {
-                            onSaveTurnConfig(editTurnUrl, editTurnUser, editTurnCred)
-                            onDismiss()
-                        },
-                        modifier = Modifier.testTag("save_turn_config_button")
-                    ) {
-                        Text("Guardar TURN")
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DiagnosticStatusRow(
-    label: String,
-    ok: Boolean,
-    detail: String
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            Icon(
-                imageVector = Icons.Filled.CheckCircle,
-                contentDescription = null,
-                tint = if (ok) OnlineGreen else MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(16.dp)
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = detail,
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-            color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
 }
