@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -153,15 +154,62 @@ class FamilyViewModel(
         }
     }
 
+    private val _isMembersLoading = MutableStateFlow(true)
+    val isMembersLoading: StateFlow<Boolean> = _isMembersLoading.asStateFlow()
+
+    private val _optimisticRegisteredMember = MutableStateFlow<Pair<String, FamilyMemberEntity>?>(null)
+    private var membersLoadingTimeoutJob: Job? = null
+
     private val rawMembers: StateFlow<List<FamilyMemberEntity>> = _activeFamilyId
         .flatMapLatest { fid ->
-            if (fid.isNullOrBlank()) flowOf(emptyList())
-            else cloudRepo.observeMembers(fid, currentUserId).safeFirestoreFlow(emptyList())
+            membersLoadingTimeoutJob?.cancel()
+            if (fid.isNullOrBlank()) {
+                _isMembersLoading.value = false
+                flowOf(emptyList())
+            } else {
+                _isMembersLoading.value = true
+                membersLoadingTimeoutJob = viewModelScope.launch {
+                    delay(4500L)
+                    if (_activeFamilyId.value == fid) {
+                        _isMembersLoading.value = false
+                    }
+                }
+                cloudRepo.observeMembers(fid, currentUserId)
+                    .onEach { list ->
+                        _isMembersLoading.value = false
+                        val opt = _optimisticRegisteredMember.value
+                        if (opt != null && opt.first == fid && list.any { it.id == opt.second.id }) {
+                            _optimisticRegisteredMember.value = null
+                        }
+                    }
+                    .catch { err ->
+                        _isMembersLoading.value = false
+                        val fsErr = err.unwrapFirestoreException()
+                        if (fsErr == null && err is CancellationException) throw err
+                        val msg = fsErr?.localizedMessage ?: err.localizedMessage
+                        if (!msg.isNullOrBlank()) {
+                            _snackbarMessage.value = msg
+                        }
+                        emit(emptyList())
+                    }
+            }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val members: StateFlow<List<FamilyMemberEntity>> = combine(
+    private val effectiveRawMembers: Flow<List<FamilyMemberEntity>> = combine(
         rawMembers,
+        _optimisticRegisteredMember,
+        _activeFamilyId
+    ) { list, optimistic, famId ->
+        if (optimistic != null && optimistic.first == famId && list.none { it.id == optimistic.second.id }) {
+            list + optimistic.second
+        } else {
+            list
+        }
+    }
+
+    val members: StateFlow<List<FamilyMemberEntity>> = combine(
+        effectiveRawMembers,
         _activeMemberId,
         _isAppForeground,
         _manualOffline,
@@ -819,6 +867,124 @@ class FamilyViewModel(
                 showMessage("Te uniste a la familia. Selecciona tu perfil.")
             }.onFailure { err ->
                 showMessage(err.localizedMessage ?: "No se pudo unir con ese código")
+            }
+        }
+    }
+
+    fun registerSelfProfile(
+        name: String,
+        roleLabel: String,
+        colorHex: String,
+        inviteCodeInput: String = "",
+        onSuccess: () -> Unit
+    ) {
+        if (_isFamilyActionBusy.value) return
+        val trimmedName = name.trim().take(40)
+        if (trimmedName.isEmpty()) {
+            showMessage("Escribe tu nombre o apodo para continuar")
+            return
+        }
+        val cleanRole = roleLabel.trim().take(40).ifEmpty { "Familiar" }
+        val cleanColor = colorHex.trim().ifEmpty { "#1A5FD4" }
+        val cleanCode = inviteCodeInput.trim().uppercase()
+
+        viewModelScope.launch {
+            _isFamilyActionBusy.value = true
+            try {
+                val currentFamCode = activeFamily.value?.inviteCode.orEmpty().uppercase()
+                var targetFamId = _activeFamilyId.value
+
+                if (cleanCode.isNotBlank() && cleanCode != currentFamCode) {
+                    val joinRes = cloudRepo.joinFamilyByInviteCode(currentUserId, cleanCode)
+                    val joinedFamId = joinRes.getOrElse { err ->
+                        showMessage(err.localizedMessage ?: "No se encontró el código familiar")
+                        return@launch
+                    }
+                    targetFamId = joinedFamId
+                    _activeFamilyId.value = joinedFamId
+                    prefs.setActiveFamilyId(joinedFamId)
+                } else if (targetFamId.isNullOrBlank()) {
+                    val fixedRes = cloudRepo.ensureFixedFamily(currentUserId)
+                    targetFamId = fixedRes.getOrElse { err ->
+                        showMessage(err.localizedMessage ?: "No se pudo conectar al espacio familiar")
+                        return@launch
+                    }
+                    _activeFamilyId.value = targetFamId
+                    prefs.setActiveFamilyId(targetFamId)
+                }
+
+                val famId = targetFamId ?: run {
+                    showMessage("No se pudo identificar el espacio familiar")
+                    return@launch
+                }
+
+                val uids = (cloudRepo.fetchFamilyUidsOnce(famId) + currentUserId).distinct()
+                val now = System.currentTimeMillis()
+                val newMemberId = "member_${UUID.randomUUID().toString().replace("-", "").take(8)}"
+                val roleEmoji = when {
+                    cleanRole.contains("mam", ignoreCase = true) -> "👩🏽"
+                    cleanRole.contains("pap", ignoreCase = true) -> "👨🏽"
+                    cleanRole.contains("abuel", ignoreCase = true) -> "🧓🏽"
+                    else -> "🧑🏽"
+                }
+                val member = FamilyMemberEntity(
+                    id = newMemberId,
+                    name = trimmedName,
+                    roleLabel = cleanRole,
+                    isAdmin = false,
+                    avatarColorHex = cleanColor,
+                    avatarEmoji = roleEmoji,
+                    avatarPhotoData = "",
+                    bioText = "",
+                    isOnline = true,
+                    lastSeenText = "En línea",
+                    createdAt = now,
+                    phoneNumber = "",
+                    liveStatus = PresenceStatus.ONLINE,
+                    liveChatId = null,
+                    liveStatusAt = now,
+                    linkedAuthUid = currentUserId,
+                    authorUid = currentUserId
+                )
+
+                val upsertRes = cloudRepo.upsertMember(
+                    familyId = famId,
+                    member = member,
+                    memberUids = uids,
+                    callerUid = currentUserId,
+                    isCreate = true
+                )
+                if (upsertRes.isFailure) {
+                    val err = upsertRes.exceptionOrNull()
+                    showMessage(err?.localizedMessage ?: "No se pudo registrar tu perfil")
+                    return@launch
+                }
+
+                _optimisticRegisteredMember.value = famId to member
+
+                val chats = cloudRepo.fetchChatsOnce(famId, currentUserId)
+                    .ifEmpty { rawChats.value }
+                val mainGroup = chats.firstOrNull { it.id == "chat_general" }
+                    ?: chats.firstOrNull { it.type == ChatType.GROUP }
+                if (mainGroup != null) {
+                    val participantIds = JsonHelpers.decodeStringList(mainGroup.participantIdsJson).toMutableList()
+                    if (!participantIds.contains(newMemberId)) {
+                        participantIds.add(newMemberId)
+                        cloudRepo.upsertChat(
+                            familyId = famId,
+                            chat = mainGroup.copy(participantIdsJson = JsonHelpers.encodeStringList(participantIds)),
+                            memberUids = uids,
+                            callerUid = currentUserId,
+                            isCreate = false
+                        )
+                    }
+                }
+
+                selectProfile(newMemberId)
+                showMessage("¡Bienvenido, $trimmedName!")
+                onSuccess()
+            } finally {
+                _isFamilyActionBusy.value = false
             }
         }
     }

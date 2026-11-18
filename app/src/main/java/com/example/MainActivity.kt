@@ -237,6 +237,7 @@ fun FamiChatApp(
     val activeFamily by vm.activeFamily.collectAsStateWithLifecycle()
     val activeFamilyId by vm.activeFamilyId.collectAsStateWithLifecycle()
     val isFamilyActionBusy by vm.isFamilyActionBusy.collectAsStateWithLifecycle()
+    val isMembersLoading by vm.isMembersLoading.collectAsStateWithLifecycle()
     val members by vm.members.collectAsStateWithLifecycle()
     val activeMember by vm.activeMember.collectAsStateWithLifecycle()
 
@@ -354,6 +355,11 @@ fun FamiChatApp(
                 ProfileSelectorScreen(
                     members = members,
                     familyName = activeFamily?.name.orEmpty(),
+                    currentInviteCode = activeFamily?.inviteCode.orEmpty(),
+                    isMembersLoading = isMembersLoading,
+                    isRegisterBusy = isFamilyActionBusy,
+                    snackbarMessage = snackbarMessage,
+                    onClearSnackbar = vm::clearSnackbar,
                     isDarkTheme = isDarkTheme,
                     onToggleTheme = vm::toggleTheme,
                     onSelectMember = { member ->
@@ -365,6 +371,19 @@ fun FamiChatApp(
                                 popUpTo(Routes.SELECTOR) { inclusive = true }
                             }
                         }
+                    },
+                    onRegisterMember = { name, roleLabel, colorHex, inviteCode ->
+                        vm.registerSelfProfile(
+                            name = name,
+                            roleLabel = roleLabel,
+                            colorHex = colorHex,
+                            inviteCodeInput = inviteCode,
+                            onSuccess = {
+                                navController.navigate(Routes.HOME) {
+                                    popUpTo(Routes.SELECTOR) { inclusive = true }
+                                }
+                            }
+                        )
                     },
                     onChangeFamily = vm::clearActiveFamilySpace
                 )

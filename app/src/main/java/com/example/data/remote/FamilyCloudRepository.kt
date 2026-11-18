@@ -514,6 +514,20 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         }
     }
 
+    suspend fun fetchFamilyUidsOnce(familyId: String): List<String> {
+        return try {
+            val snap = familyRef(familyId).get().await()
+            (snap.get("memberUids") as? List<*>)
+                ?.mapNotNull { it as? String }
+                ?.distinct()
+                ?: emptyList()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun fetchMembersOnce(familyId: String, uid: String): List<FamilyMemberEntity> {
         return try {
             familyRef(familyId).collection("members")
