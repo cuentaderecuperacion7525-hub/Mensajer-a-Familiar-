@@ -23,6 +23,10 @@ class FamiChatBackgroundSyncWorker(
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
 
+    companion object {
+        const val KEY_IS_IMMEDIATE_CHECK = "is_immediate_check"
+    }
+
     override suspend fun doWork(): Result {
         val appContext = applicationContext
         val uid = Firebase.auth.currentUser?.uid ?: return Result.success()
@@ -36,32 +40,35 @@ class FamiChatBackgroundSyncWorker(
         val meId = prefs.activeMemberIdFlow.first() ?: return Result.success()
 
         val repo = FamilyCloudRepository(appContext)
-        PushRegistrationManager.syncFcmTokenAndTopic(appContext, repo, prefs, famId, meId)
+        if (prefs.fcmTokenFlow.first().isNullOrBlank()) {
+            PushRegistrationManager.syncFcmTokenAndTopic(appContext, repo, prefs, famId, meId)
+        }
 
+        val isImmediateCheck = inputData.getBoolean(KEY_IS_IMMEDIATE_CHECK, false)
         val now = System.currentTimeMillis()
         val savedLastTs = prefs.lastNotifiedTimestampFlow.first()
         val mutedChatIds = prefs.mutedChatIdsFlow.first()
         val cutoffTs = if (savedLastTs > 0L) savedLastTs else (now - 120_000L)
 
-        val members = repo.fetchMembersOnce(famId, uid)
         val chats = repo.fetchChatsOnce(famId, uid)
-        val messages = repo.fetchMessagesOnce(famId, uid)
-        val calls = repo.fetchCallsOnce(famId, uid)
-
-        val memberMap = members.associateBy { it.id }
         val chatMap = chats.associateBy { it.id }
 
-        // Automatically mark incoming SENT messages as DELIVERED (double gray check ✓✓) in background
-        messages.forEach { msg ->
-            val chat = chatMap[msg.chatId] ?: return@forEach
+        val hasNewChatActivity = chats.any { chat ->
             val participants = JsonHelpers.decodeStringList(chat.participantIdsJson)
-            if (participants.contains(meId) &&
-                msg.senderId != meId &&
-                msg.type != MessageType.DELETED &&
-                msg.status == MessageStatus.SENT
-            ) {
-                repo.markMessageDeliveredToRecipient(famId, msg.id)
-            }
+            participants.contains(meId) &&
+                !mutedChatIds.contains(chat.id) &&
+                chat.updatedAt > cutoffTs
+        }
+
+        val messages = if (hasNewChatActivity) repo.fetchMessagesOnce(famId, uid) else emptyList()
+        val calls = if (isImmediateCheck) repo.fetchCallsOnce(famId, uid) else emptyList()
+
+        val activeRingingCall = calls.firstOrNull { call ->
+            val targets = JsonHelpers.decodeStringList(call.targetMemberIdsJson)
+            call.callStatus == CallSignalStatus.RINGING &&
+                call.callerId != meId &&
+                targets.contains(meId) &&
+                (now - call.timestamp) < 60_000L
         }
 
         val unreadNewMessages = messages.filter { msg ->
@@ -74,6 +81,25 @@ class FamiChatBackgroundSyncWorker(
                 msg.status != MessageStatus.READ &&
                 !JsonHelpers.decodeStringList(msg.readByMemberIdsJson).contains(meId) &&
                 msg.timestamp > cutoffTs
+        }
+
+        val memberMap = if (unreadNewMessages.isNotEmpty() || activeRingingCall != null) {
+            repo.fetchMembersOnce(famId, uid).associateBy { it.id }
+        } else {
+            emptyMap()
+        }
+
+        // Automatically mark incoming SENT messages as DELIVERED (double gray check ✓✓) in background
+        messages.forEach { msg ->
+            val chat = chatMap[msg.chatId] ?: return@forEach
+            val participants = JsonHelpers.decodeStringList(chat.participantIdsJson)
+            if (participants.contains(meId) &&
+                msg.senderId != meId &&
+                msg.type != MessageType.DELETED &&
+                msg.status == MessageStatus.SENT
+            ) {
+                repo.markMessageDeliveredToRecipient(famId, msg.id)
+            }
         }
 
         var maxNotifiedTs = savedLastTs
@@ -120,13 +146,6 @@ class FamiChatBackgroundSyncWorker(
             prefs.updateLastNotifiedTimestampIfNewer(now)
         }
 
-        val activeRingingCall = calls.firstOrNull { call ->
-            val targets = JsonHelpers.decodeStringList(call.targetMemberIdsJson)
-            call.callStatus == CallSignalStatus.RINGING &&
-                call.callerId != meId &&
-                targets.contains(meId) &&
-                (now - call.timestamp) < 60_000L
-        }
         if (activeRingingCall != null) {
             val callerName = memberMap[activeRingingCall.callerId]?.name ?: activeRingingCall.title
             FamiChatNotificationHelper.notifyIncomingCall(

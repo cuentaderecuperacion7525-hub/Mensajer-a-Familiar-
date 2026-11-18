@@ -30,6 +30,7 @@ class PreferencesManager(private val context: Context) {
         private val KEY_TURN_URL = stringPreferencesKey("turn_server_url")
         private val KEY_TURN_USERNAME = stringPreferencesKey("turn_server_username")
         private val KEY_TURN_CREDENTIAL = stringPreferencesKey("turn_server_credential")
+        private val KEY_LAST_SYNCED_UIDS_HASH = stringPreferencesKey("last_synced_uids_hash")
         const val DEFAULT_PIN = "7525"
         const val DEFAULT_SWITCH_PIN = "2580"
         const val DEFAULT_TURN_URL = "turn:openrelay.metered.ca:80"
@@ -100,6 +101,10 @@ class PreferencesManager(private val context: Context) {
 
     val turnCredentialFlow: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_TURN_CREDENTIAL]?.ifBlank { DEFAULT_TURN_CREDENTIAL } ?: DEFAULT_TURN_CREDENTIAL
+    }
+
+    val lastSyncedUidsHashFlow: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[KEY_LAST_SYNCED_UIDS_HASH]
     }
 
     suspend fun updateMasterPin(newPin: String) {
@@ -227,6 +232,12 @@ class PreferencesManager(private val context: Context) {
             prefs[KEY_TURN_URL] = url.trim().ifBlank { DEFAULT_TURN_URL }
             prefs[KEY_TURN_USERNAME] = username.trim().ifBlank { DEFAULT_TURN_USERNAME }
             prefs[KEY_TURN_CREDENTIAL] = credential.trim().ifBlank { DEFAULT_TURN_CREDENTIAL }
+        }
+    }
+
+    suspend fun setLastSyncedUidsHash(hash: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_LAST_SYNCED_UIDS_HASH] = hash
         }
     }
 }

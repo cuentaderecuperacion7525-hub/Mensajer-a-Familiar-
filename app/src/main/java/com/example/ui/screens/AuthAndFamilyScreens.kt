@@ -261,7 +261,7 @@ fun FamilySetupScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     var familyName by remember { mutableStateOf("Mi Familia") }
     var adminName by remember(userName) {
-        mutableStateOf(userName.substringBefore(" ").ifBlank { "Papá" })
+        mutableStateOf(userName.substringBefore(" "))
     }
     var adminEmoji by remember { mutableStateOf("👨🏽") }
     var adminColor by remember { mutableStateOf(AvatarColors.first()) }

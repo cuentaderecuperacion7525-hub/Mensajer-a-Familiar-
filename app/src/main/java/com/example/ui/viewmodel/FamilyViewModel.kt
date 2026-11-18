@@ -43,6 +43,7 @@ import com.example.util.TimeFormatters
 import com.example.util.VideoMediaHelper
 import com.example.util.VoiceAudioHelper
 import java.io.File
+import java.text.Normalizer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -109,6 +110,55 @@ data class VoiceRecordingState(
     val amplitudes: List<Float> = emptyList()
 )
 
+internal fun normalizeProfileKey(value: String): String {
+    val nfd = Normalizer.normalize(value.trim(), Normalizer.Form.NFD)
+    return nfd.replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+        .replace(Regex("\\s+"), " ")
+        .lowercase()
+}
+
+internal fun isDuplicateLegacyPapaProfile(
+    candidate: FamilyMemberEntity,
+    allMembers: List<FamilyMemberEntity>
+): Boolean {
+    if (candidate.isAdmin) return false
+    val hasPrimaryAdmin = allMembers.any { it.isAdmin && it.id != candidate.id }
+    if (!hasPrimaryAdmin) return false
+    val normName = normalizeProfileKey(candidate.name)
+    val normRole = normalizeProfileKey(candidate.roleLabel)
+    return normName == "papa" && (normRole == "familiar" || normRole.isEmpty())
+}
+
+internal fun validateMemberBeforeSave(
+    existingMembers: List<FamilyMemberEntity>,
+    editingId: String?,
+    name: String,
+    roleLabel: String,
+    isCallerAdmin: Boolean
+): String? {
+    if (!isCallerAdmin) {
+        return "Solo el administrador puede crear o modificar perfiles."
+    }
+    val trimmedName = name.trim()
+    val trimmedRole = roleLabel.trim()
+    if (trimmedName.isEmpty()) {
+        return "Ingresa un nombre para el perfil."
+    }
+    if (trimmedRole.isEmpty()) {
+        return "Ingresa el parentesco o rol familiar."
+    }
+    val normName = normalizeProfileKey(trimmedName)
+    val normRole = normalizeProfileKey(trimmedRole)
+    val others = existingMembers.filter { it.id != editingId }
+    if (others.any { normalizeProfileKey(it.name) == normName }) {
+        return "Ya existe un perfil con el nombre \"$trimmedName\"."
+    }
+    if (others.any { normalizeProfileKey(it.roleLabel) == normRole }) {
+        return "Ya existe un perfil con el parentesco \"$trimmedRole\"."
+    }
+    return null
+}
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class FamilyViewModel(
     private val appContext: Context,
@@ -124,7 +174,11 @@ class FamilyViewModel(
     private fun <T> Flow<T>.safeFirestoreFlow(fallback: T): Flow<T> = catch { err ->
         val fsErr = err.unwrapFirestoreException()
         if (fsErr == null && err is CancellationException) throw err
-        val msg = fsErr?.localizedMessage ?: err.localizedMessage
+        val msg = if (fsErr?.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED) {
+            "Límite diario de lecturas en la nube alcanzado; se restablecerá mañana."
+        } else {
+            fsErr?.localizedMessage ?: err.localizedMessage
+        }
         if (!msg.isNullOrBlank()) {
             _snackbarMessage.value = msg
         }
@@ -158,14 +212,20 @@ class FamilyViewModel(
     private val _isMembersLoading = MutableStateFlow(true)
     val isMembersLoading: StateFlow<Boolean> = _isMembersLoading.asStateFlow()
 
+    private val _isResolvingFamilySpace = MutableStateFlow(true)
+    private val _membersRetryTick = MutableStateFlow(0)
     private val _optimisticRegisteredMember = MutableStateFlow<Pair<String, FamilyMemberEntity>?>(null)
     private var membersLoadingTimeoutJob: Job? = null
 
-    private val rawMembers: StateFlow<List<FamilyMemberEntity>> = _activeFamilyId
-        .flatMapLatest { fid ->
+    private val rawMembers: StateFlow<List<FamilyMemberEntity>> = combine(
+        _activeFamilyId,
+        _isResolvingFamilySpace,
+        _membersRetryTick
+    ) { fid, resolving, _ -> fid to resolving }
+        .flatMapLatest { (fid, resolving) ->
             membersLoadingTimeoutJob?.cancel()
             if (fid.isNullOrBlank()) {
-                _isMembersLoading.value = false
+                _isMembersLoading.value = resolving
                 flowOf(emptyList())
             } else {
                 _isMembersLoading.value = true
@@ -187,7 +247,11 @@ class FamilyViewModel(
                         _isMembersLoading.value = false
                         val fsErr = err.unwrapFirestoreException()
                         if (fsErr == null && err is CancellationException) throw err
-                        val msg = fsErr?.localizedMessage ?: err.localizedMessage
+                        val msg = if (fsErr?.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED) {
+                            "Límite diario de lecturas en la nube alcanzado; se restablecerá mañana."
+                        } else {
+                            fsErr?.localizedMessage ?: err.localizedMessage
+                        }
                         if (!msg.isNullOrBlank()) {
                             _snackbarMessage.value = msg
                         }
@@ -592,6 +656,7 @@ class FamilyViewModel(
                 _isSessionReady.value = true
             }
             val resolvedFamilyId = resolveInitialFamilySpace(savedFamilyId)
+            _isResolvingFamilySpace.value = false
             if (resolvedFamilyId != null) {
                 _activeFamilyId.value = resolvedFamilyId
                 prefs.setActiveFamilyId(resolvedFamilyId)
@@ -619,15 +684,49 @@ class FamilyViewModel(
             _isSessionReady.value = true
         }
 
-        // Automatically backfill new family UIDs onto existing docs when a new family phone joins
+        // Automatically backfill new family UIDs onto existing docs only when a new phone joins (owner device only)
         viewModelScope.launch {
             activeFamily.collect { fam ->
-                if (fam != null) {
+                if (fam != null && fam.ownerUid == currentUserId) {
                     val uids = fam.memberUids.toSet()
-                    if (uids.size > 1 && uids != lastSyncedMemberUids) {
+                    val uidsHash = "${fam.id}:${uids.sorted().joinToString(",")}"
+                    val savedHash = prefs.lastSyncedUidsHashFlow.first()
+                    if (uids.size > 1 && uids != lastSyncedMemberUids && uidsHash != savedHash) {
                         lastSyncedMemberUids = uids
                         cloudRepo.syncMemberUidsAcrossExistingDocs(fam.id, fam.memberUids, currentUserId)
+                        prefs.setLastSyncedUidsHash(uidsHash)
+                    } else if (uidsHash == savedHash) {
+                        lastSyncedMemberUids = uids
                     }
+                }
+            }
+        }
+
+        // One-time admin cleanup: migrate any data from duplicate "Papa" ("Familiar") to primary admin and delete duplicate
+        viewModelScope.launch {
+            val cleanedDuplicateIds = mutableSetOf<String>()
+            var cleanupInProgress = false
+            combine(activeFamily, activeMember, rawMembers) { fam, active, membersList ->
+                Triple(fam, active, membersList)
+            }.collect { (fam, active, membersList) ->
+                if (cleanupInProgress || fam == null || active == null || !active.isAdmin) return@collect
+                val duplicate = membersList.firstOrNull {
+                    it.id !in cleanedDuplicateIds && isDuplicateLegacyPapaProfile(it, membersList)
+                } ?: return@collect
+                val primaryAdmin = membersList.firstOrNull { it.isAdmin && it.id == active.id }
+                    ?: membersList.firstOrNull { it.isAdmin }
+                    ?: return@collect
+
+                cleanedDuplicateIds.add(duplicate.id)
+                cleanupInProgress = true
+                try {
+                    migrateAndRemoveDuplicateProfile(
+                        famId = fam.id,
+                        duplicate = duplicate,
+                        targetAdmin = primaryAdmin
+                    )
+                } finally {
+                    cleanupInProgress = false
                 }
             }
         }
@@ -645,6 +744,7 @@ class FamilyViewModel(
         viewModelScope.launch {
             val sessionStartedAt = System.currentTimeMillis()
             val seenMessageIds = mutableSetOf<String>()
+            val deliveredAttemptedIds = mutableSetOf<String>()
             var seededForMemberId: String? = null
             combine(
                 allMessages,
@@ -658,6 +758,7 @@ class FamilyViewModel(
                 if (meId == null) {
                     seededForMemberId = null
                     seenMessageIds.clear()
+                    deliveredAttemptedIds.clear()
                     return@collect
                 }
                 val chatMap = chats.associateBy { it.id }
@@ -669,7 +770,8 @@ class FamilyViewModel(
                         if (participants.contains(meId) &&
                             msg.senderId != meId &&
                             msg.type != MessageType.DELETED &&
-                            msg.status == MessageStatus.SENT
+                            msg.status == MessageStatus.SENT &&
+                            deliveredAttemptedIds.add(msg.id)
                         ) {
                             viewModelScope.launch {
                                 cloudRepo.markMessageDeliveredToRecipient(famId, msg.id)
@@ -812,6 +914,7 @@ class FamilyViewModel(
 
     fun retryLoadProfiles() {
         viewModelScope.launch {
+            _isResolvingFamilySpace.value = true
             _isMembersLoading.value = true
             try {
                 val currentFamId = _activeFamilyId.value
@@ -825,11 +928,15 @@ class FamilyViewModel(
                     val code = activeFamily.value?.inviteCode?.ifBlank { "NIDO01" } ?: "NIDO01"
                     cloudRepo.joinFamilyByInviteCode(currentUserId, code).getOrNull() ?: currentFamId
                 }
+                _isResolvingFamilySpace.value = false
                 if (!targetFamId.isNullOrBlank()) {
+                    _membersRetryTick.value += 1
                     cloudRepo.fetchMembersOnce(targetFamId, currentUserId)
+                } else {
+                    _isMembersLoading.value = false
                 }
             } finally {
-                _isMembersLoading.value = false
+                _isResolvingFamilySpace.value = false
             }
         }
     }
@@ -877,16 +984,16 @@ class FamilyViewModel(
                 familyName = familyName,
                 adminName = adminName,
                 adminEmoji = adminEmoji,
-                adminColorHex = adminColorHex
+                adminColorHex = adminColorHex,
+                autoCreateAdminMember = false
             )
             _isFamilyActionBusy.value = false
-            res.onSuccess { (famId, memberId) ->
+            res.onSuccess { (famId, _) ->
                 _showFamilySpacesSetup.value = false
                 _activeFamilyId.value = famId
                 prefs.setActiveFamilyId(famId)
-                _activeMemberId.value = memberId
-                prefs.setActiveMemberId(memberId)
-                syncPushAndBackgroundWork(famId, memberId)
+                _activeMemberId.value = null
+                prefs.setActiveMemberId(null)
                 showMessage("Familia creada y sincronizada en la nube")
             }.onFailure { err ->
                 showMessage(err.localizedMessage ?: "No se pudo crear la familia")
@@ -920,115 +1027,8 @@ class FamilyViewModel(
         inviteCodeInput: String = "",
         onSuccess: () -> Unit
     ) {
-        if (_isFamilyActionBusy.value) return
-        val trimmedName = name.trim().take(40)
-        if (trimmedName.isEmpty()) {
-            showMessage("Escribe tu nombre o apodo para continuar")
-            return
-        }
-        val cleanRole = roleLabel.trim().take(40).ifEmpty { "Familiar" }
-        val cleanColor = colorHex.trim().ifEmpty { "#1A5FD4" }
-        val cleanCode = inviteCodeInput.trim().uppercase()
-
-        viewModelScope.launch {
-            _isFamilyActionBusy.value = true
-            try {
-                val currentFamCode = activeFamily.value?.inviteCode.orEmpty().uppercase()
-                var targetFamId = _activeFamilyId.value
-
-                if (cleanCode.isNotBlank() && cleanCode != currentFamCode) {
-                    val joinRes = cloudRepo.joinFamilyByInviteCode(currentUserId, cleanCode)
-                    val joinedFamId = joinRes.getOrElse { err ->
-                        showMessage(err.localizedMessage ?: "No se encontró el código familiar")
-                        return@launch
-                    }
-                    targetFamId = joinedFamId
-                    _activeFamilyId.value = joinedFamId
-                    prefs.setActiveFamilyId(joinedFamId)
-                } else if (targetFamId.isNullOrBlank()) {
-                    val fixedRes = cloudRepo.ensureFixedFamily(currentUserId)
-                    targetFamId = fixedRes.getOrElse { err ->
-                        showMessage(err.localizedMessage ?: "No se pudo conectar al espacio familiar")
-                        return@launch
-                    }
-                    _activeFamilyId.value = targetFamId
-                    prefs.setActiveFamilyId(targetFamId)
-                }
-
-                val famId = targetFamId ?: run {
-                    showMessage("No se pudo identificar el espacio familiar")
-                    return@launch
-                }
-
-                val uids = (cloudRepo.fetchFamilyUidsOnce(famId) + currentUserId).distinct()
-                val now = System.currentTimeMillis()
-                val newMemberId = "member_${UUID.randomUUID().toString().replace("-", "").take(8)}"
-                val roleEmoji = when {
-                    cleanRole.contains("mam", ignoreCase = true) -> "👩🏽"
-                    cleanRole.contains("pap", ignoreCase = true) -> "👨🏽"
-                    cleanRole.contains("abuel", ignoreCase = true) -> "🧓🏽"
-                    else -> "🧑🏽"
-                }
-                val member = FamilyMemberEntity(
-                    id = newMemberId,
-                    name = trimmedName,
-                    roleLabel = cleanRole,
-                    isAdmin = false,
-                    avatarColorHex = cleanColor,
-                    avatarEmoji = roleEmoji,
-                    avatarPhotoData = "",
-                    bioText = "",
-                    isOnline = true,
-                    lastSeenText = "En línea",
-                    createdAt = now,
-                    phoneNumber = "",
-                    liveStatus = PresenceStatus.ONLINE,
-                    liveChatId = null,
-                    liveStatusAt = now,
-                    linkedAuthUid = currentUserId,
-                    authorUid = currentUserId
-                )
-
-                val upsertRes = cloudRepo.upsertMember(
-                    familyId = famId,
-                    member = member,
-                    memberUids = uids,
-                    callerUid = currentUserId,
-                    isCreate = true
-                )
-                if (upsertRes.isFailure) {
-                    val err = upsertRes.exceptionOrNull()
-                    showMessage(err?.localizedMessage ?: "No se pudo registrar tu perfil")
-                    return@launch
-                }
-
-                _optimisticRegisteredMember.value = famId to member
-
-                val chats = cloudRepo.fetchChatsOnce(famId, currentUserId)
-                    .ifEmpty { rawChats.value }
-                val mainGroup = chats.firstOrNull { it.id == "chat_general" }
-                    ?: chats.firstOrNull { it.type == ChatType.GROUP }
-                if (mainGroup != null) {
-                    val participantIds = JsonHelpers.decodeStringList(mainGroup.participantIdsJson).toMutableList()
-                    if (!participantIds.contains(newMemberId)) {
-                        participantIds.add(newMemberId)
-                        cloudRepo.upsertChat(
-                            familyId = famId,
-                            chat = mainGroup.copy(participantIdsJson = JsonHelpers.encodeStringList(participantIds)),
-                            memberUids = uids,
-                            callerUid = currentUserId,
-                            isCreate = false
-                        )
-                    }
-                }
-
-                selectProfile(newMemberId)
-                showMessage("¡Bienvenido, $trimmedName!")
-                onSuccess()
-            } finally {
-                _isFamilyActionBusy.value = false
-            }
-        }
+        showMessage("Solo el administrador puede crear perfiles en esta familia.")
+        return
     }
 
     fun toggleTheme() {
@@ -1546,8 +1546,20 @@ class FamilyViewModel(
         removePhoto: Boolean = false
     ) {
         val famId = _activeFamilyId.value ?: return
+        val callerIsAdmin = activeMember.value?.isAdmin == true
+        val validationError = validateMemberBeforeSave(
+            existingMembers = rawMembers.value,
+            editingId = existingId,
+            name = name,
+            roleLabel = roleLabel,
+            isCallerAdmin = callerIsAdmin
+        )
+        if (validationError != null) {
+            showMessage(validationError)
+            return
+        }
         val trimmedName = name.trim()
-        if (trimmedName.isEmpty()) return
+        val trimmedRole = roleLabel.trim()
         val uids = currentMemberUids()
         viewModelScope.launch {
             val isCreate = existingId == null
@@ -1562,7 +1574,7 @@ class FamilyViewModel(
             val member = FamilyMemberEntity(
                 id = id,
                 name = trimmedName,
-                roleLabel = roleLabel.trim().ifEmpty { "Familiar" },
+                roleLabel = trimmedRole,
                 isAdmin = isAdmin,
                 avatarColorHex = colorHex,
                 avatarEmoji = emoji,
@@ -1602,6 +1614,194 @@ class FamilyViewModel(
                 showMessage("$trimmedName añadido a la familia")
             } else {
                 showMessage("Perfil de $trimmedName actualizado")
+            }
+        }
+    }
+
+    private suspend fun migrateAndRemoveDuplicateProfile(
+        famId: String,
+        duplicate: FamilyMemberEntity,
+        targetAdmin: FamilyMemberEntity
+    ) {
+        val uids = currentMemberUids()
+        val oldId = duplicate.id
+        val newId = targetAdmin.id
+        var migratedCount = 0
+
+        val chatsSnapshot = rawChats.value
+        val directChatRemap = mutableMapOf<String, String>()
+        chatsSnapshot.filter { it.type == ChatType.DIRECT }.forEach { chat ->
+            val pIds = JsonHelpers.decodeStringList(chat.participantIdsJson)
+            if (oldId in pIds) {
+                val otherId = pIds.firstOrNull { it != oldId }
+                val existingAdminDirect = if (otherId != null) {
+                    chatsSnapshot.firstOrNull { c ->
+                        c.id != chat.id && c.type == ChatType.DIRECT &&
+                            JsonHelpers.decodeStringList(c.participantIdsJson).let { newId in it && otherId in it }
+                    }
+                } else null
+                if (existingAdminDirect != null) {
+                    directChatRemap[chat.id] = existingAdminDirect.id
+                }
+            }
+        }
+
+        // 1. Migrate any messages referencing duplicate profile
+        allMessages.value.forEach { msg ->
+            val remappedChatId = directChatRemap[msg.chatId] ?: msg.chatId
+            val needsIdentityMigration = msg.senderId == oldId || msg.chatId in directChatRemap
+            val readIds = JsonHelpers.decodeStringList(msg.readByMemberIdsJson)
+            val playedIds = JsonHelpers.decodeStringList(msg.playedByMemberIdsJson)
+            val hiddenIds = JsonHelpers.decodeStringList(msg.hiddenForMemberIdsJson)
+            val reactions = JsonHelpers.decodeReactions(msg.reactionsJson)
+            val hasArrayRef = oldId in readIds || oldId in playedIds || oldId in hiddenIds || reactions.containsKey(oldId)
+
+            if (needsIdentityMigration) {
+                val newRead = readIds.map { if (it == oldId) newId else it }.distinct()
+                val newPlayed = playedIds.map { if (it == oldId) newId else it }.distinct()
+                val newHidden = hiddenIds.map { if (it == oldId) newId else it }.distinct()
+                val newReactions = reactions.toMutableMap().also { map ->
+                    val oldReaction = map.remove(oldId)
+                    if (oldReaction != null && !map.containsKey(newId)) {
+                        map[newId] = oldReaction
+                    }
+                }
+                val migratedMsg = msg.copy(
+                    id = "msg_${UUID.randomUUID().toString().replace("-", "").take(10)}",
+                    chatId = remappedChatId,
+                    senderId = if (msg.senderId == oldId) newId else msg.senderId,
+                    readByMemberIdsJson = JsonHelpers.encodeStringList(newRead),
+                    playedByMemberIdsJson = JsonHelpers.encodeStringList(newPlayed),
+                    hiddenForMemberIdsJson = JsonHelpers.encodeStringList(newHidden),
+                    reactionsJson = JsonHelpers.encodeReactions(newReactions),
+                    authorUid = currentUserId
+                )
+                if (cloudRepo.createMessage(famId, migratedMsg, uids, currentUserId).isSuccess) {
+                    cloudRepo.deleteMessage(famId, msg.id)
+                    migratedCount++
+                }
+            } else if (hasArrayRef) {
+                val fields = mutableMapOf<String, Any>()
+                if (oldId in readIds) {
+                    fields["readByMemberIds"] = readIds.map { if (it == oldId) newId else it }.distinct()
+                }
+                if (oldId in playedIds) {
+                    fields["playedByMemberIds"] = playedIds.map { if (it == oldId) newId else it }.distinct()
+                }
+                if (oldId in hiddenIds) {
+                    fields["hiddenForMemberIds"] = hiddenIds.map { if (it == oldId) newId else it }.distinct()
+                }
+                if (reactions.containsKey(oldId)) {
+                    val newReactions = reactions.toMutableMap().also { map ->
+                        val r = map.remove(oldId)
+                        if (r != null && !map.containsKey(newId)) map[newId] = r
+                    }
+                    fields["reactions"] = newReactions
+                }
+                if (fields.isNotEmpty()) {
+                    cloudRepo.updateMessageFields(famId, msg.id, fields)
+                    migratedCount++
+                }
+            }
+        }
+
+        // 2. Migrate or clean chats
+        chatsSnapshot.forEach { chat ->
+            val pIds = JsonHelpers.decodeStringList(chat.participantIdsJson)
+            if (oldId in pIds) {
+                if (chat.id in directChatRemap) {
+                    cloudRepo.deleteChat(famId, chat.id)
+                } else {
+                    val updatedPIds = pIds.map { if (it == oldId) newId else it }.distinct()
+                    cloudRepo.upsertChat(
+                        famId,
+                        chat.copy(participantIdsJson = JsonHelpers.encodeStringList(updatedPIds)),
+                        uids,
+                        currentUserId,
+                        isCreate = false
+                    )
+                    migratedCount++
+                }
+            }
+        }
+
+        // 3. Migrate statuses / stories
+        rawStatuses.value.forEach { st ->
+            if (st.memberId == oldId) {
+                val migratedStatus = st.copy(
+                    id = "st_${UUID.randomUUID().toString().replace("-", "").take(8)}",
+                    memberId = newId,
+                    authorUid = currentUserId
+                )
+                if (cloudRepo.createStatus(famId, migratedStatus, uids, currentUserId).isSuccess) {
+                    cloudRepo.deleteStatus(famId, st.id)
+                    migratedCount++
+                }
+            } else if (oldId in JsonHelpers.decodeStringList(st.viewedByMemberIdsJson)) {
+                cloudRepo.markStatusViewed(famId, st.id, newId)
+            }
+        }
+
+        // 4. Migrate calls
+        calls.value.forEach { call ->
+            if (call.callerId == oldId) {
+                val migratedCall = call.copy(
+                    id = "call_${UUID.randomUUID().toString().replace("-", "").take(8)}",
+                    callerId = newId,
+                    authorUid = currentUserId
+                )
+                if (cloudRepo.createCall(famId, migratedCall, uids, currentUserId).isSuccess) {
+                    cloudRepo.deleteCall(famId, call.id)
+                    migratedCount++
+                }
+            }
+        }
+
+        // 5. Migrate events, notes, shopping items
+        events.value.forEach { ev ->
+            if (ev.assignedMemberId == oldId) {
+                if (cloudRepo.updateEventAssignedMember(famId, ev.id, newId).isSuccess) {
+                    migratedCount++
+                }
+            }
+        }
+        notes.value.forEach { note ->
+            if (note.authorId == oldId) {
+                val migratedNote = note.copy(
+                    id = "note_${UUID.randomUUID().toString().replace("-", "").take(8)}",
+                    authorId = newId,
+                    authorUid = currentUserId
+                )
+                if (cloudRepo.upsertNote(famId, migratedNote, uids, currentUserId, isCreate = true).isSuccess) {
+                    cloudRepo.deleteNote(famId, note.id)
+                    migratedCount++
+                }
+            }
+        }
+        shoppingItems.value.forEach { item ->
+            if (item.addedById == oldId) {
+                val migratedItem = item.copy(
+                    id = "shop_${UUID.randomUUID().toString().replace("-", "").take(8)}",
+                    addedById = newId,
+                    authorUid = currentUserId
+                )
+                if (cloudRepo.upsertShoppingItem(famId, migratedItem, uids, currentUserId, isCreate = true).isSuccess) {
+                    cloudRepo.deleteShoppingItem(famId, item.id)
+                    migratedCount++
+                }
+            }
+        }
+
+        // 6. Delete duplicate member document
+        val deleteRes = cloudRepo.deleteMember(famId, oldId)
+        if (deleteRes.isSuccess) {
+            if (prefs.activeMemberIdFlow.first() == oldId) {
+                prefs.setActiveMemberId(newId)
+            }
+            if (migratedCount > 0) {
+                showMessage("Datos de \"${duplicate.name}\" transferidos a ${targetAdmin.name} y perfil duplicado eliminado.")
+            } else {
+                showMessage("Perfil duplicado \"${duplicate.name}\" eliminado. Solo ${targetAdmin.name} permanece como administrador.")
             }
         }
     }

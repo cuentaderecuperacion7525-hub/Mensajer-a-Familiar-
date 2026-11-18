@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -126,6 +127,10 @@ class MainActivity : ComponentActivity() {
                 }
             ) {
                 val signedInUser = currentUser
+                val savedMemberState by produceState<Pair<Boolean, String?>>(initialValue = false to null, prefs) {
+                    val id = runCatching { prefs.activeMemberIdFlow.first() }.getOrNull()
+                    value = true to id
+                }
                 if (signedInUser == null) {
                     var authError by remember { mutableStateOf<String?>(null) }
                     var retryTick by remember { mutableStateOf(0) }
@@ -139,25 +144,37 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.background),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (authError == null) {
-                            CircularProgressIndicator()
-                        } else {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Text(
-                                    text = authError ?: "Error de conexión",
-                                    color = MaterialTheme.colorScheme.onBackground
-                                )
-                                Button(onClick = { retryTick++ }) {
-                                    Text("Reintentar")
+                    val (prefsLoaded, savedMemberId) = savedMemberState
+                    if (prefsLoaded && savedMemberId == null) {
+                        ProfileSelectorScreen(
+                            members = emptyList(),
+                            isMembersLoading = authError == null,
+                            snackbarMessage = authError,
+                            onClearSnackbar = { authError = null },
+                            onSelectMember = {},
+                            onRetryLoad = { retryTick++ }
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (authError == null) {
+                                CircularProgressIndicator()
+                            } else {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text(
+                                        text = authError ?: "Error de conexión",
+                                        color = MaterialTheme.colorScheme.onBackground
+                                    )
+                                    Button(onClick = { retryTick++ }) {
+                                        Text("Reintentar")
+                                    }
                                 }
                             }
                         }

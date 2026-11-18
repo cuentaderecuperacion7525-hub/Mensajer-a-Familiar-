@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.app.Activity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -39,18 +41,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import coil.compose.AsyncImage
 import com.example.data.model.FamilyMemberEntity
 import com.example.ui.components.extractAvatarInitials
@@ -66,6 +71,68 @@ private val SelectorCardBorder = Color(0xFFE3E6EC)
 private val SelectorAdminPillBg = Color(0xFFE4EDFC)
 private val SelectorAdminBlue = Color(0xFF1A5FD4)
 
+private val SelectorFallbackPalette = listOf(
+    "#1A5FD4",
+    "#6B4FD8",
+    "#C94521",
+    "#B0306A",
+    "#0E7C66",
+    "#A45F08"
+)
+
+internal fun formatShortProfileName(fullName: String): String {
+    val parts = fullName.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (parts.size <= 2) return parts.joinToString(" ")
+    val connectors = setOf("de", "del", "la", "las", "los", "y")
+    return if (parts[1].lowercase() in connectors) {
+        parts.take(3).joinToString(" ")
+    } else {
+        parts.take(2).joinToString(" ")
+    }
+}
+
+internal fun resolveProfileSelectorColors(orderedMembers: List<FamilyMemberEntity>): Map<String, String> {
+    val hexRegex = Regex("^#[0-9A-F]{6}$")
+    val defaultBlueAliases = setOf("#1A73E8", "#1A5FD4")
+    val usedColors = mutableSetOf<String>()
+    val assigned = linkedMapOf<String, String>()
+
+    // Pass 1: claim each member's first distinct valid saved color
+    orderedMembers.forEach { member ->
+        val rawHex = member.avatarColorHex.trim().uppercase()
+        val isValid = hexRegex.matches(rawHex)
+        val isCollision = !isValid ||
+            rawHex in usedColors ||
+            (rawHex in defaultBlueAliases && usedColors.any { it in defaultBlueAliases })
+        if (!isCollision) {
+            assigned[member.id] = rawHex
+            usedColors.add(rawHex)
+            if (rawHex in defaultBlueAliases) {
+                usedColors.addAll(defaultBlueAliases)
+            }
+        }
+    }
+
+    // Pass 2: assign non-repeating fallback palette colors in list order for missing/duplicated colors
+    var fallbackIdx = 0
+    orderedMembers.forEach { member ->
+        if (!assigned.containsKey(member.id)) {
+            val nextColor = SelectorFallbackPalette.firstOrNull { candidate ->
+                val upper = candidate.uppercase()
+                upper !in usedColors &&
+                    !(upper in defaultBlueAliases && usedColors.any { it in defaultBlueAliases })
+            } ?: SelectorFallbackPalette[fallbackIdx % SelectorFallbackPalette.size]
+            fallbackIdx++
+            assigned[member.id] = nextColor
+            usedColors.add(nextColor.uppercase())
+            if (nextColor.uppercase() in defaultBlueAliases) {
+                usedColors.addAll(defaultBlueAliases)
+            }
+        }
+    }
+    return assigned
+}
+
 @Composable
 fun ProfileSelectorScreen(
     members: List<FamilyMemberEntity>,
@@ -75,6 +142,16 @@ fun ProfileSelectorScreen(
     onSelectMember: (FamilyMemberEntity) -> Unit,
     onRetryLoad: () -> Unit
 ) {
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = true
+            controller.isAppearanceLightNavigationBars = true
+        }
+    }
+
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(snackbarMessage) {
         val msg = snackbarMessage
@@ -89,6 +166,9 @@ fun ProfileSelectorScreen(
             compareByDescending<FamilyMemberEntity> { it.isAdmin }
                 .thenBy { it.createdAt }
         )
+    }
+    val resolvedColors = remember(orderedMembers) {
+        resolveProfileSelectorColors(orderedMembers)
     }
 
     Scaffold(
@@ -222,7 +302,7 @@ fun ProfileSelectorScreen(
                     else -> {
                         val rows = remember(orderedMembers) { orderedMembers.chunked(2) }
                         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                            val cardWidth = ((maxWidth - 12.dp) / 2f).coerceIn(128.dp, 152.dp)
+                            val cardWidth = ((maxWidth - 12.dp) / 2f).coerceAtLeast(120.dp)
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -237,6 +317,7 @@ fun ProfileSelectorScreen(
                                         rowMembers.forEach { member ->
                                             ProfileSelectionCard(
                                                 member = member,
+                                                resolvedColorHex = resolvedColors[member.id] ?: member.avatarColorHex,
                                                 cardWidth = cardWidth,
                                                 onClick = { onSelectMember(member) }
                                             )
@@ -255,14 +336,17 @@ fun ProfileSelectorScreen(
 @Composable
 private fun ProfileSelectionCard(
     member: FamilyMemberEntity,
+    resolvedColorHex: String,
     cardWidth: androidx.compose.ui.unit.Dp,
     onClick: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(18.dp)
     val avatarShape = RoundedCornerShape(18.dp)
-    val avatarBg = parseHexColor(member.avatarColorHex)
-    val initials = remember(member.name, member.avatarEmoji) {
-        extractAvatarInitials(member.name, member.avatarEmoji)
+    val hasPhoto = member.avatarPhotoData.isNotBlank()
+    val avatarBg = if (hasPhoto) Color.White else parseHexColor(resolvedColorHex)
+    val displayName = remember(member.name) { formatShortProfileName(member.name) }
+    val initials = remember(displayName, member.name, member.avatarEmoji) {
+        extractAvatarInitials(displayName.ifBlank { member.name }, member.avatarEmoji)
     }
 
     Surface(
@@ -273,15 +357,15 @@ private fun ProfileSelectionCard(
         shadowElevation = 0.dp,
         modifier = Modifier
             .width(cardWidth)
-            .heightIn(min = 124.dp)
+            .height(124.dp)
             .clip(cardShape)
             .clickable(onClick = onClick)
             .testTag("profile_card_${member.id}")
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 12.dp),
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -293,10 +377,10 @@ private fun ProfileSelectionCard(
                         .background(avatarBg),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (member.avatarPhotoData.isNotBlank()) {
+                    if (hasPhoto) {
                         AsyncImage(
                             model = ImageCompressionHelper.resolveCoilModel(member.avatarPhotoData),
-                            contentDescription = "Foto de ${member.name}",
+                            contentDescription = "Foto de $displayName",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -316,10 +400,11 @@ private fun ProfileSelectionCard(
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
+                            .offset(x = 3.dp, y = 3.dp)
                             .size(20.dp)
                             .clip(CircleShape)
                             .background(SelectorTitleInk)
-                            .border(1.5.dp, SelectorCardBg, CircleShape),
+                            .border(2.dp, SelectorCardBg, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -335,11 +420,11 @@ private fun ProfileSelectionCard(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = member.name,
+                text = displayName,
                 fontFamily = InterFontFamily,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp,
-                lineHeight = 17.sp,
+                lineHeight = 16.sp,
                 color = SelectorTitleInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

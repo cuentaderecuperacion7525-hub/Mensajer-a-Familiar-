@@ -324,5 +324,55 @@ class ExampleRobolectricTest {
     assertEquals("C", com.example.ui.components.extractAvatarInitials("Cristopher", "🧑🏽"))
     assertEquals("AJ", com.example.ui.components.extractAvatarInitials("Ángel de Jesús", "🧑🏽"))
   }
+
+  @Test
+  fun `profile selector formats short names and assigns non repeating colors`() {
+    assertEquals("José Manuel", com.example.ui.screens.formatShortProfileName("José Manuel Martínez"))
+    assertEquals("Tila del Carmen", com.example.ui.screens.formatShortProfileName("Tila del Carmen"))
+    assertEquals("Ángel de Jesús", com.example.ui.screens.formatShortProfileName("Ángel de Jesús"))
+    assertEquals("Cristian Fernando", com.example.ui.screens.formatShortProfileName("Cristian Fernando"))
+    assertEquals("Cristopher", com.example.ui.screens.formatShortProfileName("Cristopher"))
+
+    val members = listOf(
+      com.example.data.model.FamilyMemberEntity("m1", "José Manuel Martínez", "Papá", true, "#1A73E8", "👨🏽"),
+      com.example.data.model.FamilyMemberEntity("m2", "Mama", "Mamá", false, "#1A73E8", "👩🏽"),
+      com.example.data.model.FamilyMemberEntity("m3", "Cristopher", "Hijo", false, "", "🧑🏽"),
+      com.example.data.model.FamilyMemberEntity("m4", "Cristian Fernando", "Hijo", false, "#1A73E8", "🧑🏽")
+    )
+    val resolved = com.example.ui.screens.resolveProfileSelectorColors(members)
+    assertEquals(4, resolved.values.toSet().size)
+    assertEquals("#6B4FD8", resolved["m2"])
+    assertEquals("#C94521", resolved["m3"])
+    assertEquals("#B0306A", resolved["m4"])
+  }
+
+  @Test
+  fun `duplicate legacy papa detector and member validator enforce rules accurately`() {
+    val admin = com.example.data.model.FamilyMemberEntity("m_admin", "José Manuel Martínez", "Papá", true, "#1A5FD4", "👨🏽")
+    val dupPapa = com.example.data.model.FamilyMemberEntity("m_dup", "Papa", "Familiar", false, "#1A73E8", "👨🏽")
+    val mama = com.example.data.model.FamilyMemberEntity("m_mama", "Mama", "Mamá", false, "#6B4FD8", "👩🏽")
+    val cristopher = com.example.data.model.FamilyMemberEntity("m_cris1", "Cristopher", "Hijo", false, "#C94521", "🧑🏽")
+    val cristian = com.example.data.model.FamilyMemberEntity("m_cris2", "Cristian Fernando", "Hijo mayor", false, "#B0306A", "🧑🏽")
+    val all = listOf(admin, dupPapa, mama, cristopher, cristian)
+
+    assertTrue(com.example.ui.viewmodel.isDuplicateLegacyPapaProfile(dupPapa, all))
+    assertFalse(com.example.ui.viewmodel.isDuplicateLegacyPapaProfile(admin, all))
+    assertFalse(com.example.ui.viewmodel.isDuplicateLegacyPapaProfile(mama, all))
+    assertFalse(com.example.ui.viewmodel.isDuplicateLegacyPapaProfile(cristopher, all))
+    assertFalse(com.example.ui.viewmodel.isDuplicateLegacyPapaProfile(cristian, all))
+
+    // Non-admin blocked
+    assertTrue(com.example.ui.viewmodel.validateMemberBeforeSave(all, null, "Abuela", "Abuela", isCallerAdmin = false) != null)
+    // Blank role blocked
+    assertTrue(com.example.ui.viewmodel.validateMemberBeforeSave(all, null, "Abuela", "  ", isCallerAdmin = true) != null)
+    // Duplicate name blocked (accent/case insensitive)
+    assertTrue(com.example.ui.viewmodel.validateMemberBeforeSave(all, null, "Mamá", "Tía", isCallerAdmin = true) != null)
+    // Duplicate role blocked (accent/case insensitive)
+    assertTrue(com.example.ui.viewmodel.validateMemberBeforeSave(all, null, "Carlos", "Papa", isCallerAdmin = true) != null)
+    // Valid new unique member passes
+    assertTrue(com.example.ui.viewmodel.validateMemberBeforeSave(all, null, "Ángel de Jesús", "Hijo menor", isCallerAdmin = true) == null)
+    // Editing same member keeps passing
+    assertTrue(com.example.ui.viewmodel.validateMemberBeforeSave(all, "m_mama", "Mamá", "Mamá", isCallerAdmin = true) == null)
+  }
 }
 

@@ -22,6 +22,7 @@ import com.example.data.model.ShoppingItemEntity
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -129,10 +130,11 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         adminColorHex: String = "#1A73E8",
         defaultMasterPin: String = "7525",
         defaultSwitchPin: String = "2580",
-        customInviteCode: String? = null
+        customInviteCode: String? = null,
+        autoCreateAdminMember: Boolean = true
     ): Result<Pair<String, String>> {
         val cleanFamName = familyName.trim().take(50).ifEmpty { "Mi Familia" }
-        val cleanAdminName = adminName.trim().take(40).ifEmpty { "Papá" }
+        val cleanAdminName = adminName.trim().take(40).ifEmpty { "Administrador" }
         val familyId = "fam_${UUID.randomUUID().toString().replace("-", "").take(12)}"
         val inviteCode = customInviteCode?.trim()?.uppercase() ?: generateInviteCode()
         val adminMemberId = "member_${UUID.randomUUID().toString().replace("-", "").take(8)}"
@@ -174,25 +176,30 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         return try {
             batch.commit().await()
 
-            val adminMember = FamilyMemberEntity(
-                id = adminMemberId,
-                name = cleanAdminName,
-                roleLabel = "Administrador",
-                isAdmin = true,
-                avatarColorHex = adminColorHex,
-                avatarEmoji = adminEmoji,
-                isOnline = true,
-                lastSeenText = "En línea",
-                createdAt = now,
-                liveStatus = PresenceStatus.ONLINE,
-                liveChatId = null,
-                liveStatusAt = now,
-                linkedAuthUid = uid,
-                authorUid = uid
-            )
-            fRef.collection("members").document(adminMemberId)
-                .set(FirestoreMappers.memberToMap(adminMember, memberUids, uid, isCreate = true))
-                .await()
+            val initialMemberIds = if (autoCreateAdminMember) {
+                val adminMember = FamilyMemberEntity(
+                    id = adminMemberId,
+                    name = cleanAdminName,
+                    roleLabel = "Administrador",
+                    isAdmin = true,
+                    avatarColorHex = adminColorHex,
+                    avatarEmoji = adminEmoji,
+                    isOnline = true,
+                    lastSeenText = "En línea",
+                    createdAt = now,
+                    liveStatus = PresenceStatus.ONLINE,
+                    liveChatId = null,
+                    liveStatusAt = now,
+                    linkedAuthUid = uid,
+                    authorUid = uid
+                )
+                fRef.collection("members").document(adminMemberId)
+                    .set(FirestoreMappers.memberToMap(adminMember, memberUids, uid, isCreate = true))
+                    .await()
+                listOf(adminMemberId)
+            } else {
+                emptyList()
+            }
 
             val mainChat = ChatThreadEntity(
                 id = mainChatId,
@@ -200,7 +207,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                 title = cleanFamName,
                 avatarColorHex = "#1A73E8",
                 avatarEmoji = "🏡",
-                participantIdsJson = JsonHelpers.encodeStringList(listOf(adminMemberId)),
+                participantIdsJson = JsonHelpers.encodeStringList(initialMemberIds),
                 updatedAt = now,
                 authorUid = uid
             )
@@ -211,14 +218,14 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             fRef.collection("meta").document("bootstrap").set(
                 mapOf(
                     "ownerUid" to uid,
-                    "memberIds" to listOf(adminMemberId),
+                    "memberIds" to initialMemberIds,
                     "chatIds" to listOf(mainChatId),
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
 
-            Result.success(familyId to adminMemberId)
+            Result.success(familyId to (if (autoCreateAdminMember) adminMemberId else ""))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -239,7 +246,8 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                     uid = uid,
                     familyName = "Mi Familia",
                     adminName = "Administrador",
-                    customInviteCode = code
+                    customInviteCode = code,
+                    autoCreateAdminMember = false
                 ).map { it.first }
                 if (created.isSuccess) {
                     created
@@ -276,7 +284,14 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             val fRef = familyRef(familyId)
             currentPath = fRef.path
 
-            val existingSnap = runCatching { fRef.get().await() }.getOrNull()
+            val existingSnap = try {
+                fRef.get().await()
+            } catch (getErr: Exception) {
+                if (getErr is CancellationException) throw getErr
+                val fsCode = getErr.unwrapFirestoreException()?.code
+                if (fsCode == FirebaseFirestoreException.Code.PERMISSION_DENIED) null
+                else throw getErr
+            }
             val alreadyInFamily = existingSnap?.exists() == true &&
                 ((existingSnap.get("memberUids") as? List<*>)?.mapNotNull { it as? String }?.contains(uid) == true)
 
@@ -290,6 +305,9 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                     ).await()
                 } catch (updateErr: Exception) {
                     if (updateErr is CancellationException) throw updateErr
+                    if (updateErr.unwrapFirestoreException()?.code != FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                        throw updateErr
+                    }
                     val alreadyMember = runCatching {
                         val existingUids = (fRef.get().await().get("memberUids") as? List<*>)
                             ?.mapNotNull { it as? String }
@@ -600,6 +618,14 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         val docRef = familyRef(familyId).collection("members").document(memberId)
         return try {
             docRef.delete().await()
+            runCatching {
+                familyRef(familyId).collection("meta").document("bootstrap").update(
+                    mapOf(
+                        "memberIds" to FieldValue.arrayRemove(memberId),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -718,6 +744,19 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteMessage(familyId: String, messageId: String): Result<Unit> {
+        val docRef = familyRef(familyId).collection("messages").document(messageId)
+        return try {
+            docRef.delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docRef.path)
             Result.failure(e)
         }
     }
@@ -1112,6 +1151,28 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateEventAssignedMember(
+        familyId: String,
+        eventId: String,
+        assignedMemberId: String
+    ): Result<Unit> {
+        val docRef = familyRef(familyId).collection("events").document(eventId)
+        return try {
+            docRef.update(
+                mapOf(
+                    "assignedMemberId" to assignedMemberId,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
             Result.failure(e)
         }
     }

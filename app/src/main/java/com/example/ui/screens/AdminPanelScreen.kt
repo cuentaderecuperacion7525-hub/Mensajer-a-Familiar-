@@ -910,7 +910,7 @@ private fun MemberEditorDialog(
                 onClick = {
                     onSave(name, role, isAdmin, selectedColor, selectedEmoji, phone, bioText, pendingPhotoUri, removePhoto)
                 },
-                enabled = name.isNotBlank(),
+                enabled = name.isNotBlank() && role.isNotBlank(),
                 modifier = Modifier.testTag("save_member_button")
             ) {
                 Text("Guardar")

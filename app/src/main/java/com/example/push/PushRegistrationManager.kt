@@ -8,6 +8,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.example.data.local.PreferencesManager
 import com.example.data.remote.FamilyCloudRepository
 import com.google.firebase.Firebase
@@ -33,12 +34,13 @@ object PushRegistrationManager {
         familyId: String,
         memberId: String
     ): String? {
+        val cachedToken = prefs.fcmTokenFlow.first()?.takeIf { it.isNotBlank() }
         val token = runCatching { Firebase.messaging.token.await() }
             .getOrNull()
             ?.takeIf { it.isNotBlank() }
-            ?: prefs.fcmTokenFlow.first()?.takeIf { it.isNotBlank() }
+            ?: cachedToken
 
-        if (!token.isNullOrBlank()) {
+        if (!token.isNullOrBlank() && token != cachedToken) {
             prefs.setFcmToken(token)
             runCatching {
                 cloudRepo.registerMemberFcmToken(familyId, memberId, token)
@@ -77,7 +79,7 @@ object PushRegistrationManager {
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
         val request = PeriodicWorkRequestBuilder<FamiChatBackgroundSyncWorker>(
-            15,
+            30,
             TimeUnit.MINUTES
         )
             .setConstraints(constraints)
@@ -87,7 +89,7 @@ object PushRegistrationManager {
             WorkManager.getInstance(context.applicationContext)
                 .enqueueUniquePeriodicWork(
                     UNIQUE_PERIODIC_WORK,
-                    ExistingPeriodicWorkPolicy.KEEP,
+                    ExistingPeriodicWorkPolicy.UPDATE,
                     request
                 )
         }
@@ -99,6 +101,7 @@ object PushRegistrationManager {
             .build()
         val request = OneTimeWorkRequestBuilder<FamiChatBackgroundSyncWorker>()
             .setConstraints(constraints)
+            .setInputData(workDataOf(FamiChatBackgroundSyncWorker.KEY_IS_IMMEDIATE_CHECK to true))
             .setInitialDelay(30, TimeUnit.SECONDS)
             .build()
 
