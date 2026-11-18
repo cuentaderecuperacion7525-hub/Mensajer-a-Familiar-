@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
@@ -265,7 +266,7 @@ fun MainHomeScreen(
                         Column(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
-                                .clickable { showOverflowMenu = !showOverflowMenu }
+                                .clickable { showProfileOptionsDialog = true }
                                 .defaultMinSize(minHeight = 48.dp)
                                 .padding(horizontal = 4.dp, vertical = 4.dp)
                                 .testTag("active_profile_switcher"),
@@ -304,6 +305,18 @@ fun MainHomeScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = { showOverflowMenu = !showOverflowMenu },
+                            modifier = Modifier.testTag("home_more_menu_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.MoreVert,
+                                contentDescription = "Opciones de perfil",
+                                tint = textPrimary
+                            )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
