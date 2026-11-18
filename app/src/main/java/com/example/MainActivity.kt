@@ -233,6 +233,7 @@ fun FamiChatApp(
     }
 
     val isSessionReady by vm.isSessionReady.collectAsStateWithLifecycle()
+    val showFamilySpacesSetup by vm.showFamilySpacesSetup.collectAsStateWithLifecycle()
     val myFamilies by vm.myFamilies.collectAsStateWithLifecycle()
     val activeFamily by vm.activeFamily.collectAsStateWithLifecycle()
     val activeFamilyId by vm.activeFamilyId.collectAsStateWithLifecycle()
@@ -253,7 +254,7 @@ fun FamiChatApp(
         return
     }
 
-    if (activeFamilyId == null) {
+    if (showFamilySpacesSetup) {
         FamilySetupScreen(
             userEmail = userEmail,
             userName = userName,
@@ -270,7 +271,7 @@ fun FamiChatApp(
     }
 
     val navController = rememberNavController()
-    val initialRoute = remember(activeFamilyId) { if (activeMember != null) Routes.HOME else Routes.SELECTOR }
+    val initialRoute = remember { if (activeMember != null) Routes.HOME else Routes.SELECTOR }
     val selectedTab by vm.selectedTab.collectAsStateWithLifecycle()
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val chatPreviews by vm.chatPreviews.collectAsStateWithLifecycle()
@@ -354,14 +355,9 @@ fun FamiChatApp(
             composable(Routes.SELECTOR) {
                 ProfileSelectorScreen(
                     members = members,
-                    familyName = activeFamily?.name.orEmpty(),
-                    currentInviteCode = activeFamily?.inviteCode.orEmpty(),
                     isMembersLoading = isMembersLoading,
-                    isRegisterBusy = isFamilyActionBusy,
                     snackbarMessage = snackbarMessage,
                     onClearSnackbar = vm::clearSnackbar,
-                    isDarkTheme = isDarkTheme,
-                    onToggleTheme = vm::toggleTheme,
                     onSelectMember = { member ->
                         if (member.isAdmin) {
                             pendingProtectedMember = member
@@ -372,20 +368,7 @@ fun FamiChatApp(
                             }
                         }
                     },
-                    onRegisterMember = { name, roleLabel, colorHex, inviteCode ->
-                        vm.registerSelfProfile(
-                            name = name,
-                            roleLabel = roleLabel,
-                            colorHex = colorHex,
-                            inviteCodeInput = inviteCode,
-                            onSuccess = {
-                                navController.navigate(Routes.HOME) {
-                                    popUpTo(Routes.SELECTOR) { inclusive = true }
-                                }
-                            }
-                        )
-                    },
-                    onChangeFamily = vm::clearActiveFamilySpace
+                    onRetryLoad = vm::retryLoadProfiles
                 )
             }
 

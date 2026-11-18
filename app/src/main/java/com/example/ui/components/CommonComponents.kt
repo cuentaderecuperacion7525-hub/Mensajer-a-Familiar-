@@ -131,17 +131,37 @@ import com.example.util.parseHexColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.Normalizer
+
+private val INITIALS_SKIP_WORDS = setOf("de", "del", "la", "las", "los", "y")
+
+private fun firstPlainAlnumUpper(word: String): Char? {
+    val normalized = Normalizer.normalize(word, Normalizer.Form.NFD)
+    for (ch in normalized) {
+        if (Character.getType(ch) == Character.NON_SPACING_MARK.toInt()) continue
+        if (ch.isLetterOrDigit()) return ch.uppercaseChar()
+    }
+    return null
+}
 
 fun extractAvatarInitials(name: String?, fallbackEmoji: String): String {
     val cleanName = name?.trim().orEmpty()
     if (cleanName.isNotEmpty()) {
-        val parts = cleanName.split(Regex("\\s+")).filter { it.isNotEmpty() }
-        if (parts.size >= 2) {
-            val first = parts[0].firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()
-            val second = parts[1].firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()
+        val rawParts = cleanName.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val significantParts = if (rawParts.size > 2) {
+            val filtered = rawParts.filterIndexed { index, part ->
+                index == 0 || part.lowercase() !in INITIALS_SKIP_WORDS
+            }
+            if (filtered.size >= 2) filtered else rawParts
+        } else {
+            rawParts
+        }
+        if (significantParts.size >= 2) {
+            val first = firstPlainAlnumUpper(significantParts[0])
+            val second = firstPlainAlnumUpper(significantParts[1])
             if (first != null && second != null) return "$first$second"
         }
-        val single = parts.firstOrNull()?.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()
+        val single = significantParts.firstOrNull()?.let { firstPlainAlnumUpper(it) }
         if (single != null) return single.toString()
     }
     val cleanFallback = fallbackEmoji.trim()

@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
 enum class MainTab { CHATS, GROUPS, CALLS, BOARD }
@@ -342,6 +343,9 @@ class FamilyViewModel(
     private val _isSessionReady = MutableStateFlow(false)
     val isSessionReady: StateFlow<Boolean> = _isSessionReady.asStateFlow()
 
+    private val _showFamilySpacesSetup = MutableStateFlow(false)
+    val showFamilySpacesSetup: StateFlow<Boolean> = _showFamilySpacesSetup.asStateFlow()
+
     private val _isFamilyActionBusy = MutableStateFlow(false)
     val isFamilyActionBusy: StateFlow<Boolean> = _isFamilyActionBusy.asStateFlow()
 
@@ -581,30 +585,26 @@ class FamilyViewModel(
         }
         viewModelScope.launch {
             val savedFamilyId = prefs.activeFamilyIdFlow.first()
-            val fams = runCatching {
-                cloudRepo.observeMyFamilies(currentUserId).first()
-            }.getOrDefault(emptyList())
-            var resolvedFamilyId = when {
-                savedFamilyId != null && fams.any { it.id == savedFamilyId } -> savedFamilyId
-                fams.any { it.inviteCode == "NIDO01" } -> fams.first { it.inviteCode == "NIDO01" }.id
-                savedFamilyId != null -> savedFamilyId
-                else -> null
+            val savedMemberId = prefs.activeMemberIdFlow.first()
+            if (savedMemberId == null) {
+                // Show ProfileSelectorScreen immediately in "Cargando perfiles…" state on fresh device
+                _isMembersLoading.value = true
+                _isSessionReady.value = true
             }
-            if (resolvedFamilyId == null) {
-                resolvedFamilyId = cloudRepo.ensureFixedFamily(currentUserId).getOrNull()
-                    ?: fams.firstOrNull()?.id
-            }
+            val resolvedFamilyId = resolveInitialFamilySpace(savedFamilyId)
             if (resolvedFamilyId != null) {
                 _activeFamilyId.value = resolvedFamilyId
                 prefs.setActiveFamilyId(resolvedFamilyId)
-                val savedMemberId = prefs.activeMemberIdFlow.first()
                 if (savedMemberId != null) {
-                    // Wait briefly for initial member list so locked session restores straight to HOME
+                    // Wait briefly for initial member list so saved profile restores straight to HOME
                     val loadedMembers = runCatching {
                         cloudRepo.observeMembers(resolvedFamilyId, currentUserId).first()
                     }.getOrDefault(emptyList())
                     if (loadedMembers.any { it.id == savedMemberId }) {
                         _activeMemberId.value = savedMemberId
+                        withTimeoutOrNull(1000L) {
+                            activeMember.first { it?.id == savedMemberId }
+                        }
                         syncPushAndBackgroundWork(resolvedFamilyId, savedMemberId)
                         if (_isAppForeground.value && !_manualOffline.value) {
                             startPresenceHeartbeat()
@@ -613,6 +613,8 @@ class FamilyViewModel(
                         prefs.setActiveMemberId(null)
                     }
                 }
+            } else {
+                _isMembersLoading.value = false
             }
             _isSessionReady.value = true
         }
@@ -796,7 +798,49 @@ class FamilyViewModel(
 
     // --- Family Setup / Join ---
 
+    private suspend fun resolveInitialFamilySpace(savedFamilyId: String?): String? {
+        val fams = runCatching {
+            cloudRepo.observeMyFamilies(currentUserId).first()
+        }.getOrDefault(emptyList())
+        var resolvedFamilyId = when {
+            savedFamilyId != null && fams.any { it.id == savedFamilyId } -> savedFamilyId
+            fams.any { it.inviteCode == "NIDO01" } -> fams.first { it.inviteCode == "NIDO01" }.id
+            savedFamilyId != null -> savedFamilyId
+            else -> null
+        }
+        if (resolvedFamilyId == null) {
+            resolvedFamilyId = cloudRepo.ensureFixedFamily(currentUserId).getOrNull()
+                ?: fams.firstOrNull()?.id
+        }
+        return resolvedFamilyId
+    }
+
+    fun retryLoadProfiles() {
+        viewModelScope.launch {
+            _isMembersLoading.value = true
+            try {
+                val currentFamId = _activeFamilyId.value
+                val targetFamId = if (currentFamId.isNullOrBlank()) {
+                    val savedFamId = prefs.activeFamilyIdFlow.first()
+                    resolveInitialFamilySpace(savedFamId)?.also { fid ->
+                        _activeFamilyId.value = fid
+                        prefs.setActiveFamilyId(fid)
+                    }
+                } else {
+                    val code = activeFamily.value?.inviteCode?.ifBlank { "NIDO01" } ?: "NIDO01"
+                    cloudRepo.joinFamilyByInviteCode(currentUserId, code).getOrNull() ?: currentFamId
+                }
+                if (!targetFamId.isNullOrBlank()) {
+                    cloudRepo.fetchMembersOnce(targetFamId, currentUserId)
+                }
+            } finally {
+                _isMembersLoading.value = false
+            }
+        }
+    }
+
     fun selectFamilySpace(familyId: String) {
+        _showFamilySpacesSetup.value = false
         _activeFamilyId.value = familyId
         _activeMemberId.value = null
         viewModelScope.launch {
@@ -808,6 +852,7 @@ class FamilyViewModel(
     fun clearActiveFamilySpace() {
         val prevFamId = _activeFamilyId.value
         val prevMemberId = _activeMemberId.value
+        _showFamilySpacesSetup.value = true
         _activeFamilyId.value = null
         _activeMemberId.value = null
         _activeChatId.value = null
@@ -841,6 +886,7 @@ class FamilyViewModel(
             )
             _isFamilyActionBusy.value = false
             res.onSuccess { (famId, memberId) ->
+                _showFamilySpacesSetup.value = false
                 _activeFamilyId.value = famId
                 prefs.setActiveFamilyId(famId)
                 _activeMemberId.value = memberId
@@ -860,6 +906,7 @@ class FamilyViewModel(
             val res = cloudRepo.joinFamilyByInviteCode(currentUserId, code)
             _isFamilyActionBusy.value = false
             res.onSuccess { famId ->
+                _showFamilySpacesSetup.value = false
                 _activeFamilyId.value = famId
                 prefs.setActiveFamilyId(famId)
                 _activeMemberId.value = null

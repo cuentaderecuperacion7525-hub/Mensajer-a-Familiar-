@@ -315,5 +315,14 @@ class ExampleRobolectricTest {
     com.example.util.VideoMediaHelper.cleanupExpiredStatusVideos(context)
     assertFalse(cachedFile.exists())
   }
+
+  @Test
+  fun `extractAvatarInitials computes expected initials for Spanish family names`() {
+    assertEquals("JM", com.example.ui.components.extractAvatarInitials("José Manuel", "👨🏽"))
+    assertEquals("TC", com.example.ui.components.extractAvatarInitials("Tila del Carmen", "👩🏽"))
+    assertEquals("CF", com.example.ui.components.extractAvatarInitials("Cristian Fernando", "🧑🏽"))
+    assertEquals("C", com.example.ui.components.extractAvatarInitials("Cristopher", "🧑🏽"))
+    assertEquals("AJ", com.example.ui.components.extractAvatarInitials("Ángel de Jesús", "🧑🏽"))
+  }
 }
 
