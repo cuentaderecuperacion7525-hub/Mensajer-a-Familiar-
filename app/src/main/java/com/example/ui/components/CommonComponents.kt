@@ -303,7 +303,10 @@ fun UserProfileOptionsDialog(
     var selectedColorHex by remember(member.id, member.avatarColorHex) {
         val initial = member.avatarColorHex.trim()
         val mapped = when {
-            initial.isBlank() || initial.equals("#1A73E8", ignoreCase = true) -> ProfileAvatarColors.first()
+            initial.isBlank() ||
+                initial.equals("#1A73E8", ignoreCase = true) ||
+                initial.equals("#2563EB", ignoreCase = true) ||
+                initial.equals("#2F6FED", ignoreCase = true) -> ProfileAvatarColors.first()
             else -> initial
         }
         mutableStateOf(mapped)
@@ -315,17 +318,7 @@ fun UserProfileOptionsDialog(
     var pendingCameraPhotoUri by remember(member.id) { mutableStateOf<Uri?>(null) }
     var removeExistingPhoto by remember(member.id) { mutableStateOf(false) }
 
-    val colorSwatches = remember(member.avatarColorHex) {
-        val current = member.avatarColorHex.trim()
-        if (current.startsWith("#") &&
-            !current.equals("#1A73E8", ignoreCase = true) &&
-            ProfileAvatarColors.none { it.equals(current, ignoreCase = true) }
-        ) {
-            listOf(current) + ProfileAvatarColors.take(5)
-        } else {
-            ProfileAvatarColors
-        }
-    }
+    val colorSwatches = ProfileAvatarColors
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -409,50 +402,53 @@ fun UserProfileOptionsDialog(
                 .fillMaxWidth()
                 .navigationBarsPadding()
         ) {
+            // 2. Encabezado fijo arriba: título + X
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 10.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Mi perfil",
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .testTag("profile_close_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Cerrar",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .weight(1f, fill = false)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 22.dp)
-                    .padding(bottom = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // 2. Encabezado: título grande + X
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Mi perfil",
-                        fontFamily = InterFontFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 23.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("profile_close_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = "Cerrar",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-
-                // 3. Bloque de identidad: avatar squircle 72dp (rx 28dp) + Nombre + píldora rol
+                // 3. Bloque de identidad: avatar squircle 60dp (rx 16dp) + Nombre + píldora rol
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
-                            .clip(RoundedCornerShape(28.dp))
+                            .size(60.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .background(squircleColor),
                         contentAlignment = Alignment.Center
                     ) {
@@ -471,7 +467,7 @@ fun UserProfileOptionsDialog(
                                     fontFamily = InterFontFamily,
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = if (liveInitials.length > 1) 26.sp else 30.sp,
+                                    fontSize = if (liveInitials.length > 1) 22.sp else 25.sp,
                                     textAlign = TextAlign.Center
                                 )
                             }
@@ -479,24 +475,24 @@ fun UserProfileOptionsDialog(
                                 Text(
                                     text = member.avatarEmoji.ifBlank { "👤" },
                                     color = Color.White,
-                                    fontSize = 30.sp
+                                    fontSize = 26.sp
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.width(14.dp))
 
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
                             text = liveDisplayName,
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            lineHeight = 23.sp,
+                            fontSize = 17.sp,
+                            lineHeight = 21.sp,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
@@ -508,43 +504,43 @@ fun UserProfileOptionsDialog(
                             Text(
                                 text = if (member.isAdmin) "Administrador" else member.roleLabel,
                                 fontFamily = InterFontFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 11.5.sp,
                                 color = accentBlue,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                             )
                         }
                     }
                 }
 
-                // 4. Dos botones de contorno 2dp en fila: Tomar foto | Galería
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // 4. Dos botones de contorno compactos en fila: Tomar foto | Galería
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         OutlinedButton(
                             onClick = { launchCameraForPhoto() },
                             shape = RoundedCornerShape(50),
-                            border = BorderStroke(2.dp, accentBlue),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                            border = BorderStroke(1.5.dp, accentBlue),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .defaultMinSize(minHeight = 46.dp)
+                                .height(38.dp)
                                 .testTag("profile_take_photo_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.PhotoCamera,
                                 contentDescription = null,
                                 tint = accentBlue,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "Tomar foto",
                                 fontFamily = InterFontFamily,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp,
+                                fontSize = 13.sp,
                                 color = accentBlue,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -558,25 +554,25 @@ fun UserProfileOptionsDialog(
                                 )
                             },
                             shape = RoundedCornerShape(50),
-                            border = BorderStroke(2.dp, accentBlue),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                            border = BorderStroke(1.5.dp, accentBlue),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .defaultMinSize(minHeight = 46.dp)
+                                .height(38.dp)
                                 .testTag("profile_change_photo_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.PhotoLibrary,
                                 contentDescription = null,
                                 tint = accentBlue,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "Galería",
                                 fontFamily = InterFontFamily,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp,
+                                fontSize = 13.sp,
                                 color = accentBlue,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -589,27 +585,29 @@ fun UserProfileOptionsDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.End
                         ) {
-                            TextButton(
-                                onClick = {
-                                    pendingPhotoUri = null
-                                    removeExistingPhoto = true
-                                },
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 modifier = Modifier
-                                    .defaultMinSize(minHeight = 44.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable {
+                                        pendingPhotoUri = null
+                                        removeExistingPhoto = true
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
                                     .testTag("profile_remove_photo_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.DeleteOutline,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "Quitar foto",
                                     fontFamily = InterFontFamily,
                                     fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp,
+                                    fontSize = 12.5.sp,
                                     color = MaterialTheme.colorScheme.error
                                 )
                             }
@@ -617,18 +615,18 @@ fun UserProfileOptionsDialog(
                     }
                 }
 
-                // 5. Color del avatar (6 círculos ~36dp dentro de área táctil >=44dp)
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 5. Color del avatar (6 círculos distintos)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         text = "Color del avatar",
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
+                        fontSize = 12.5.sp,
                         color = labelGray
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         colorSwatches.forEachIndexed { idx, hex ->
@@ -636,7 +634,7 @@ fun UserProfileOptionsDialog(
                             val swatchColor = parseHexColor(hex)
                             Box(
                                 modifier = Modifier
-                                    .size(44.dp)
+                                    .size(40.dp)
                                     .clip(CircleShape)
                                     .clickable { selectedColorHex = hex }
                                     .testTag("profile_color_swatch_$idx"),
@@ -644,16 +642,16 @@ fun UserProfileOptionsDialog(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(if (isSelected) 42.dp else 36.dp)
+                                        .size(if (isSelected) 36.dp else 31.dp)
                                         .then(
                                             if (isSelected) {
                                                 Modifier
                                                     .border(
-                                                        width = 2.5.dp,
+                                                        width = 2.dp,
                                                         color = MaterialTheme.colorScheme.onSurface,
                                                         shape = CircleShape
                                                     )
-                                                    .padding(3.5.dp)
+                                                    .padding(3.dp)
                                             } else {
                                                 Modifier
                                             }
@@ -667,7 +665,7 @@ fun UserProfileOptionsDialog(
                                             imageVector = Icons.Filled.Check,
                                             contentDescription = "Color seleccionado",
                                             tint = Color.White,
-                                            modifier = Modifier.size(17.dp)
+                                            modifier = Modifier.size(15.dp)
                                         )
                                     }
                                 }
@@ -676,13 +674,13 @@ fun UserProfileOptionsDialog(
                     }
                 }
 
-                // 6. Campo Apodo (esquinas 20dp, borde 2dp gris claro)
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // 6. Campo Apodo
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         text = "Apodo",
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
+                        fontSize = 12.5.sp,
                         color = labelGray
                     )
                     ProfileRoundedInputField(
@@ -699,7 +697,7 @@ fun UserProfileOptionsDialog(
                 }
 
                 // 7. Campo Bio con contador 0/80
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -709,14 +707,14 @@ fun UserProfileOptionsDialog(
                             text = "Bio",
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
+                            fontSize = 12.5.sp,
                             color = labelGray
                         )
                         Text(
                             text = "${bioInput.length}/80",
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.Medium,
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             color = labelGray
                         )
                     }
@@ -733,13 +731,13 @@ fun UserProfileOptionsDialog(
                     )
                 }
 
-                // 8. Sección Estado: chips píldora en FlowRow, >=44dp touch target
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 8. Sección Estado: chips compactos en FlowRow
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         text = "Estado",
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
+                        fontSize = 12.5.sp,
                         color = labelGray
                     )
                     FlowRow(
@@ -751,9 +749,8 @@ fun UserProfileOptionsDialog(
                             Surface(
                                 shape = RoundedCornerShape(50),
                                 color = if (selected) accentBlue else sheetSurface,
-                                border = if (selected) null else BorderStroke(1.5.dp, borderLightGray),
+                                border = if (selected) null else BorderStroke(1.25.dp, borderLightGray),
                                 modifier = Modifier
-                                    .defaultMinSize(minHeight = 44.dp)
                                     .clip(RoundedCornerShape(50))
                                     .clickable {
                                         statusInput = preset
@@ -764,23 +761,23 @@ fun UserProfileOptionsDialog(
                                     .testTag("profile_status_chip_$preset")
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
                                     if (selected) {
                                         Icon(
                                             imageVector = Icons.Filled.Check,
                                             contentDescription = null,
                                             tint = Color.White,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(14.dp)
                                         )
                                     }
                                     Text(
                                         text = preset,
                                         fontFamily = InterFontFamily,
                                         fontWeight = FontWeight.SemiBold,
-                                        fontSize = 14.sp,
+                                        fontSize = 12.5.sp,
                                         color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
                                     )
                                 }
@@ -791,9 +788,7 @@ fun UserProfileOptionsDialog(
 
                 // 9. Fila con interruptor: Mostrar mi última vez
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .defaultMinSize(minHeight = 48.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -802,13 +797,13 @@ fun UserProfileOptionsDialog(
                             text = "Mostrar mi última vez",
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
+                            fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = if (isOnlineInput) "Visible para la familia" else "Apareces como desconectado",
                             fontFamily = InterFontFamily,
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             color = labelGray
                         )
                     }
@@ -831,7 +826,7 @@ fun UserProfileOptionsDialog(
                 }
             }
 
-            // 10. Botón principal fijo al fondo
+            // 10. Botón principal fijo al fondo, compacto y estilizado
             Surface(
                 color = sheetSurface,
                 tonalElevation = 0.dp,
@@ -855,18 +850,19 @@ fun UserProfileOptionsDialog(
                         containerColor = accentBlue,
                         contentColor = Color.White
                     ),
+                    contentPadding = PaddingValues(vertical = 8.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 22.dp)
-                        .padding(top = 8.dp, bottom = 20.dp)
-                        .height(52.dp)
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 6.dp, bottom = 14.dp)
+                        .height(44.dp)
                         .testTag("profile_save_status_button")
                 ) {
                     Text(
                         text = "Guardar cambios",
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
+                        fontSize = 15.sp
                     )
                 }
             }
@@ -894,24 +890,24 @@ private fun ProfileRoundedInputField(
         else -> defaultBorderColor
     }
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(2.dp, borderColor),
+        border = BorderStroke(1.5.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 52.dp)
+            .heightIn(min = 44.dp)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             if (value.isEmpty()) {
                 Text(
                     text = placeholder,
                     fontFamily = InterFontFamily,
-                    fontSize = 15.sp,
+                    fontSize = 14.sp,
                     color = placeholderColor
                 )
             }
@@ -922,7 +918,7 @@ private fun ProfileRoundedInputField(
                 maxLines = maxLines,
                 textStyle = TextStyle(
                     fontFamily = InterFontFamily,
-                    fontSize = 15.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface
                 ),

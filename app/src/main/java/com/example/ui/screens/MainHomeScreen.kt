@@ -265,9 +265,6 @@ fun MainHomeScreen(
                     title = {
                         Column(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { showProfileOptionsDialog = true }
-                                .defaultMinSize(minHeight = 48.dp)
                                 .padding(horizontal = 4.dp, vertical = 4.dp)
                                 .testTag("active_profile_switcher"),
                             verticalArrangement = Arrangement.Center
