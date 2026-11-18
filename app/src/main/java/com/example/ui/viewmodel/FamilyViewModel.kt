@@ -802,17 +802,12 @@ class FamilyViewModel(
         val fams = runCatching {
             cloudRepo.observeMyFamilies(currentUserId).first()
         }.getOrDefault(emptyList())
-        var resolvedFamilyId = when {
-            savedFamilyId != null && fams.any { it.id == savedFamilyId } -> savedFamilyId
-            fams.any { it.inviteCode == "NIDO01" } -> fams.first { it.inviteCode == "NIDO01" }.id
-            savedFamilyId != null -> savedFamilyId
-            else -> null
-        }
-        if (resolvedFamilyId == null) {
-            resolvedFamilyId = cloudRepo.ensureFixedFamily(currentUserId).getOrNull()
-                ?: fams.firstOrNull()?.id
-        }
-        return resolvedFamilyId
+        val verifiedSavedFamilyId = savedFamilyId?.takeIf { id -> fams.any { it.id == id } }
+        return verifiedSavedFamilyId
+            ?: fams.firstOrNull { it.inviteCode == "NIDO01" }?.id
+            ?: cloudRepo.ensureFixedFamily(currentUserId).getOrNull()
+            ?: fams.firstOrNull()?.id
+            ?: savedFamilyId
     }
 
     fun retryLoadProfiles() {

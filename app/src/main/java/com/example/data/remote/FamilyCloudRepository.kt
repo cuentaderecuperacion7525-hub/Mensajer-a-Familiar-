@@ -276,22 +276,28 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             val fRef = familyRef(familyId)
             currentPath = fRef.path
 
-            try {
-                fRef.update(
-                    mapOf(
-                        "memberUids" to FieldValue.arrayUnion(uid),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
-            } catch (updateErr: Exception) {
-                if (updateErr is CancellationException) throw updateErr
-                val alreadyMember = runCatching {
-                    val existingUids = (fRef.get().await().get("memberUids") as? List<*>)
-                        ?.mapNotNull { it as? String }
-                        ?: emptyList()
-                    uid in existingUids
-                }.getOrDefault(false)
-                if (!alreadyMember) throw updateErr
+            val existingSnap = runCatching { fRef.get().await() }.getOrNull()
+            val alreadyInFamily = existingSnap?.exists() == true &&
+                ((existingSnap.get("memberUids") as? List<*>)?.mapNotNull { it as? String }?.contains(uid) == true)
+
+            if (!alreadyInFamily) {
+                try {
+                    fRef.update(
+                        mapOf(
+                            "memberUids" to FieldValue.arrayUnion(uid),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                } catch (updateErr: Exception) {
+                    if (updateErr is CancellationException) throw updateErr
+                    val alreadyMember = runCatching {
+                        val existingUids = (fRef.get().await().get("memberUids") as? List<*>)
+                            ?.mapNotNull { it as? String }
+                            ?: emptyList()
+                        uid in existingUids
+                    }.getOrDefault(false)
+                    if (!alreadyMember) throw updateErr
+                }
             }
 
             // Immediately sync joining UID onto existing members & chats listed in bootstrap
