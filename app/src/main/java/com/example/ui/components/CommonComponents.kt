@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -1371,6 +1372,16 @@ fun AppUpdateDialog(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Descargar e instalar")
                         }
+                        TextButton(
+                            onClick = { AppUpdateChecker.openDownloadInBrowser(context, rel) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("update_available_browser_button")
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Descargar en navegador")
+                        }
                         if (hasUnifiedSigning == false) {
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
@@ -1438,11 +1449,24 @@ fun AppUpdateDialog(
                             } else {
                                 String.format("%.1f MB descargados", downloadedMb)
                             }
+                            val statusInfo = updateState.statusLabel.ifBlank {
+                                "Descarga gestionada por el sistema Android."
+                            }
                             Text(
-                                text = "$sizeLabel · Reanudación automática activa si se corta la señal.",
+                                text = "$sizeLabel · $statusInfo",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            OutlinedButton(
+                                onClick = { AppUpdateChecker.openDownloadInBrowser(context, rel) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("update_browser_download_button")
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Descargar en navegador")
+                            }
                             TextButton(
                                 onClick = onDismiss,
                                 modifier = Modifier.align(Alignment.End).testTag("update_cancel_download_button")
@@ -1617,13 +1641,34 @@ fun AppUpdateDialog(
                                 )
                             }
                         }
+                        val failedRelease = updateState.release
                         Button(
-                            onClick = onCheckAgain,
+                            onClick = {
+                                if (failedRelease != null && failedRelease.downloadUrl.isNotBlank()) {
+                                    onDownloadUpdate(failedRelease)
+                                } else {
+                                    onCheckAgain()
+                                }
+                            },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("update_retry_button")
                         ) {
-                            Text("Reintentar")
+                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Reintentar descarga")
+                        }
+                        if (failedRelease != null) {
+                            OutlinedButton(
+                                onClick = { AppUpdateChecker.openDownloadInBrowser(context, failedRelease) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("update_error_browser_button")
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Descargar en navegador")
+                            }
                         }
                         if (isAdmin) {
                             TextButton(

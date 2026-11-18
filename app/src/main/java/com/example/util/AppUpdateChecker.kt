@@ -1,6 +1,7 @@
 package com.example.util
 
 import android.app.Activity
+import android.app.DownloadManager
 import android.content.ClipData
 import android.content.Context
 import android.content.ContextWrapper
@@ -9,20 +10,25 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import androidx.core.content.pm.PackageInfoCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.security.MessageDigest
@@ -67,14 +73,16 @@ sealed interface AppUpdateUiState {
         val release: AppReleaseInfo,
         val progressPercent: Int,
         val downloadedBytes: Long,
-        val totalBytes: Long
+        val totalBytes: Long,
+        val statusLabel: String = ""
     ) : AppUpdateUiState
     data class ReadyToInstall(
         val release: AppReleaseInfo,
         val apkFilePath: String
     ) : AppUpdateUiState
     data class Error(
-        val message: String
+        val message: String,
+        val release: AppReleaseInfo? = null
     ) : AppUpdateUiState
 }
 
@@ -229,8 +237,11 @@ object AppUpdateChecker {
 
     private val downloadClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .protocols(listOf(Protocol.HTTP_1_1))
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .writeTimeout(12, TimeUnit.SECONDS)
+            .callTimeout(60, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
             .retryOnConnectionFailure(true)
@@ -646,7 +657,7 @@ object AppUpdateChecker {
     suspend fun downloadApkToCache(
         context: Context,
         release: AppReleaseInfo,
-        onProgress: (progressPercent: Int, downloadedBytes: Long, totalBytes: Long) -> Unit
+        onProgress: (progressPercent: Int, downloadedBytes: Long, totalBytes: Long, statusLabel: String) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
         val url = release.downloadUrl.trim()
         val isLikelyApk = url.contains(".apk", ignoreCase = true) ||
@@ -663,24 +674,252 @@ object AppUpdateChecker {
         }
 
         val updatesDir = File(context.filesDir, "updates").apply { mkdirs() }
+        val targetFile = File(updatesDir, "FamiChat-update.apk")
+
+        // 1) Primary engine: Android native DownloadManager (handles redirects, mobile/Wi-Fi handoff & background OEM throttling)
+        val dmResult = downloadApkWithSystemManager(
+            context = context,
+            release = release,
+            url = url,
+            targetFile = targetFile,
+            onProgress = onProgress
+        )
+        if (dmResult.isSuccess) {
+            return@withContext dmResult
+        }
+        val dmErr = dmResult.exceptionOrNull()
+        if (dmErr is CancellationException) throw dmErr
+
+        // 2) Fallback engine: Hardened HTTP/1.1 OkHttp stream with strict zero-byte stall guard
+        return@withContext downloadApkWithHttpFallback(
+            release = release,
+            url = url,
+            updatesDir = updatesDir,
+            targetFile = targetFile,
+            priorReason = dmErr?.localizedMessage,
+            onProgress = onProgress
+        )
+    }
+
+    private suspend fun downloadApkWithSystemManager(
+        context: Context,
+        release: AppReleaseInfo,
+        url: String,
+        targetFile: File,
+        onProgress: (progressPercent: Int, downloadedBytes: Long, totalBytes: Long, statusLabel: String) -> Unit
+    ): Result<File> {
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+            ?: return Result.failure(IllegalStateException("Gestor de descargas no disponible"))
+        val extDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: return Result.failure(IllegalStateException("Carpeta de descargas privada no disponible"))
+
+        runCatching {
+            extDir.listFiles()?.forEach { old ->
+                if (old.isFile && old.name.startsWith("FamiChat")) {
+                    old.delete()
+                }
+            }
+        }
+
+        val safeTag = release.tagName.replace(Regex("[^a-zA-Z0-9._-]"), "_").ifBlank { "latest" }
+        val destFileName = "FamiChat-$safeTag-${System.currentTimeMillis()}.apk"
+        val stagedFile = File(extDir, destFileName)
+
+        var downloadId = -1L
+        var finishedCleanly = false
+        return try {
+            onProgress(0, 0L, -1L, "Iniciando gestor de descargas Android...")
+            val request = DownloadManager.Request(Uri.parse(url))
+                .setTitle("FamiChat v${release.versionName}")
+                .setDescription("Descargando actualización de FamiChat")
+                .setMimeType("application/vnd.android.package-archive")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(true)
+                .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, destFileName)
+                .addRequestHeader("User-Agent", "FamiChat-Android")
+                .addRequestHeader("Accept", "application/vnd.android.package-archive, application/octet-stream, */*")
+
+            downloadId = dm.enqueue(request)
+
+            val query = DownloadManager.Query().setFilterById(downloadId)
+            val startedAt = System.currentTimeMillis()
+            var maxBytesSeen = 0L
+            var lastAdvanceAt = startedAt
+
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val now = System.currentTimeMillis()
+                var status = DownloadManager.STATUS_PENDING
+                var reason = 0
+                var downloaded = 0L
+                var total = -1L
+                var rowFound = false
+
+                dm.query(query)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        rowFound = true
+                        val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                        val reasonIdx = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
+                        val downIdx = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                        val totalIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                        if (statusIdx >= 0) status = cursor.getInt(statusIdx)
+                        if (reasonIdx >= 0) reason = cursor.getInt(reasonIdx)
+                        if (downIdx >= 0) downloaded = cursor.getLong(downIdx).coerceAtLeast(0L)
+                        if (totalIdx >= 0) total = cursor.getLong(totalIdx)
+                    }
+                }
+
+                if (!rowFound) {
+                    error("La descarga fue cancelada por el sistema.")
+                }
+
+                if (downloaded > maxBytesSeen) {
+                    maxBytesSeen = downloaded
+                    lastAdvanceAt = now
+                }
+
+                val pct = if (total > 0L) {
+                    ((downloaded * 100L) / total).toInt().coerceIn(0, 100)
+                } else {
+                    if (downloaded > 0L) -1 else 0
+                }
+
+                when (status) {
+                    DownloadManager.STATUS_SUCCESSFUL -> {
+                        val copied = copyCompletedDmFile(dm, downloadId, stagedFile, targetFile)
+                        if (!copied || !hasValidZipMagic(targetFile)) {
+                            error("El paquete descargado está incompleto o dañado.")
+                        }
+                        finishedCleanly = true
+                        runCatching { dm.remove(downloadId) }
+                        runCatching { if (stagedFile.exists()) stagedFile.delete() }
+                        val finalTotal = if (total > 0L) total else targetFile.length()
+                        onProgress(100, targetFile.length(), finalTotal, "Descarga completa")
+                        return Result.success(targetFile)
+                    }
+
+                    DownloadManager.STATUS_FAILED -> {
+                        error(describeDmFailureReason(reason))
+                    }
+
+                    DownloadManager.STATUS_PAUSED -> {
+                        val pauseLabel = when (reason) {
+                            DownloadManager.PAUSED_WAITING_TO_RETRY -> "Reconectando descarga..."
+                            DownloadManager.PAUSED_WAITING_FOR_NETWORK -> "Esperando conexión a internet..."
+                            DownloadManager.PAUSED_QUEUED_FOR_WIFI -> "Esperando red Wi-Fi o datos..."
+                            else -> "Descarga en pausa por el sistema..."
+                        }
+                        onProgress(pct, downloaded, total, pauseLabel)
+                        if (maxBytesSeen == 0L && (now - startedAt) > 16_000L) {
+                            error("El gestor del sistema quedó esperando red en 0%.")
+                        }
+                        if (maxBytesSeen > 0L && (now - lastAdvanceAt) > 25_000L) {
+                            error("La descarga se detuvo sin conexión.")
+                        }
+                    }
+
+                    DownloadManager.STATUS_PENDING -> {
+                        onProgress(pct, downloaded, total, "Conectando con gestor Android...")
+                        if ((now - startedAt) > 15_000L) {
+                            error("El gestor del sistema tardó demasiado en iniciar.")
+                        }
+                    }
+
+                    DownloadManager.STATUS_RUNNING -> {
+                        val runningLabel = if (downloaded <= 0L) {
+                            "Conectando con el servidor..."
+                        } else {
+                            "Descargando con gestor Android..."
+                        }
+                        onProgress(pct, downloaded, total, runningLabel)
+                        if (maxBytesSeen == 0L && (now - startedAt) > 18_000L) {
+                            error("No se recibieron datos después de 18 s.")
+                        }
+                        if (maxBytesSeen > 0L && (now - lastAdvanceAt) > 25_000L) {
+                            error("La transferencia se detuvo a mitad de descarga.")
+                        }
+                    }
+                }
+
+                delay(350L)
+            }
+            @Suppress("UNREACHABLE_CODE")
+            Result.failure(IllegalStateException("Descarga interrumpida"))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Result.failure(e)
+        } finally {
+            if (!finishedCleanly && downloadId >= 0L) {
+                withContext(NonCancellable) {
+                    runCatching { dm.remove(downloadId) }
+                    runCatching { if (stagedFile.exists()) stagedFile.delete() }
+                }
+            }
+        }
+    }
+
+    private fun copyCompletedDmFile(
+        dm: DownloadManager,
+        downloadId: Long,
+        stagedFile: File,
+        targetFile: File
+    ): Boolean {
+        if (targetFile.exists()) targetFile.delete()
+        if (stagedFile.exists() && stagedFile.length() > 0L) {
+            if (stagedFile.renameTo(targetFile)) {
+                return true
+            }
+            stagedFile.copyTo(targetFile, overwrite = true)
+            stagedFile.delete()
+            return targetFile.exists() && targetFile.length() > 0L
+        }
+        return runCatching {
+            dm.openDownloadedFile(downloadId)?.use { pfd ->
+                FileInputStream(pfd.fileDescriptor).use { input ->
+                    BufferedOutputStream(FileOutputStream(targetFile), 64 * 1024).use { output ->
+                        input.copyTo(output, bufferSize = 64 * 1024)
+                        output.flush()
+                    }
+                }
+                true
+            } ?: false
+        }.getOrDefault(false)
+    }
+
+    private fun describeDmFailureReason(reason: Int): String = when (reason) {
+        DownloadManager.ERROR_CANNOT_RESUME -> "No se pudo reanudar la descarga."
+        DownloadManager.ERROR_INSUFFICIENT_SPACE -> "Espacio insuficiente en el dispositivo."
+        DownloadManager.ERROR_TOO_MANY_REDIRECTS -> "Demasiadas redirecciones del servidor."
+        DownloadManager.ERROR_HTTP_DATA_ERROR -> "Error de transferencia HTTP."
+        DownloadManager.ERROR_UNHANDLED_HTTP_CODE -> "El servidor rechazó la descarga."
+        else -> "El gestor de descargas detuvo la transferencia (código $reason)."
+    }
+
+    private suspend fun downloadApkWithHttpFallback(
+        release: AppReleaseInfo,
+        url: String,
+        updatesDir: File,
+        targetFile: File,
+        priorReason: String?,
+        onProgress: (progressPercent: Int, downloadedBytes: Long, totalBytes: Long, statusLabel: String) -> Unit
+    ): Result<File> {
         val safeTag = release.tagName.replace(Regex("[^a-zA-Z0-9._-]"), "_").ifBlank { "latest" }
         val partFileName = "FamiChat-$safeTag.apk.part"
         val partFile = File(updatesDir, partFileName)
-        val targetFile = File(updatesDir, "FamiChat-update.apk")
 
-        // Delete older version .part files while preserving current version's .part for instant resume
         updatesDir.listFiles()?.forEach { old ->
             if (old.isFile && old.name != partFileName) {
                 old.delete()
             }
         }
-
         if (partFile.exists() && !hasValidZipMagic(partFile)) {
             partFile.delete()
         }
 
-        return@withContext runCatching {
-            val maxAttempts = 6
+        return runCatching {
+            val maxAttempts = 2
             var expectedTotalBytes = -1L
             var lastError: Throwable? = null
 
@@ -693,12 +932,19 @@ object AppUpdateChecker {
                 }
 
                 try {
+                    onProgress(
+                        if (expectedTotalBytes > 0L) ((resumeOffset * 100L) / expectedTotalBytes).toInt().coerceIn(0, 100) else 0,
+                        resumeOffset,
+                        expectedTotalBytes,
+                        "Probando conexión directa (intento $attempt/$maxAttempts)..."
+                    )
+
                     val reqBuilder = Request.Builder()
                         .url(url)
                         .header("User-Agent", "FamiChat-Android")
                         .header("Accept", "application/vnd.android.package-archive, application/octet-stream, */*")
                         .header("Accept-Encoding", "identity")
-                        .header("Connection", "keep-alive")
+                        .header("Connection", "close")
 
                     if (resumeOffset > 0L) {
                         reqBuilder.header("Range", "bytes=$resumeOffset-")
@@ -707,7 +953,6 @@ object AppUpdateChecker {
                     downloadClient.newCall(reqBuilder.build()).execute().use { response ->
                         val code = response.code
                         if (code == 416) {
-                            // Range not satisfiable: reset partial file and retry cleanly from 0
                             if (expectedTotalBytes > 0L && resumeOffset >= expectedTotalBytes && hasValidZipMagic(partFile)) {
                                 return@use
                             }
@@ -742,7 +987,7 @@ object AppUpdateChecker {
                         val initialPct = if (totalBytes > 0L) {
                             ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
                         } else -1
-                        onProgress(initialPct, downloaded, totalBytes)
+                        onProgress(initialPct, downloaded, totalBytes, "Descarga directa en curso...")
 
                         body.byteStream().use { input ->
                             BufferedOutputStream(FileOutputStream(partFile, isPartial), 64 * 1024).use { output ->
@@ -769,10 +1014,10 @@ object AppUpdateChecker {
                                     } else {
                                         -1
                                     }
-                                    if ((pct != lastPercent && pct >= 0) || now - lastEmitTime >= 120L) {
+                                    if ((pct != lastPercent && pct >= 0) || now - lastEmitTime >= 150L) {
                                         lastPercent = pct
                                         lastEmitTime = now
-                                        onProgress(pct, downloaded, totalBytes)
+                                        onProgress(pct, downloaded, totalBytes, "Descarga directa en curso...")
                                     }
                                 }
                                 output.flush()
@@ -796,20 +1041,27 @@ object AppUpdateChecker {
                     currentCoroutineContext().ensureActive()
                     lastError = e
                     if (attempt < maxAttempts) {
-                        delay(600L * attempt)
+                        delay(500L)
                     }
                 }
             }
 
             val completedSize = if (partFile.exists()) partFile.length() else 0L
             if (completedSize <= 0L || !hasValidZipMagic(partFile)) {
-                throw (lastError ?: IllegalStateException("El archivo APK descargado está vacío."))
+                val hint = lastError?.localizedMessage ?: priorReason
+                throw IllegalStateException(
+                    if (!hint.isNullOrBlank()) {
+                        "No se pudo completar la descarga ($hint). Usa 'Descargar en navegador' para instalarla de inmediato."
+                    } else {
+                        "La descarga se detuvo en 0%. Usa 'Descargar en navegador' para instalarla de inmediato."
+                    }
+                )
             }
             if (expectedTotalBytes > 0L && completedSize < expectedTotalBytes) {
                 val mbDown = String.format("%.1f", completedSize / (1024f * 1024f))
                 val mbTot = String.format("%.1f", expectedTotalBytes / (1024f * 1024f))
                 throw IllegalStateException(
-                    "Conexión inestable ($mbDown MB de $mbTot MB). Toca 'Descargar e instalar' para reanudar desde $mbDown MB."
+                    "Conexión interrumpida ($mbDown MB de $mbTot MB). Reintenta o usa 'Descargar en navegador'."
                 )
             }
 
@@ -818,9 +1070,22 @@ object AppUpdateChecker {
                 partFile.copyTo(targetFile, overwrite = true)
                 partFile.delete()
             }
-            onProgress(100, completedSize, if (expectedTotalBytes > 0L) expectedTotalBytes else completedSize)
+            onProgress(100, completedSize, if (expectedTotalBytes > 0L) expectedTotalBytes else completedSize, "Descarga completa")
             targetFile
         }
+    }
+
+    fun openDownloadInBrowser(context: Context, release: AppReleaseInfo?): Result<Unit> = runCatching {
+        val targetUrl = release?.downloadUrl?.takeIf { it.startsWith("http") }
+            ?: release?.releasePageUrl?.takeIf { it.startsWith("http") }
+            ?: error("No hay enlace disponible para abrir en el navegador.")
+        val hostActivity = findActivity(context)
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+            if (hostActivity == null) {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+        (hostActivity ?: context).startActivity(intent)
     }
 
     fun canRequestPackageInstalls(context: Context): Boolean {

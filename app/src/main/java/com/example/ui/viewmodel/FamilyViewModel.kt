@@ -1448,17 +1448,19 @@ class FamilyViewModel(
                 release = release,
                 progressPercent = 0,
                 downloadedBytes = 0L,
-                totalBytes = -1L
+                totalBytes = -1L,
+                statusLabel = "Iniciando gestor de descargas Android..."
             )
             val result = AppUpdateChecker.downloadApkToCache(
                 context = appContext,
                 release = release
-            ) { pct, downloaded, total ->
+            ) { pct, downloaded, total, statusLabel ->
                 _updateState.value = AppUpdateUiState.Downloading(
                     release = release,
                     progressPercent = pct,
                     downloadedBytes = downloaded,
-                    totalBytes = total
+                    totalBytes = total,
+                    statusLabel = statusLabel
                 )
             }
             result.fold(
@@ -1471,7 +1473,8 @@ class FamilyViewModel(
                 onFailure = { error ->
                     if (error is CancellationException) throw error
                     _updateState.value = AppUpdateUiState.Error(
-                        message = error.localizedMessage ?: "No se pudo descargar la actualización."
+                        message = error.localizedMessage ?: "No se pudo descargar la actualización.",
+                        release = release
                     )
                 }
             )

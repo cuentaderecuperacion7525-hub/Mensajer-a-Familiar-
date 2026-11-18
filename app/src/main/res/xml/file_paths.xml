@@ -3,6 +3,9 @@
     <files-path
         name="apk_updates_files"
         path="updates/" />
+    <external-files-path
+        name="apk_updates_ext"
+        path="Download/" />
     <cache-path
         name="apk_updates"
         path="updates/" />
