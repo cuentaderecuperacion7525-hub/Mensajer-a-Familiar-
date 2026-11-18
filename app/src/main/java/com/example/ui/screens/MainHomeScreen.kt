@@ -7,7 +7,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -19,10 +18,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Call
@@ -52,7 +54,6 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
@@ -77,6 +78,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -116,12 +118,10 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.R
 import com.example.data.model.CallDirection
 import com.example.data.model.CallRecordEntity
 import com.example.data.model.CallType
@@ -141,6 +141,7 @@ import com.example.ui.components.MessageStatusIcon
 import com.example.ui.components.PushAndCallDiagnosticsDialog
 import com.example.ui.components.StatusViewerDialog
 import com.example.ui.components.UserProfileOptionsDialog
+import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.viewmodel.ChatThreadUi
 import com.example.ui.viewmodel.MainTab
@@ -247,89 +248,103 @@ fun MainHomeScreen(
     }
 
     val totalUnread = remember(chatPreviews) { chatPreviews.sumOf { it.unreadCount } }
+    val brandBlue = if (isDarkTheme) MaterialTheme.colorScheme.primary else Color(0xFF1A5FD4)
+    val textPrimary = if (isDarkTheme) MaterialTheme.colorScheme.onSurface else Color(0xFF1B1F2A)
+    val textSecondary = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFF5B6270)
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isWide = maxWidth >= 700.dp
 
         Scaffold(
             contentWindowInsets = WindowInsets.safeDrawing,
+            containerColor = if (isDarkTheme) MaterialTheme.colorScheme.surface else Color.White,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                Column {
-                    TopAppBar(
-                        title = {
+                TopAppBar(
+                    title = {
+                        Column(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { showOverflowMenu = !showOverflowMenu }
+                                .defaultMinSize(minHeight = 48.dp)
+                                .padding(horizontal = 4.dp, vertical = 4.dp)
+                                .testTag("active_profile_switcher"),
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "FamiChat",
+                                fontFamily = InterFontFamily,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable { showProfileOptionsDialog = true }
-                                    .padding(end = 8.dp)
-                                    .testTag("active_profile_switcher")
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                MemberAvatar(
-                                    emoji = activeMember.avatarEmoji,
-                                    colorHex = activeMember.avatarColorHex,
-                                    photoData = activeMember.avatarPhotoData,
-                                    size = 44.dp,
-                                    isOnline = activeMember.isOnline,
-                                    showOnlineDot = false,
-                                    nameForInitials = activeMember.name
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (activeMember.isOnline) OnlineGreen
+                                            else Color(0xFF9AA0A6)
+                                        )
                                 )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Image(
-                                            painter = painterResource(id = R.drawable.ic_famichat_logo),
-                                            contentDescription = "Logo FamiChat",
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Text(
-                                            text = "FamiChat",
-                                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    Text(
-                                        text = "${activeMember.name} · ${activeMember.lastSeenText}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        },
-                        actions = {
-                            IconButton(
-                                onClick = { showOverflowMenu = !showOverflowMenu },
-                                modifier = Modifier.testTag("home_more_menu_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.MoreVert,
-                                    contentDescription = "Opciones de perfil",
-                                    tint = MaterialTheme.colorScheme.onSurface
+                                Text(
+                                    text = "${activeMember.name} · ${activeMember.lastSeenText}",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = InterFontFamily
+                                    ),
+                                    color = textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            titleContentColor = MaterialTheme.colorScheme.onSurface,
-                            actionIconContentColor = MaterialTheme.colorScheme.onSurface
-                        )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = if (isDarkTheme) MaterialTheme.colorScheme.surface else Color.White,
+                        titleContentColor = textPrimary,
+                        actionIconContentColor = textPrimary
                     )
+                )
+            },
+            floatingActionButton = {
+                if (selectedTab == MainTab.CHATS) {
+                    FloatingActionButton(
+                        onClick = { showNewChatDialog = true },
+                        shape = CircleShape,
+                        containerColor = brandBlue,
+                        contentColor = Color.White,
+                        elevation = FloatingActionButtonDefaults.elevation(
+                            defaultElevation = 0.dp,
+                            pressedElevation = 2.dp,
+                            focusedElevation = 0.dp,
+                            hoveredElevation = 0.dp
+                        ),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("fab_new_chat")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = "Nuevo chat",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             },
             bottomBar = {
                 if (!isWide) {
                     Column {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                         NavigationBar(
                             windowInsets = WindowInsets.navigationBars,
-                            containerColor = MaterialTheme.colorScheme.surface,
+                            containerColor = if (isDarkTheme) MaterialTheme.colorScheme.surface else Color.White,
                             tonalElevation = 0.dp
                         ) {
                             MainNavBarItems(
@@ -456,6 +471,8 @@ fun MainHomeScreen(
                                 }
                                 ChatsListSection(
                                     chats = chatPreviews,
+                                    allMembers = allMembers,
+                                    showHomeSummaryPill = true,
                                     isDarkTheme = isDarkTheme,
                                     searchQuery = searchQuery,
                                     onSearchChange = onSearchChange,
@@ -1012,7 +1029,7 @@ private fun MainNavRailItems(
 ) {
     val entries = listOf(
         Triple(MainTab.CHATS, "Chats", Pair(Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat)),
-        Triple(MainTab.GROUPS, "Grupos", Pair(Icons.Filled.Person, Icons.Outlined.Person)),
+        Triple(MainTab.GROUPS, "Grupos", Pair(Icons.Filled.Groups, Icons.Outlined.Groups)),
         Triple(MainTab.CALLS, "Llamadas", Pair(Icons.Filled.Call, Icons.Outlined.Call)),
         Triple(MainTab.BOARD, "Avisos", Pair(Icons.AutoMirrored.Filled.VolumeUp, Icons.AutoMirrored.Outlined.VolumeUp))
     )
@@ -1050,7 +1067,7 @@ private fun androidx.compose.foundation.layout.RowScope.MainNavBarItems(
 ) {
     val entries = listOf(
         Triple(MainTab.CHATS, "Chats", Pair(Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat)),
-        Triple(MainTab.GROUPS, "Grupos", Pair(Icons.Filled.Person, Icons.Outlined.Person)),
+        Triple(MainTab.GROUPS, "Grupos", Pair(Icons.Filled.Groups, Icons.Outlined.Groups)),
         Triple(MainTab.CALLS, "Llamadas", Pair(Icons.Filled.Call, Icons.Outlined.Call)),
         Triple(MainTab.BOARD, "Avisos", Pair(Icons.AutoMirrored.Filled.VolumeUp, Icons.AutoMirrored.Outlined.VolumeUp))
     )
@@ -1079,6 +1096,14 @@ private fun androidx.compose.foundation.layout.RowScope.MainNavBarItem(
     tag: String,
     onClick: () -> Unit
 ) {
+    val activeBlue = if (isDarkTheme) MaterialTheme.colorScheme.primary else Color(0xFF1A5FD4)
+    val inactiveGray = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFF5B6270)
+    val activePill = if (isDarkTheme) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+    } else {
+        Color(0xFFDCE8FC)
+    }
+
     NavigationBarItem(
         selected = selected,
         onClick = onClick,
@@ -1096,19 +1121,19 @@ private fun androidx.compose.foundation.layout.RowScope.MainNavBarItem(
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelMedium.copy(
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                    fontFamily = InterFontFamily,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
                 ),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         },
         colors = NavigationBarItemDefaults.colors(
-            selectedIconColor = MaterialTheme.colorScheme.primary,
-            selectedTextColor = MaterialTheme.colorScheme.primary,
-            indicatorColor = if (isDarkTheme) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-            else Color(0xFFD8E6FF),
-            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+            selectedIconColor = activeBlue,
+            selectedTextColor = activeBlue,
+            indicatorColor = activePill,
+            unselectedIconColor = inactiveGray,
+            unselectedTextColor = inactiveGray
         ),
         modifier = Modifier.testTag(tag)
     )
@@ -1117,6 +1142,8 @@ private fun androidx.compose.foundation.layout.RowScope.MainNavBarItem(
 @Composable
 private fun ChatsListSection(
     chats: List<ChatThreadUi>,
+    allMembers: List<FamilyMemberEntity> = emptyList(),
+    showHomeSummaryPill: Boolean = false,
     isDarkTheme: Boolean = false,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
@@ -1125,6 +1152,12 @@ private fun ChatsListSection(
     onToggleMuteChat: (String) -> Unit = {},
     emptyTip: String
 ) {
+    val brandBlue = if (isDarkTheme) MaterialTheme.colorScheme.primary else Color(0xFF1A5FD4)
+    val textPrimary = if (isDarkTheme) MaterialTheme.colorScheme.onSurface else Color(0xFF1B1F2A)
+    val textSecondary = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFF5B6270)
+    val searchBg = if (isDarkTheme) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f) else Color(0xFFF0F2F8)
+    val summaryPillBg = if (isDarkTheme) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f) else Color(0xFFE4EDFC)
+
     val filtered = remember(chats, searchQuery) {
         if (searchQuery.isBlank()) chats
         else chats.filter {
@@ -1133,15 +1166,19 @@ private fun ChatsListSection(
         }
     }
 
+    val atHomeCount = remember(allMembers) {
+        allMembers.count { it.lastSeenText.trim().equals("En casa", ignoreCase = true) }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = if (isDarkTheme) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-            else Color(0xFFF1F4F9),
+            shape = RoundedCornerShape(50),
+            color = searchBg,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 6.dp)
-                .height(46.dp)
+                .heightIn(min = 44.dp)
+                .height(44.dp)
         ) {
             Row(
                 modifier = Modifier
@@ -1152,8 +1189,8 @@ private fun ChatsListSection(
                 Icon(
                     imageVector = Icons.Filled.Search,
                     contentDescription = "Buscar",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
+                    tint = textSecondary,
+                    modifier = Modifier.size(19.dp)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Box(
@@ -1163,8 +1200,8 @@ private fun ChatsListSection(
                     if (searchQuery.isEmpty()) {
                         Text(
                             text = "Buscar chats o mensajes",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = InterFontFamily),
+                            color = textSecondary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1173,10 +1210,11 @@ private fun ChatsListSection(
                         value = searchQuery,
                         onValueChange = onSearchChange,
                         singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            color = MaterialTheme.colorScheme.onSurface
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = InterFontFamily,
+                            color = textPrimary
                         ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        cursorBrush = SolidColor(brandBlue),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("chat_list_search")
@@ -1190,11 +1228,29 @@ private fun ChatsListSection(
                         Icon(
                             imageVector = Icons.Filled.Close,
                             contentDescription = "Limpiar búsqueda",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = textSecondary,
                             modifier = Modifier.size(16.dp)
                         )
                     }
                 }
+            }
+        }
+
+        if (showHomeSummaryPill && atHomeCount > 0 && allMembers.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = summaryPillBg,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp)
+            ) {
+                Text(
+                    text = "$atHomeCount de ${allMembers.size} en casa",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontFamily = InterFontFamily,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = brandBlue,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                )
             }
         }
 
@@ -1205,17 +1261,18 @@ private fun ChatsListSection(
             ) {
                 Text(
                     text = emptyTip,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = InterFontFamily),
+                    color = textSecondary
                 )
             }
         } else {
             LazyColumn(
-                contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)
+                contentPadding = PaddingValues(top = 4.dp, bottom = 84.dp)
             ) {
                 items(filtered, key = { it.chat.id }) { item ->
                     ChatRowItem(
                         item = item,
+                        isDarkTheme = isDarkTheme,
                         onClick = { onOpenChat(item.chat.id) },
                         onTogglePin = { onTogglePinChat(item.chat.id) },
                         onToggleMute = { onToggleMuteChat(item.chat.id) }
@@ -1230,31 +1287,51 @@ private fun ChatsListSection(
 @Composable
 private fun ChatRowItem(
     item: ChatThreadUi,
+    isDarkTheme: Boolean = false,
     onClick: () -> Unit,
     onTogglePin: () -> Unit = {},
     onToggleMute: () -> Unit = {}
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
+    val brandBlue = if (isDarkTheme) MaterialTheme.colorScheme.primary else Color(0xFF1A5FD4)
+    val textPrimary = if (isDarkTheme) MaterialTheme.colorScheme.onSurface else Color(0xFF1B1F2A)
+    val textSecondary = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFF5B6270)
+    val amberStatus = Color(0xFFD97706)
+
     val isGroup = item.chat.type == ChatType.GROUP
-    val isEmptyThread = item.lastMessagePreview == "Aún no hay mensajes. ¡Saluda a la familia!" ||
+    val isHomeGroup = isGroup && (
+        item.displayTitle.trim().equals("Mi Familia", ignoreCase = true) ||
+            item.displayEmoji == "🏠"
+        )
+    val isEmptyThread = item.lastMessagePreview == "Sin mensajes aún" ||
+        item.lastMessagePreview == "Aún no hay mensajes. ¡Saluda a la familia!" ||
         item.lastMessagePreview.isBlank()
+
+    val cleanStatus = item.subtitleStatus.trim()
+    val hasExplicitMemberStatus = !isGroup && (
+        cleanStatus.equals("En línea", ignoreCase = true) ||
+            cleanStatus.equals("En casa", ignoreCase = true) ||
+            cleanStatus.equals("Ocupado", ignoreCase = true) ||
+            cleanStatus.equals("En el trabajo", ignoreCase = true) ||
+            cleanStatus.equals("En la escuela", ignoreCase = true) ||
+            cleanStatus.startsWith("Escribiendo", ignoreCase = true) ||
+            cleanStatus.startsWith("Grabando", ignoreCase = true)
+        )
 
     val secondaryLineText = when {
         !isEmptyThread -> item.lastMessagePreview
-        isGroup -> {
-            val count = item.participants.size.coerceAtLeast(1)
-            if (item.isPinned) "$count miembros · Fijado" else "$count miembros"
-        }
-        item.isOnline -> {
-            val lowerTitle = item.displayTitle.lowercase()
-            if (lowerTitle.contains("mam") || lowerTitle.endsWith("a")) "Activa ahora" else "Activo ahora"
-        }
+        hasExplicitMemberStatus -> cleanStatus
         else -> "Toca para saludar"
     }
 
-    val rightTimeText = when {
-        isGroup && isEmptyThread -> ""
-        else -> item.lastMessageTime
+    val rightTimeText = if (isEmptyThread) "" else item.lastMessageTime
+
+    val directDotColor = when {
+        isGroup -> null
+        cleanStatus.equals("En el trabajo", ignoreCase = true) ||
+            cleanStatus.equals("En la escuela", ignoreCase = true) -> amberStatus
+        item.isOnline -> OnlineGreen
+        else -> Color(0xFF9AA0A6)
     }
 
     Box {
@@ -1265,22 +1342,26 @@ private fun ChatRowItem(
                     onClick = onClick,
                     onLongClick = { showContextMenu = true }
                 )
-                .padding(horizontal = 16.dp, vertical = 11.dp)
+                .defaultMinSize(minHeight = 60.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp)
                 .testTag("chat_item_${item.chat.id}"),
             verticalAlignment = Alignment.CenterVertically
         ) {
             MemberAvatar(
                 emoji = item.displayEmoji,
-                colorHex = item.displayColorHex,
+                colorHex = if (isHomeGroup) "#1A5FD4" else item.displayColorHex,
                 photoData = item.displayPhotoData,
-                size = 54.dp,
+                size = 44.dp,
                 isOnline = item.isOnline,
                 showOnlineDot = !isGroup,
                 showOfflineDot = !isGroup,
+                statusDotColor = directDotColor,
                 nameForInitials = item.displayTitle,
-                isGroupAvatar = isGroup
+                isGroupAvatar = isGroup,
+                useHomeGroupIcon = isHomeGroup,
+                cornerRadius = 12.dp
             )
-            Spacer(modifier = Modifier.width(14.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1293,7 +1374,11 @@ private fun ChatRowItem(
                     ) {
                         Text(
                             text = item.displayTitle,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontFamily = InterFontFamily,
+                                fontWeight = FontWeight.Medium
+                            ),
+                            color = textPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
@@ -1303,19 +1388,35 @@ private fun ChatRowItem(
                             Icon(
                                 imageVector = Icons.Filled.NotificationsOff,
                                 contentDescription = "Chat silenciado",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = textSecondary,
                                 modifier = Modifier.size(15.dp)
                             )
                         }
                     }
-                    if (rightTimeText.isNotBlank()) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = rightTimeText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (item.unreadCount > 0) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (item.isPinned) {
+                            Text(
+                                text = "Fijado",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = InterFontFamily,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                color = textSecondary
+                            )
+                        }
+                        if (rightTimeText.isNotBlank()) {
+                            Text(
+                                text = rightTimeText,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = InterFontFamily,
+                                    fontWeight = if (item.unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal
+                                ),
+                                color = if (item.unreadCount > 0) brandBlue else textSecondary
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(2.dp))
@@ -1329,8 +1430,11 @@ private fun ChatRowItem(
                     }
                     Text(
                         text = secondaryLineText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = InterFontFamily,
+                            fontWeight = if (item.unreadCount > 0 && !isEmptyThread) FontWeight.Bold else FontWeight.Normal
+                        ),
+                        color = if (item.unreadCount > 0 && !isEmptyThread) textPrimary else textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
@@ -1343,14 +1447,17 @@ private fun ChatRowItem(
                                 .clip(CircleShape)
                                 .background(
                                     if (item.isMuted) MaterialTheme.colorScheme.outline
-                                    else MaterialTheme.colorScheme.primary
+                                    else brandBlue
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = item.unreadCount.toString(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = InterFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = Color.White
                             )
                         }
                     }
