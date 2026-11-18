@@ -1,5 +1,7 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.io.File
 import java.time.Duration
+import org.gradle.process.CommandLineArgumentProvider
 
 plugins {
   alias(libs.plugins.android.application)
@@ -17,8 +19,8 @@ android {
     applicationId = "com.aistudio.nidofamiliar.mrxqkp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 40
-    versionName = "2.7.8"
+    versionCode = 41
+    versionName = "2.7.9"
 
     val githubRepo = (System.getenv("GITHUB_REPOSITORY") ?: "").trim().replace("\"", "")
     buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
@@ -157,9 +159,31 @@ dependencies {
   // "ksp"(libs.moshi.kotlin.codegen)
 }
 
-tasks.withType<Test> {
+class RobolectricSdkArgumentProvider : CommandLineArgumentProvider {
+  override fun asArguments(): Iterable<String> {
+    val args = mutableListOf(
+      "-Djava.net.preferIPv4Stack=true",
+      "-Dhttp.keepAlive=false"
+    )
+    val sdkArtifactDir = File(
+      System.getProperty("user.home"),
+      ".m2/repository/org/robolectric/android-all-instrumented/16-robolectric-13921718-i7"
+    )
+    val sdkJar = File(sdkArtifactDir, "android-all-instrumented-16-robolectric-13921718-i7.jar")
+    if (sdkJar.isFile && sdkJar.length() > 1_000_000L) {
+      args += "-Drobolectric.offline=true"
+      args += "-Drobolectric.dependency.dir=${sdkArtifactDir.absolutePath}"
+    } else {
+      args += "-Drobolectric.dependency.repo.url=https://maven-central.storage-download.googleapis.com/maven2"
+    }
+    return args
+  }
+}
+
+tasks.withType<Test>().configureEach {
   failFast = true
-  timeout.set(Duration.ofMinutes(2))
+  timeout.set(Duration.ofMinutes(5))
+  jvmArgumentProviders.add(RobolectricSdkArgumentProvider())
   testLogging {
     events("passed", "failed", "skipped")
   }

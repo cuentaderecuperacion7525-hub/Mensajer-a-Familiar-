@@ -71,6 +71,43 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
+      - name: Cachear SDK de Robolectric
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-sdk-16-13921718-i7-v1
+
+      - name: Preparar artefacto Robolectric SDK 36
+        run: |
+          ROBO_DIR="$HOME/.m2/repository/org/robolectric/android-all-instrumented/16-robolectric-13921718-i7"
+          mkdir -p "$ROBO_DIR"
+          BASE_JAR="android-all-instrumented-16-robolectric-13921718-i7.jar"
+          BASE_POM="android-all-instrumented-16-robolectric-13921718-i7.pom"
+          if [ -s "$ROBO_DIR/$BASE_JAR" ] && unzip -tqq "$ROBO_DIR/$BASE_JAR" >/dev/null 2>&1; then
+            echo "Artefacto Robolectric SDK 36 disponible y verificado en caché."
+            exit 0
+          fi
+          rm -f "$ROBO_DIR/$BASE_JAR" "$ROBO_DIR/$BASE_JAR.sha512" "$ROBO_DIR/$BASE_POM" "$ROBO_DIR/$BASE_POM.sha512"
+          REPOS=(
+            "https://maven-central.storage-download.googleapis.com/maven2"
+            "https://repo1.maven.org/maven2"
+            "https://repo.maven.apache.org/maven2"
+          )
+          for REPO in "${REPOS[@]}"; do
+            PATH_PREFIX="$REPO/org/robolectric/android-all-instrumented/16-robolectric-13921718-i7"
+            echo "Descargando Robolectric SDK 36 desde $REPO ..."
+            if curl -4 -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 -o "$ROBO_DIR/$BASE_POM" "$PATH_PREFIX/$BASE_POM" \
+              && curl -4 -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 -o "$ROBO_DIR/$BASE_POM.sha512" "$PATH_PREFIX/$BASE_POM.sha512" \
+              && curl -4 -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 -o "$ROBO_DIR/$BASE_JAR" "$PATH_PREFIX/$BASE_JAR" \
+              && curl -4 -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 -o "$ROBO_DIR/$BASE_JAR.sha512" "$PATH_PREFIX/$BASE_JAR.sha512" \
+              && unzip -tqq "$ROBO_DIR/$BASE_JAR" >/dev/null 2>&1; then
+              echo "Descarga de Robolectric SDK 36 verificada desde $REPO."
+              exit 0
+            fi
+            rm -f "$ROBO_DIR/$BASE_JAR" "$ROBO_DIR/$BASE_JAR.sha512" "$ROBO_DIR/$BASE_POM" "$ROBO_DIR/$BASE_POM.sha512"
+          done
+          echo "::warning::No se pudo predescargar Robolectric SDK desde curl; Gradle/Robolectric usará fallback."
+
       - name: Ejecutar pruebas unitarias
         run: gradle :app:testDebugUnitTest --tests 'com.example.Example*'
 
