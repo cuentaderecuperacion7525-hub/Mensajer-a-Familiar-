@@ -227,6 +227,32 @@ fun GoogleSignInScreen(
                             Spacer(modifier = Modifier.width(10.dp))
                             Text("Continuar con Google", style = MaterialTheme.typography.titleSmall)
                         }
+
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    isBusy = true
+                                    errorMessage = null
+                                    when (val res = GoogleAuthHelper.signInWithGoogleViaBrowser(context)) {
+                                        is GoogleAuthResult.Success -> onSignedIn()
+                                        GoogleAuthResult.Cancelled -> Unit
+                                        is GoogleAuthResult.Error -> errorMessage = res.message
+                                    }
+                                    isBusy = false
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("google_browser_signin_button")
+                        ) {
+                            Text(
+                                text = "Entrar desde el navegador (sin Servicios de Google)",
+                                style = MaterialTheme.typography.labelLarge,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2
+                            )
+                        }
                     }
 
                     if (!errorMessage.isNullOrBlank()) {

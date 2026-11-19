@@ -1952,5 +1952,23 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithText("José Manuel").assertIsDisplayed()
     composeTestRule.onNodeWithText("Cristian Fernando").assertIsDisplayed()
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `google sign in screen shows browser fallback option for devices without google play services`() {
+    composeTestRule.setContent {
+      com.example.ui.screens.GoogleSignInScreen(
+        isDarkTheme = false,
+        onToggleTheme = {},
+        onSignedIn = {}
+      )
+    }
+    composeTestRule.waitUntil(timeoutMillis = 6_000L) {
+      composeTestRule.onAllNodesWithText("Continuar con Google").fetchSemanticsNodes().isNotEmpty()
+    }
+    composeTestRule.onNodeWithTag("google_signin_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("google_browser_signin_button").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Entrar desde el navegador (sin Servicios de Google)").assertIsDisplayed()
+  }
 }
 

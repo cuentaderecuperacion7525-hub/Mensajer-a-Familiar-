@@ -23,6 +23,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -255,7 +256,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         val code = fixedCode.trim().uppercase()
         val invRef = db.collection("familyInvites").document(code)
         return try {
-            val invSnap = withTimeoutOrNull(8_000L) { invRef.get().await() }
+            val invSnap = withTimeoutOrNull(10_000L) { invRef.get().await() }
                 ?: return Result.failure(IllegalStateException("Tiempo de espera agotado al buscar la familia."))
             if (invSnap.exists() && invSnap.getBoolean("active") == true) {
                 joinFamilyByInviteCode(
@@ -274,7 +275,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                 if (created.isSuccess) {
                     created
                 } else {
-                    val retrySnap = runCatching { withTimeoutOrNull(5_000L) { invRef.get().await() } }.getOrNull()
+                    val retrySnap = runCatching { withTimeoutOrNull(6_000L) { invRef.get(Source.SERVER).await() } }.getOrNull()
                     if (retrySnap != null && retrySnap.exists() && retrySnap.getBoolean("active") == true) {
                         joinFamilyByInviteCode(
                             uid = uid,
@@ -308,7 +309,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             val familyId = if (!prefetchedFamilyId.isNullOrBlank()) {
                 prefetchedFamilyId
             } else {
-                val invSnap = withTimeoutOrNull(8_000L) { invRef.get().await() }
+                val invSnap = withTimeoutOrNull(10_000L) { invRef.get().await() }
                     ?: return Result.failure(IllegalStateException("Tiempo de espera agotado al verificar el código."))
                 if (!invSnap.exists() || invSnap.getBoolean("active") != true) {
                     return Result.failure(IllegalArgumentException("Código familiar no encontrado o inactivo."))
@@ -319,46 +320,35 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             val fRef = familyRef(familyId)
             currentPath = fRef.path
 
-            val existingSnap = try {
-                withTimeoutOrNull(5_000L) { fRef.get().await() }
-            } catch (getErr: Exception) {
-                if (getErr is CancellationException) throw getErr
-                val fsCode = getErr.unwrapFirestoreException()?.code
-                if (fsCode == FirebaseFirestoreException.Code.PERMISSION_DENIED) null
-                else throw getErr
-            }
-            val alreadyInFamily = existingSnap?.exists() == true &&
-                ((existingSnap.get("memberUids") as? List<*>)?.mapNotNull { it as? String }?.contains(uid) == true)
-
-            if (!alreadyInFamily) {
-                try {
-                    withTimeoutOrNull(8_000L) {
-                        fRef.update(
-                            mapOf(
-                                "memberUids" to FieldValue.arrayUnion(uid),
-                                "updatedAt" to FieldValue.serverTimestamp()
-                            )
-                        ).await()
-                    } ?: return Result.failure(IllegalStateException("Tiempo de espera agotado al unirse a la familia."))
-                } catch (updateErr: Exception) {
-                    if (updateErr is CancellationException) throw updateErr
-                    if (updateErr.unwrapFirestoreException()?.code != FirebaseFirestoreException.Code.PERMISSION_DENIED) {
-                        throw updateErr
-                    }
-                    val alreadyMember = runCatching {
-                        val existingUids = (withTimeoutOrNull(5_000L) { fRef.get().await() }
-                            ?.get("memberUids") as? List<*>)
-                            ?.mapNotNull { it as? String }
-                            ?: emptyList()
-                        uid in existingUids
-                    }.getOrDefault(false)
-                    if (!alreadyMember) throw updateErr
+            // Attempt joining directly in 1 round-trip; if already in memberUids, Firestore rules
+            // reject the size+1 join update with PERMISSION_DENIED and we verify membership once.
+            try {
+                withTimeoutOrNull(10_000L) {
+                    fRef.update(
+                        mapOf(
+                            "memberUids" to FieldValue.arrayUnion(uid),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                } ?: return Result.failure(IllegalStateException("Tiempo de espera agotado al unirse a la familia."))
+            } catch (updateErr: Exception) {
+                if (updateErr is CancellationException) throw updateErr
+                if (updateErr.unwrapFirestoreException()?.code != FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                    throw updateErr
                 }
+                val alreadyMember = runCatching {
+                    val existingUids = (withTimeoutOrNull(6_000L) { fRef.get().await() }
+                        ?.get("memberUids") as? List<*>)
+                        ?.mapNotNull { it as? String }
+                        ?: emptyList()
+                    uid in existingUids
+                }.getOrDefault(false)
+                if (!alreadyMember) throw updateErr
             }
 
             // Sync joining UID onto existing members in parallel so ProfileSelectorScreen loads right away
             val bootstrap = runCatching {
-                withTimeoutOrNull(5_000L) { fRef.collection("meta").document("bootstrap").get().await() }
+                withTimeoutOrNull(6_000L) { fRef.collection("meta").document("bootstrap").get().await() }
             }.getOrNull()
             val memberIds = (bootstrap?.get("memberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
 
@@ -367,7 +357,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                     memberIds.map { mId ->
                         async {
                             runCatching {
-                                withTimeoutOrNull(4_000L) {
+                                withTimeoutOrNull(5_000L) {
                                     fRef.collection("members").document(mId).update(
                                         mapOf(
                                             "memberUids" to FieldValue.arrayUnion(uid),
@@ -415,12 +405,30 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         }
     }
 
+    suspend fun fetchMembersOnceFromServer(familyId: String, uid: String): List<FamilyMemberEntity> {
+        if (familyId.isBlank() || uid.isBlank()) return emptyList()
+        return try {
+            val snap = withTimeoutOrNull(6_000L) {
+                familyRef(familyId).collection("members")
+                    .whereArrayContains("memberUids", uid)
+                    .get(Source.SERVER)
+                    .await()
+            } ?: return emptyList()
+            snap.documents.mapNotNull(FirestoreMappers::toMember).sortedBy { it.createdAt }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun fetchBootstrapMembersById(familyId: String): List<FamilyMemberEntity> {
         if (familyId.isBlank()) return emptyList()
         return try {
             val fRef = familyRef(familyId)
-            val bootstrap = withTimeoutOrNull(5_000L) {
-                fRef.collection("meta").document("bootstrap").get().await()
+            val bootstrap = withTimeoutOrNull(6_000L) {
+                runCatching { fRef.collection("meta").document("bootstrap").get(Source.SERVER).await() }
+                    .getOrElse { fRef.collection("meta").document("bootstrap").get().await() }
             } ?: return emptyList()
             val memberIds = (bootstrap.get("memberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
             if (memberIds.isEmpty()) return emptyList()
@@ -428,7 +436,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                 memberIds.map { mId ->
                     async {
                         runCatching {
-                            withTimeoutOrNull(4_000L) {
+                            withTimeoutOrNull(5_000L) {
                                 fRef.collection("members").document(mId).get().await()
                             }?.let(FirestoreMappers::toMember)
                         }.getOrNull()

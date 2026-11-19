@@ -1,12 +1,15 @@
 package com.example.data.remote
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
 import com.example.R
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -16,7 +19,9 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -41,9 +46,15 @@ fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
 object GoogleAuthHelper {
 
     suspend fun attemptSilentSignIn(activityContext: Context): FirebaseUser? {
-        val current = Firebase.auth.currentUser
+        val current = runCatching { Firebase.auth.currentUser }.getOrNull()
         if (current != null) return current
-        val webClientId = activityContext.getString(R.string.default_web_client_id)
+        val pendingUser = runCatching {
+            Firebase.auth.pendingAuthResult?.await()?.user
+        }.getOrNull()
+        if (pendingUser != null) return pendingUser
+        val webClientId = runCatching {
+            activityContext.getString(R.string.default_web_client_id)
+        }.getOrDefault("")
         if (webClientId.isBlank()) return null
 
         return try {
@@ -111,10 +122,60 @@ object GoogleAuthHelper {
             }
         } catch (_: GetCredentialCancellationException) {
             GoogleAuthResult.Cancelled
+        } catch (credErr: GetCredentialException) {
+            Log.w(TAG, "Credential Manager unavailable (${credErr.type}), falling back to browser Google Sign-In", credErr)
+            signInWithGoogleViaBrowser(activityContext)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Google Sign-In failed", e)
-            GoogleAuthResult.Error(e.localizedMessage ?: "Error al iniciar sesión con Google.")
+            Log.e(TAG, "Google Sign-In failed, attempting browser fallback", e)
+            val fallback = signInWithGoogleViaBrowser(activityContext)
+            if (fallback is GoogleAuthResult.Success || fallback is GoogleAuthResult.Cancelled) {
+                fallback
+            } else {
+                GoogleAuthResult.Error(e.localizedMessage ?: "Error al iniciar sesión con Google.")
+            }
         }
+    }
+
+    suspend fun signInWithGoogleViaBrowser(activityContext: Context): GoogleAuthResult {
+        val activity = activityContext.findActivity()
+            ?: return GoogleAuthResult.Error("No se pudo abrir el navegador para iniciar sesión.")
+        return try {
+            val provider = OAuthProvider.newBuilder("google.com")
+                .addCustomParameter("prompt", "select_account")
+                .build()
+            val authResult = Firebase.auth
+                .startActivityForSignInWithProvider(activity, provider)
+                .await()
+            val user = authResult.user ?: Firebase.auth.currentUser
+            if (user != null) {
+                GoogleAuthResult.Success(user)
+            } else {
+                GoogleAuthResult.Error("No se pudo completar el inicio de sesión desde el navegador.")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val msg = e.localizedMessage.orEmpty()
+            if (msg.contains("canceled", ignoreCase = true) ||
+                msg.contains("cancelled", ignoreCase = true)
+            ) {
+                GoogleAuthResult.Cancelled
+            } else {
+                Log.e(TAG, "Browser Google Sign-In failed", e)
+                GoogleAuthResult.Error(msg.ifBlank { "Error al iniciar sesión desde el navegador." })
+            }
+        }
+    }
+
+    private fun Context.findActivity(): Activity? {
+        var ctx: Context? = this
+        while (ctx is ContextWrapper) {
+            if (ctx is Activity) return ctx
+            ctx = ctx.baseContext
+        }
+        return ctx as? Activity
     }
 
     suspend fun signOut(context: Context) {

@@ -226,7 +226,7 @@ class FamilyViewModel(
                 _isMembersLoading.value = resolving
                 if (resolving) {
                     membersLoadingTimeoutJob = viewModelScope.launch {
-                        delay(14_000L)
+                        delay(22_000L)
                         if (_activeFamilyId.value.isNullOrBlank()) {
                             _isResolvingFamilySpace.value = false
                             _isMembersLoading.value = false
@@ -237,20 +237,35 @@ class FamilyViewModel(
             } else {
                 _isMembersLoading.value = true
                 membersLoadingTimeoutJob = viewModelScope.launch {
-                    delay(5_500L)
+                    delay(12_000L)
                     if (_activeFamilyId.value == fid) {
                         _isMembersLoading.value = false
                     }
                 }
+                var handledInitialEmpty = false
                 cloudRepo.observeMembers(fid, currentUserId)
                     .onEach { list ->
                         if (list.isEmpty()) {
-                            // Fallback via direct document get (allowed by isFamilyMemberByDoc) in case
-                            // memberUids array sync on a joining device hasn't finished or skipped a legacy doc
-                            val fallback = cloudRepo.fetchBootstrapMembersById(fid)
+                            // On a fresh install, Firestore's local cache immediately emits emptyList()
+                            // before server data or newly-synced memberUids arrive. Fetch directly
+                            // from server + meta/bootstrap before ever showing the empty state.
+                            var fallback = cloudRepo.fetchMembersOnceFromServer(fid, currentUserId)
+                            if (fallback.isEmpty()) {
+                                fallback = cloudRepo.fetchBootstrapMembersById(fid)
+                            }
+                            if (fallback.isEmpty() && !handledInitialEmpty) {
+                                handledInitialEmpty = true
+                                delay(1_000L)
+                                fallback = cloudRepo.fetchMembersOnceFromServer(fid, currentUserId)
+                                if (fallback.isEmpty()) {
+                                    fallback = cloudRepo.fetchBootstrapMembersById(fid)
+                                }
+                            }
                             if (fallback.isNotEmpty()) {
                                 _bootstrapFallbackMembers.value = fid to fallback
                             }
+                        } else {
+                            membersLoadingTimeoutJob?.cancel()
                         }
                         _isMembersLoading.value = false
                         val opt = _optimisticRegisteredMember.value
@@ -693,10 +708,24 @@ class FamilyViewModel(
                     _isMembersLoading.value = true
                     _isSessionReady.value = true
                 }
-                val resolvedFamilyId = resolveInitialFamilySpace(savedFamilyId)
-                _isResolvingFamilySpace.value = false
+                var resolvedFamilyId = resolveInitialFamilySpace(savedFamilyId)
+                // Automatic silent retry on fresh install (e.g. cold Firestore gRPC / auth token propagation on 4G)
+                var attempt = 1
+                while (resolvedFamilyId == null && attempt < 3) {
+                    delay(attempt * 900L)
+                    resolvedFamilyId = resolveInitialFamilySpace(savedFamilyId)
+                    attempt++
+                }
                 if (resolvedFamilyId != null) {
+                    // Pre-fetch profiles before exposing the selector so first launch never flashes empty state
+                    val prefetchedMembers = cloudRepo.fetchMembersOnceFromServer(resolvedFamilyId, currentUserId)
+                        .ifEmpty { cloudRepo.fetchBootstrapMembersById(resolvedFamilyId) }
+                    if (prefetchedMembers.isNotEmpty()) {
+                        _bootstrapFallbackMembers.value = resolvedFamilyId to prefetchedMembers
+                    }
+                    // Set _activeFamilyId BEFORE clearing _isResolvingFamilySpace so combine() never sees (null, false)
                     _activeFamilyId.value = resolvedFamilyId
+                    _isResolvingFamilySpace.value = false
                     prefs.setActiveFamilyId(resolvedFamilyId)
                     // Sync chats in the background so the profile selector never waits on chat docs
                     viewModelScope.launch {
@@ -704,11 +733,13 @@ class FamilyViewModel(
                     }
                     if (savedMemberId != null) {
                         // Wait briefly for initial member list so saved profile restores straight to HOME
-                        val loadedMembers = runCatching {
-                            withTimeoutOrNull(4_000L) {
-                                cloudRepo.observeMembers(resolvedFamilyId, currentUserId).first()
-                            }
-                        }.getOrNull().orEmpty()
+                        val loadedMembers = prefetchedMembers.ifEmpty {
+                            runCatching {
+                                withTimeoutOrNull(4_000L) {
+                                    cloudRepo.observeMembers(resolvedFamilyId, currentUserId).first()
+                                }
+                            }.getOrNull().orEmpty()
+                        }
                         if (loadedMembers.any { it.id == savedMemberId }) {
                             _activeMemberId.value = savedMemberId
                             withTimeoutOrNull(1000L) {
@@ -723,6 +754,7 @@ class FamilyViewModel(
                         }
                     }
                 } else {
+                    _isResolvingFamilySpace.value = false
                     _isMembersLoading.value = false
                 }
             } catch (e: CancellationException) {
@@ -956,13 +988,13 @@ class FamilyViewModel(
     // --- Family Setup / Join ---
 
     private suspend fun resolveInitialFamilySpace(savedFamilyId: String?): String? {
-        val fams = withTimeoutOrNull(6_000L) {
+        val fams = withTimeoutOrNull(7_000L) {
             cloudRepo.fetchMyFamiliesOnce(currentUserId)
         } ?: emptyList()
         val verifiedSavedFamilyId = savedFamilyId?.takeIf { id -> fams.any { it.id == id } }
         return verifiedSavedFamilyId
             ?: fams.firstOrNull { it.inviteCode == "NIDO01" }?.id
-            ?: withTimeoutOrNull(12_000L) { cloudRepo.ensureFixedFamily(currentUserId).getOrNull() }
+            ?: withTimeoutOrNull(15_000L) { cloudRepo.ensureFixedFamily(currentUserId).getOrNull() }
             ?: fams.firstOrNull()?.id
             ?: savedFamilyId
     }
