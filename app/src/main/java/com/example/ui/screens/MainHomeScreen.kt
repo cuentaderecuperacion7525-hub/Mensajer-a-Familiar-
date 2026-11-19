@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -305,6 +306,9 @@ fun MainHomeScreen(
     }
 
     val totalUnread = remember(chatPreviews) { chatPreviews.sumOf { it.unreadCount } }
+    val hasUnviewedStatuses = remember(statuses, activeMember.id) {
+        hasUnviewedFamilyStatuses(statuses, activeMember.id)
+    }
     val brandBlue = if (isDarkTheme) MaterialTheme.colorScheme.primary else Color(0xFF1A5FD4)
     val textPrimary = if (isDarkTheme) MaterialTheme.colorScheme.onSurface else Color(0xFF1B1F2A)
     val textSecondary = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFF5B6270)
@@ -317,91 +321,145 @@ fun MainHomeScreen(
             containerColor = if (isDarkTheme) MaterialTheme.colorScheme.surface else Color.White,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                TopAppBar(
-                    title = {
-                        Column(
-                            modifier = Modifier
-                                .padding(horizontal = 4.dp, vertical = 4.dp)
-                                .testTag("active_profile_switcher"),
-                            verticalArrangement = Arrangement.Center
-                        ) {
+                if (selectedTab == MainTab.UPDATES) {
+                    TopAppBar(
+                        title = {
                             Text(
-                                text = "FamiChat",
+                                text = "Novedades",
                                 fontFamily = InterFontFamily,
                                 fontSize = 22.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = textPrimary,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .padding(horizontal = 4.dp)
+                                    .testTag("updates_top_title")
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = if (isDarkTheme) MaterialTheme.colorScheme.surface else Color.White,
+                            titleContentColor = textPrimary
+                        )
+                    )
+                } else {
+                    TopAppBar(
+                        title = {
+                            Column(
+                                modifier = Modifier
+                                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                                    .testTag("active_profile_switcher"),
+                                verticalArrangement = Arrangement.Center
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (activeMember.isOnline) OnlineGreen
-                                            else Color(0xFF9AA0A6)
-                                        )
-                                )
                                 Text(
-                                    text = "${activeMember.name} · ${activeMember.lastSeenText}",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontFamily = InterFontFamily
-                                    ),
-                                    color = textSecondary,
+                                    text = "FamiChat",
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = textPrimary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (activeMember.isOnline) OnlineGreen
+                                                else Color(0xFF9AA0A6)
+                                            )
+                                    )
+                                    Text(
+                                        text = "${activeMember.name} · ${activeMember.lastSeenText}",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFamily = InterFontFamily
+                                        ),
+                                        color = textSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
-                        }
-                    },
-                    actions = {
-                        IconButton(
-                            onClick = { showOverflowMenu = !showOverflowMenu },
-                            modifier = Modifier.testTag("home_more_menu_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.MoreVert,
-                                contentDescription = "Opciones de perfil",
-                                tint = textPrimary
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = if (isDarkTheme) MaterialTheme.colorScheme.surface else Color.White,
-                        titleContentColor = textPrimary,
-                        actionIconContentColor = textPrimary
+                        },
+                        actions = {
+                            IconButton(
+                                onClick = { showOverflowMenu = !showOverflowMenu },
+                                modifier = Modifier.testTag("home_more_menu_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.MoreVert,
+                                    contentDescription = "Opciones de perfil",
+                                    tint = textPrimary
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = if (isDarkTheme) MaterialTheme.colorScheme.surface else Color.White,
+                            titleContentColor = textPrimary,
+                            actionIconContentColor = textPrimary
+                        )
                     )
-                )
+                }
             },
             floatingActionButton = {
-                if (selectedTab == MainTab.CHATS) {
-                    FloatingActionButton(
-                        onClick = { showNewChatDialog = true },
-                        shape = CircleShape,
-                        containerColor = brandBlue,
-                        contentColor = Color.White,
-                        elevation = FloatingActionButtonDefaults.elevation(
-                            defaultElevation = 0.dp,
-                            pressedElevation = 2.dp,
-                            focusedElevation = 0.dp,
-                            hoveredElevation = 0.dp
-                        ),
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("fab_new_chat")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = "Nuevo chat",
-                            modifier = Modifier.size(22.dp)
-                        )
+                when (selectedTab) {
+                    MainTab.CHATS -> {
+                        FloatingActionButton(
+                            onClick = { showNewChatDialog = true },
+                            shape = CircleShape,
+                            containerColor = brandBlue,
+                            contentColor = Color.White,
+                            elevation = FloatingActionButtonDefaults.elevation(
+                                defaultElevation = 0.dp,
+                                pressedElevation = 2.dp,
+                                focusedElevation = 0.dp,
+                                hoveredElevation = 0.dp
+                            ),
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("fab_new_chat")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Add,
+                                contentDescription = "Nuevo chat",
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
+                    MainTab.UPDATES -> {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .clickable { showCreateStatusDialog = true }
+                                .testTag("fab_new_status"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = brandBlue,
+                                contentColor = Color.White,
+                                tonalElevation = 0.dp,
+                                shadowElevation = 2.dp,
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Filled.PhotoCamera,
+                                        contentDescription = "Crear estado",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    else -> Unit
                 }
             },
             bottomBar = {
@@ -416,6 +474,7 @@ fun MainHomeScreen(
                             MainNavBarItems(
                                 selectedTab = selectedTab,
                                 unreadCount = totalUnread,
+                                hasUnviewedStatuses = hasUnviewedStatuses,
                                 isDarkTheme = isDarkTheme,
                                 onSelectTab = onSelectTab
                             )
@@ -438,6 +497,7 @@ fun MainHomeScreen(
                         MainNavRailItems(
                             selectedTab = selectedTab,
                             unreadCount = totalUnread,
+                            hasUnviewedStatuses = hasUnviewedStatuses,
                             onSelectTab = onSelectTab
                         )
                     }
@@ -575,20 +635,17 @@ fun MainHomeScreen(
                                     onStartCall(call.chatId, call.title, call.avatarEmoji, call.avatarColorHex, type)
                                 }
                             )
-                            MainTab.BOARD -> FamilyBoardTab(
+                            MainTab.UPDATES -> UpdatesTabScreen(
                                 activeMember = activeMember,
-                                members = allMembers,
-                                shoppingItems = shoppingItems,
-                                events = events,
+                                allMembers = allMembers,
+                                statuses = statuses,
                                 notes = notes,
-                                onAddShoppingItem = onAddShoppingItem,
-                                onToggleShoppingItem = onToggleShoppingItem,
-                                onDeleteShoppingItem = onDeleteShoppingItem,
-                                onClearCheckedShopping = onClearCheckedShopping,
-                                onAddEvent = onAddEvent,
-                                onDeleteEvent = onDeleteEvent,
-                                onSaveNote = onSaveNote,
-                                onDeleteNote = onDeleteNote
+                                isDarkTheme = isDarkTheme,
+                                mediaTransferProgress = mediaTransferProgress,
+                                onAddStatus = { showCreateStatusDialog = true },
+                                onOpenMemberStatuses = { group ->
+                                    viewingStatusMemberId = group.member.id
+                                }
                             )
                         }
                     }
@@ -1037,30 +1094,52 @@ private fun MenuPillSwitch(
 private fun MainNavRailItems(
     selectedTab: MainTab,
     unreadCount: Int,
+    hasUnviewedStatuses: Boolean,
     onSelectTab: (MainTab) -> Unit
 ) {
-    val entries = listOf(
-        Triple(MainTab.CHATS, "Chats", Pair(Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat)),
-        Triple(MainTab.GROUPS, "Grupos", Pair(Icons.Filled.Groups, Icons.Outlined.Groups)),
-        Triple(MainTab.CALLS, "Llamadas", Pair(Icons.Filled.Call, Icons.Outlined.Call)),
-        Triple(MainTab.BOARD, "Avisos", Pair(Icons.AutoMirrored.Filled.VolumeUp, Icons.AutoMirrored.Outlined.VolumeUp))
+    val tabs = listOf(
+        MainTab.CHATS to "Chats",
+        MainTab.GROUPS to "Grupos",
+        MainTab.CALLS to "Llamadas",
+        MainTab.UPDATES to "Novedades"
     )
 
-    entries.forEach { (tab, label, icons) ->
+    tabs.forEach { (tab, label) ->
         val selected = selectedTab == tab
         NavigationRailItem(
             selected = selected,
             onClick = { onSelectTab(tab) },
             icon = {
                 Box {
-                    Icon(
-                        imageVector = if (selected) icons.first else icons.second,
-                        contentDescription = label
-                    )
+                    when (tab) {
+                        MainTab.CHATS -> Icon(
+                            imageVector = if (selected) Icons.AutoMirrored.Filled.Chat else Icons.AutoMirrored.Outlined.Chat,
+                            contentDescription = label
+                        )
+                        MainTab.GROUPS -> Icon(
+                            imageVector = if (selected) Icons.Filled.Groups else Icons.Outlined.Groups,
+                            contentDescription = label
+                        )
+                        MainTab.CALLS -> Icon(
+                            imageVector = if (selected) Icons.Filled.Call else Icons.Outlined.Call,
+                            contentDescription = label
+                        )
+                        MainTab.UPDATES -> UpdatesDottedRingIcon(selected = selected)
+                    }
                     if (tab == MainTab.CHATS && unreadCount > 0) {
                         Badge(modifier = Modifier.align(Alignment.TopEnd)) {
                             Text(unreadCount.toString())
                         }
+                    }
+                    if (tab == MainTab.UPDATES && hasUnviewedStatuses) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFD93025))
+                                .testTag("nav_updates_unread_dot")
+                        )
                     }
                 }
             },
@@ -1074,23 +1153,41 @@ private fun MainNavRailItems(
 private fun androidx.compose.foundation.layout.RowScope.MainNavBarItems(
     selectedTab: MainTab,
     unreadCount: Int,
+    hasUnviewedStatuses: Boolean = false,
     isDarkTheme: Boolean = false,
     onSelectTab: (MainTab) -> Unit
 ) {
-    val entries = listOf(
-        Triple(MainTab.CHATS, "Chats", Pair(Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat)),
-        Triple(MainTab.GROUPS, "Grupos", Pair(Icons.Filled.Groups, Icons.Outlined.Groups)),
-        Triple(MainTab.CALLS, "Llamadas", Pair(Icons.Filled.Call, Icons.Outlined.Call)),
-        Triple(MainTab.BOARD, "Avisos", Pair(Icons.AutoMirrored.Filled.VolumeUp, Icons.AutoMirrored.Outlined.VolumeUp))
+    val tabs = listOf(
+        MainTab.CHATS to "Chats",
+        MainTab.GROUPS to "Grupos",
+        MainTab.CALLS to "Llamadas",
+        MainTab.UPDATES to "Novedades"
     )
 
-    entries.forEach { (tab, label, icons) ->
+    tabs.forEach { (tab, label) ->
         val selected = selectedTab == tab
         MainNavBarItem(
             selected = selected,
             label = label,
-            icon = if (selected) icons.first else icons.second,
+            iconContent = {
+                when (tab) {
+                    MainTab.CHATS -> Icon(
+                        imageVector = if (selected) Icons.AutoMirrored.Filled.Chat else Icons.AutoMirrored.Outlined.Chat,
+                        contentDescription = label
+                    )
+                    MainTab.GROUPS -> Icon(
+                        imageVector = if (selected) Icons.Filled.Groups else Icons.Outlined.Groups,
+                        contentDescription = label
+                    )
+                    MainTab.CALLS -> Icon(
+                        imageVector = if (selected) Icons.Filled.Call else Icons.Outlined.Call,
+                        contentDescription = label
+                    )
+                    MainTab.UPDATES -> UpdatesDottedRingIcon(selected = selected)
+                }
+            },
             badgeCount = if (tab == MainTab.CHATS) unreadCount else 0,
+            showRedDot = tab == MainTab.UPDATES && hasUnviewedStatuses,
             isDarkTheme = isDarkTheme,
             tag = "nav_${tab.name.lowercase()}",
             onClick = { onSelectTab(tab) }
@@ -1102,8 +1199,9 @@ private fun androidx.compose.foundation.layout.RowScope.MainNavBarItems(
 private fun androidx.compose.foundation.layout.RowScope.MainNavBarItem(
     selected: Boolean,
     label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconContent: @Composable () -> Unit,
     badgeCount: Int,
+    showRedDot: Boolean = false,
     isDarkTheme: Boolean,
     tag: String,
     onClick: () -> Unit
@@ -1121,11 +1219,21 @@ private fun androidx.compose.foundation.layout.RowScope.MainNavBarItem(
         onClick = onClick,
         icon = {
             Box {
-                Icon(icon, contentDescription = label)
+                iconContent()
                 if (badgeCount > 0) {
                     Badge(modifier = Modifier.align(Alignment.TopEnd)) {
                         Text(badgeCount.toString())
                     }
+                }
+                if (showRedDot) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFD93025))
+                            .testTag("nav_updates_unread_dot")
+                    )
                 }
             }
         },

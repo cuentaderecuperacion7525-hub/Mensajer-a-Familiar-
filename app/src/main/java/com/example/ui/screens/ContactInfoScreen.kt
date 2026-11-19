@@ -84,14 +84,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.data.model.CallDirection
 import com.example.data.model.CallRecordEntity
-import com.example.data.model.CallSignalStatus
 import com.example.data.model.CallType
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ChatType
 import com.example.data.model.FamilyMemberEntity
-import com.example.data.model.JsonHelpers
 import com.example.data.model.MessageType
 import com.example.ui.components.ChatWallpaperPalette
 import com.example.ui.components.extractAvatarInitials
@@ -113,7 +110,6 @@ private val ContactStatusPillBg = Color(0xFFE1F5EE)
 private val ContactStatusPillText = Color(0xFF085041)
 private val ContactOnlineDot = Color(0xFF2FA866)
 private val ContactOfflineDot = Color(0xFF9AA0A6)
-private val ContactMissedRed = Color(0xFFD93025)
 private val ContactWallpaperBorder = Color(0xFFC9CED8)
 
 private enum class ContactSharedTab { PHOTOS, FILES, LINKS }
@@ -187,26 +183,6 @@ fun ContactInfoScreen(
         } else {
             null
         }
-    }
-
-    val recentCalls = remember(calls, chatUi.chat.id, contactMember?.id, activeMember.id, isGroup) {
-        calls
-            .filter { call ->
-                if (call.chatId == chatUi.chat.id) {
-                    true
-                } else if (!isGroup && contactMember != null) {
-                    val targets = JsonHelpers.decodeStringList(call.targetMemberIdsJson)
-                    val directFromContact = call.callerId == contactMember.id &&
-                        (targets.isEmpty() || (targets.size == 1 && targets.contains(activeMember.id)))
-                    val directToContact = call.callerId == activeMember.id &&
-                        targets.size == 1 && targets.contains(contactMember.id)
-                    directFromContact || directToContact
-                } else {
-                    false
-                }
-            }
-            .sortedByDescending { it.timestamp }
-            .take(2)
     }
 
     val sharedPhotos = remember(visibleMessages) {
@@ -590,85 +566,6 @@ fun ContactInfoScreen(
                             onClick = onSearchInChat,
                             modifier = Modifier.weight(1f)
                         )
-                    }
-
-                    // RECENT CALLS (Hidden completely if there are no calls)
-                    if (recentCalls.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(24.dp))
-                        SectionHeaderLabel(text = "LLAMADAS RECIENTES")
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(18.dp),
-                            color = ContactCardBg,
-                            tonalElevation = 0.dp,
-                            shadowElevation = 0.dp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("contact_info_recent_calls_card")
-                        ) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                recentCalls.forEachIndexed { index, call ->
-                                    val isMissed = call.direction == CallDirection.MISSED ||
-                                        call.callStatus == CallSignalStatus.MISSED ||
-                                        call.callStatus == CallSignalStatus.DECLINED
-                                    val dotColor = if (isMissed) ContactMissedRed else ContactOnlineDot
-                                    val statusLabel = if (isMissed) {
-                                        "Llamada perdida"
-                                    } else {
-                                        val dirText = when {
-                                            call.callerId == activeMember.id -> "Saliente"
-                                            call.callerId.isNotBlank() -> "Entrante"
-                                            call.direction == CallDirection.OUTGOING -> "Saliente"
-                                            else -> "Entrante"
-                                        }
-                                        val durText = TimeFormatters.formatCallDurationShort(call.durationSec)
-                                        if (durText.isNotEmpty()) "$dirText · $durText" else dirText
-                                    }
-                                    val dateText = TimeFormatters.formatCallDateTime(call.timestamp)
-
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .defaultMinSize(minHeight = 48.dp)
-                                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(dotColor)
-                                        )
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Text(
-                                            text = statusLabel,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = if (isMissed) ContactMissedRed else ContactInkPrimary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        if (dateText.isNotEmpty()) {
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                text = dateText,
-                                                fontSize = 12.sp,
-                                                color = ContactInkSecondary,
-                                                maxLines = 1
-                                            )
-                                        }
-                                    }
-                                    if (index < recentCalls.lastIndex) {
-                                        HorizontalDivider(
-                                            color = ContactDividerColor,
-                                            thickness = 1.dp,
-                                            modifier = Modifier.padding(horizontal = 16.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
                     }
 
                     // SHARED SECTION (Fotos N, Archivos N, Enlaces N)

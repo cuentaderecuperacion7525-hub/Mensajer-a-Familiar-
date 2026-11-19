@@ -1214,10 +1214,9 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithText("Cumpleaños", substring = true, ignoreCase = true).assertDoesNotExist()
     composeTestRule.onNodeWithText("Información", ignoreCase = true).assertDoesNotExist()
 
-    // Recent calls section shows completed + missed calls
-    composeTestRule.onNodeWithTag("contact_info_recent_calls_card").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithText("Entrante · 12 min").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Llamada perdida").assertIsDisplayed()
+    // Recent calls section is intentionally omitted in ContactInfoScreen (already exists in Llamadas tab)
+    composeTestRule.onNodeWithTag("contact_info_recent_calls_card").assertDoesNotExist()
+    composeTestRule.onNodeWithText("LLAMADAS RECIENTES").assertDoesNotExist()
 
     // Shared counts (5 photos with +1 overflow, 1 file, 1 link)
     composeTestRule.onNodeWithTag("contact_info_shared_tabs").performScrollTo().assertIsDisplayed()
@@ -1533,6 +1532,212 @@ class ExampleRobolectricTest {
       .onNodeWithText("Emojis animados: Noto Emoji Animation de Google, licencia CC BY 4.0")
       .performScrollTo()
       .assertIsDisplayed()
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `novedades tab replaces avisos, shows red dot, recientes and vistos, opens viewer, creates status, and backs to chats`() {
+    val me = sampleMember(id = "m_me", name = "José Manuel", isAdmin = true)
+    val mama = sampleMember(id = "m_mama", name = "Tila del Carmen")
+    val hijo = sampleMember(id = "m_hijo", name = "Cristian Fernando")
+    val now = System.currentTimeMillis()
+
+    val tabState = androidx.compose.runtime.mutableStateOf(MainTab.CHATS)
+    val statusesState = androidx.compose.runtime.mutableStateOf(
+      listOf(
+        com.example.data.model.FamilyStatusEntity(
+          id = "st_mama_1",
+          memberId = mama.id,
+          text = "Buenos días familia",
+          mediaType = "VIDEO",
+          createdAt = now - 60_000L,
+          expiresAt = now + com.example.data.model.FamilyStatusEntity.STATUS_TTL_MS,
+          viewedByMemberIdsJson = "[]"
+        ),
+        com.example.data.model.FamilyStatusEntity(
+          id = "st_hijo_1",
+          memberId = hijo.id,
+          text = "En camino",
+          createdAt = now - 120_000L,
+          expiresAt = now + com.example.data.model.FamilyStatusEntity.STATUS_TTL_MS,
+          viewedByMemberIdsJson = "[\"${me.id}\"]"
+        )
+      )
+    )
+    val notesState = androidx.compose.runtime.mutableStateOf(
+      listOf(
+        com.example.data.model.FamilyNoteEntity(
+          id = "n1",
+          title = "Cena familiar",
+          content = "Hoy a las 8 pm en casa",
+          authorId = mama.id,
+          colorHex = "#FFF4CC",
+          isPinned = true
+        )
+      )
+    )
+
+    composeTestRule.setContent {
+      MainHomeScreen(
+        activeMember = me,
+        allMembers = listOf(me, mama, hijo),
+        userGroupsCount = 1,
+        isDarkTheme = false,
+        notificationsEnabled = true,
+        updateRepoSlug = "",
+        updateState = AppUpdateUiState.Idle,
+        selectedTab = tabState.value,
+        searchQuery = "",
+        chatPreviews = emptyList(),
+        statuses = statusesState.value,
+        calls = emptyList(),
+        shoppingItems = emptyList(),
+        events = emptyList(),
+        notes = notesState.value,
+        snackbarMessage = null,
+        onClearSnackbar = {},
+        onToggleTheme = {},
+        onToggleNotifications = {},
+        onUpdateOwnProfile = { _, _, _, _, _, _, _ -> },
+        onPublishTextStatus = { _, _ -> },
+        onPublishPhotoStatus = { _, _ -> },
+        onMarkStatusViewed = { statusId ->
+          statusesState.value = statusesState.value.map { st ->
+            if (st.id == statusId) st.copy(viewedByMemberIdsJson = "[\"${me.id}\"]") else st
+          }
+        },
+        onDeleteStatus = {},
+        onReplyToStatus = { _, _ -> },
+        onCheckForUpdate = {},
+        onSaveUpdateRepoSlug = {},
+        onDownloadUpdate = {},
+        onResetUpdateState = {},
+        onSelectTab = { tabState.value = it },
+        onSearchChange = {},
+        onOpenChat = {},
+        onStartDirectChat = {},
+        onSwitchProfile = {},
+        onOpenAdminPanel = {},
+        onStartCall = { _, _, _, _, _ -> },
+        onAddShoppingItem = { _, _, _ -> },
+        onToggleShoppingItem = {},
+        onDeleteShoppingItem = {},
+        onClearCheckedShopping = {},
+        onAddEvent = { _, _, _, _, _, _ -> },
+        onDeleteEvent = {},
+        onSaveNote = { _, _, _, _, _ -> },
+        onDeleteNote = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    // Bottom bar has Chats, Grupos, Llamadas, Novedades — no Avisos; Chats stories strip preserved
+    composeTestRule.onNodeWithTag("nav_chats").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("nav_groups").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("nav_calls").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("nav_updates").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Avisos").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("family_status_strip").assertIsDisplayed()
+
+    // Red dot appears on Novedades icon while mama's status is unseen
+    composeTestRule.onNodeWithTag("nav_updates_unread_dot", useUnmergedTree = true).assertIsDisplayed()
+
+    // Switch to Novedades tab
+    composeTestRule.onNodeWithTag("nav_updates").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(MainTab.UPDATES, tabState.value)
+
+    // Header is "Novedades" with no overflow icon; camera FAB is shown
+    composeTestRule.onNodeWithTag("updates_top_title").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("home_more_menu_button").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("fab_new_status").assertIsDisplayed()
+
+    // Pinned family notices card is visible because notes is non-empty
+    composeTestRule.onNodeWithTag("updates_family_notices_card").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Avisos de la familia").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Cena familiar").assertIsDisplayed()
+
+    // Estados section with "Añadir estado" / "Tu día en una foto"
+    composeTestRule.onNodeWithText("Estados").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Añadir estado").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Tu día en una foto").assertIsDisplayed()
+
+    // Recientes (mama with video badge) and Vistos (hijo)
+    composeTestRule.onNodeWithTag("updates_section_recent").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_recent_row_${mama.id}").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_video_play_badge_st_mama_1", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_section_viewed").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_viewed_row_${hijo.id}").assertIsDisplayed()
+
+    // Tap mama's status -> opens viewer & marks viewed -> moves from Recientes to Vistos and clears red dot
+    composeTestRule.onNodeWithTag("updates_recent_row_${mama.id}").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_reply_input").assertIsDisplayed()
+    dispatchSystemBack()
+    composeTestRule.onNodeWithTag("status_reply_input").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("updates_recent_row_${mama.id}").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("updates_viewed_row_${mama.id}").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("nav_updates_unread_dot", useUnmergedTree = true).assertDoesNotExist()
+
+    // Tap camera FAB -> opens existing CreateStatusDialog
+    composeTestRule.onNodeWithTag("fab_new_status").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("publish_status_button").assertIsDisplayed()
+    dispatchSystemBack()
+    composeTestRule.onNodeWithTag("publish_status_button").assertDoesNotExist()
+
+    // Back gesture from Novedades returns to Chats
+    dispatchSystemBack()
+    assertEquals(MainTab.CHATS, tabState.value)
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `novedades empty state hides notices card when empty and shows my status when active`() {
+    val me = sampleMember(id = "m_me", name = "José Manuel", isAdmin = true)
+    val now = System.currentTimeMillis()
+    var addClicked = 0
+    var openedMine = false
+
+    composeTestRule.setContent {
+      com.example.ui.screens.UpdatesTabScreen(
+        activeMember = me,
+        allMembers = listOf(me),
+        statuses = listOf(
+          com.example.data.model.FamilyStatusEntity(
+            id = "st_me_1",
+            memberId = me.id,
+            text = "Listo para hoy",
+            createdAt = now - 30_000L,
+            expiresAt = now + com.example.data.model.FamilyStatusEntity.STATUS_TTL_MS
+          )
+        ),
+        notes = emptyList(),
+        isDarkTheme = false,
+        onAddStatus = { addClicked++ },
+        onOpenMemberStatuses = { if (it.member.id == me.id) openedMine = true }
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("updates_family_notices_card").assertDoesNotExist()
+    composeTestRule.onNodeWithText("Mi estado").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_empty_message").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Aún no hay estados. Toca la cámara para compartir tu día.").assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("updates_my_status_row").performClick()
+    assertTrue(openedMine)
+
+    composeTestRule.onNodeWithTag("updates_add_another_status_button").performClick()
+    assertEquals(1, addClicked)
+
+    // Verify unseen detector ignores own statuses and flips to false once viewed
+    val own = com.example.data.model.FamilyStatusEntity(id = "s1", memberId = me.id, viewedByMemberIdsJson = "[]")
+    val unseen = com.example.data.model.FamilyStatusEntity(id = "s2", memberId = "m_other", viewedByMemberIdsJson = "[]")
+    val seen = unseen.copy(viewedByMemberIdsJson = "[\"${me.id}\"]")
+    assertFalse(com.example.ui.screens.hasUnviewedFamilyStatuses(listOf(own), me.id))
+    assertTrue(com.example.ui.screens.hasUnviewedFamilyStatuses(listOf(own, unseen), me.id))
+    assertFalse(com.example.ui.screens.hasUnviewedFamilyStatuses(listOf(own, seen), me.id))
   }
 }
 

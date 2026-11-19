@@ -67,7 +67,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
-enum class MainTab { CHATS, GROUPS, CALLS, BOARD }
+enum class MainTab { CHATS, GROUPS, CALLS, UPDATES }
 
 data class ChatThreadUi(
     val chat: ChatThreadEntity,

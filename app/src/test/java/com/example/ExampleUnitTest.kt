@@ -367,4 +367,23 @@ class ExampleUnitTest {
     assertFalse(NotoAnimatedEmojiSession.consumeShouldAutoPlay("msg_emoji_1"))
     assertTrue(NotoAnimatedEmojiSession.consumeShouldAutoPlay("msg_emoji_2"))
   }
+
+  @Test
+  fun `status time formatter matches Novedades spec`() {
+    val calNow = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 18, 18, 0, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val calTodayPm = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 18, 16, 51, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val calYesterdayPm = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 17, 17, 58, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+
+    assertEquals("4:51 p. m.", TimeFormatters.formatStatusTime(calTodayPm.timeInMillis, calNow.timeInMillis))
+    assertEquals("Ayer 5:58 p. m.", TimeFormatters.formatStatusTime(calYesterdayPm.timeInMillis, calNow.timeInMillis))
+  }
 }

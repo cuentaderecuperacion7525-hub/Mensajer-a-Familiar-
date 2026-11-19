@@ -173,6 +173,44 @@ object TimeFormatters {
         }
     }
 
+    /**
+     * Formats status timestamps for Novedades:
+     * - Today: "4:51 p. m."
+     * - Yesterday: "Ayer 5:58 p. m."
+     * - Older: "15 nov 5:58 p. m."
+     */
+    fun formatStatusTime(timestamp: Long, nowMs: Long = System.currentTimeMillis()): String {
+        if (timestamp <= 0L) return ""
+        val spanish = Locale.forLanguageTag("es-ES")
+        val calNow = Calendar.getInstance().apply { timeInMillis = nowMs }
+        val calThen = Calendar.getInstance().apply { timeInMillis = timestamp }
+        val hour24 = calThen.get(Calendar.HOUR_OF_DAY)
+        val hour12 = when {
+            hour24 == 0 -> 12
+            hour24 > 12 -> hour24 - 12
+            else -> hour24
+        }
+        val minute = calThen.get(Calendar.MINUTE)
+        val amPm = if (hour24 < 12) "a. m." else "p. m."
+        val time12 = String.format(Locale.US, "%d:%02d %s", hour12, minute, amPm)
+
+        val sameDay = calNow.get(Calendar.YEAR) == calThen.get(Calendar.YEAR) &&
+            calNow.get(Calendar.DAY_OF_YEAR) == calThen.get(Calendar.DAY_OF_YEAR)
+        if (sameDay) return time12
+
+        calNow.add(Calendar.DAY_OF_YEAR, -1)
+        val isYesterday = calNow.get(Calendar.YEAR) == calThen.get(Calendar.YEAR) &&
+            calNow.get(Calendar.DAY_OF_YEAR) == calThen.get(Calendar.DAY_OF_YEAR)
+        if (isYesterday) return "Ayer $time12"
+
+        val monthShort = SimpleDateFormat("MMM", spanish).format(Date(timestamp))
+            .lowercase(spanish)
+            .replace(".", "")
+            .trim()
+        val day = calThen.get(Calendar.DAY_OF_MONTH)
+        return "$day $monthShort $time12"
+    }
+
     fun formatCallDurationShort(seconds: Int): String {
         if (seconds <= 0) return ""
         if (seconds < 60) return "$seconds seg"
