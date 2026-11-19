@@ -1048,5 +1048,291 @@ class ExampleRobolectricTest {
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("empty_chat_privacy_notice").assertIsDisplayed()
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `contact info opens full screen from chat header without kinship or birthday, supports actions, calls, media, wallpaper sheet, and back returns to chat`() {
+    val calCreated = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 10, 9, 0, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val calCall1 = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 17, 17, 40, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val calCall2 = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 16, 10, 15, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val me = sampleMember(id = "m_me", name = "José Manuel", isAdmin = true)
+    val contact = sampleMember(id = "m_mama", name = "Tila del Carmen").copy(
+      roleLabel = "Mamá Especial",
+      avatarColorHex = "#6B4FD8",
+      bioText = "Siempre aquí para todos",
+      isOnline = true,
+      lastSeenText = "En casa",
+      createdAt = calCreated.timeInMillis,
+      liveStatusAt = calCall1.timeInMillis
+    )
+    val chatUiState = androidx.compose.runtime.mutableStateOf(
+      com.example.ui.viewmodel.ChatThreadUi(
+        chat = com.example.data.model.ChatThreadEntity(
+          id = "direct_mama",
+          type = com.example.data.model.ChatType.DIRECT,
+          title = contact.name,
+          avatarColorHex = contact.avatarColorHex,
+          avatarEmoji = contact.avatarEmoji,
+          participantIdsJson = "[\"${me.id}\",\"${contact.id}\"]"
+        ),
+        displayTitle = contact.name,
+        displayEmoji = contact.avatarEmoji,
+        displayColorHex = contact.avatarColorHex,
+        partnerBioText = contact.bioText,
+        isOnline = true,
+        subtitleStatus = "En casa",
+        lastMessagePreview = "Mira este enlace",
+        lastMessageTime = "18:00",
+        unreadCount = 0,
+        lastMessageStatus = null,
+        isLastMessageFromMe = false,
+        participants = listOf(me, contact),
+        isPinned = false,
+        isMuted = false,
+        rightStatusText = "En casa"
+      )
+    )
+    val selectedWallpaper = androidx.compose.runtime.mutableStateOf("default")
+    val selectedTone = androidx.compose.runtime.mutableStateOf("")
+    val startedCalls = mutableListOf<com.example.data.model.CallType>()
+    var leftChat = false
+
+    val sampleMessages = listOf(
+      com.example.data.model.ChatMessageEntity(
+        id = "img_1", chatId = "direct_mama", senderId = contact.id, text = "Foto 1",
+        type = com.example.data.model.MessageType.IMAGE, mediaUri = "https://example.com/1.jpg", timestamp = 1_700_000_001L
+      ),
+      com.example.data.model.ChatMessageEntity(
+        id = "img_2", chatId = "direct_mama", senderId = contact.id, text = "Foto 2",
+        type = com.example.data.model.MessageType.IMAGE, mediaUri = "https://example.com/2.jpg", timestamp = 1_700_000_002L
+      ),
+      com.example.data.model.ChatMessageEntity(
+        id = "img_3", chatId = "direct_mama", senderId = contact.id, text = "Foto 3",
+        type = com.example.data.model.MessageType.IMAGE, mediaUri = "https://example.com/3.jpg", timestamp = 1_700_000_003L
+      ),
+      com.example.data.model.ChatMessageEntity(
+        id = "img_4", chatId = "direct_mama", senderId = contact.id, text = "Foto 4",
+        type = com.example.data.model.MessageType.IMAGE, mediaUri = "https://example.com/4.jpg", timestamp = 1_700_000_004L
+      ),
+      com.example.data.model.ChatMessageEntity(
+        id = "img_5", chatId = "direct_mama", senderId = contact.id, text = "Foto 5",
+        type = com.example.data.model.MessageType.IMAGE, mediaUri = "https://example.com/5.jpg", timestamp = 1_700_000_005L
+      ),
+      com.example.data.model.ChatMessageEntity(
+        id = "doc_1", chatId = "direct_mama", senderId = me.id, text = "",
+        type = com.example.data.model.MessageType.DOCUMENT, fileName = "Receta.pdf", fileSizeBytes = 2048L, timestamp = 1_700_000_006L
+      ),
+      com.example.data.model.ChatMessageEntity(
+        id = "link_1", chatId = "direct_mama", senderId = contact.id, text = "Checa https://famichat.example.com/hola",
+        type = com.example.data.model.MessageType.TEXT, timestamp = 1_700_000_007L
+      )
+    )
+    val sampleCalls = listOf(
+      com.example.data.model.CallRecordEntity(
+        id = "c1", chatId = "direct_mama", title = contact.name, callerId = contact.id,
+        avatarColorHex = contact.avatarColorHex, avatarEmoji = contact.avatarEmoji,
+        callType = com.example.data.model.CallType.VOICE, direction = com.example.data.model.CallDirection.INCOMING,
+        durationSec = 720, timestamp = calCall1.timeInMillis, callStatus = com.example.data.model.CallSignalStatus.ENDED
+      ),
+      com.example.data.model.CallRecordEntity(
+        id = "c2", chatId = "direct_mama", title = contact.name, callerId = contact.id,
+        avatarColorHex = contact.avatarColorHex, avatarEmoji = contact.avatarEmoji,
+        callType = com.example.data.model.CallType.VOICE, direction = com.example.data.model.CallDirection.MISSED,
+        durationSec = 0, timestamp = calCall2.timeInMillis, callStatus = com.example.data.model.CallSignalStatus.MISSED
+      )
+    )
+
+    composeTestRule.setContent {
+      com.example.ui.screens.ChatRoomScreen(
+        chatUi = chatUiState.value,
+        activeMember = me,
+        allMembers = listOf(me, contact),
+        calls = sampleCalls,
+        selectedWallpaperKey = selectedWallpaper.value,
+        selectedNotificationToneUri = selectedTone.value,
+        messages = sampleMessages,
+        voiceRecording = com.example.ui.viewmodel.VoiceRecordingState(),
+        playingVoiceMessageId = null,
+        playingVoiceProgress = 0f,
+        snackbarMessage = null,
+        onClearSnackbar = {},
+        onBack = { leftChat = true },
+        onSendText = { _, _ -> },
+        onSendImage = { _, _, _ -> },
+        onSendLocation = { _, _, _, _, _, _ -> },
+        onSendPoll = { _, _ -> },
+        onVotePoll = { _, _ -> },
+        onEditMessage = { _, _ -> },
+        onSelectWallpaper = { selectedWallpaper.value = it },
+        onSelectNotificationTone = { selectedTone.value = it },
+        onToggleReaction = { _, _ -> },
+        onTogglePin = {},
+        onTogglePinChat = { chatUiState.value = chatUiState.value.copy(isPinned = !chatUiState.value.isPinned) },
+        onToggleMuteChat = { chatUiState.value = chatUiState.value.copy(isMuted = !chatUiState.value.isMuted) },
+        onDeleteForMe = {},
+        onDeleteForEveryone = {},
+        onStartVoiceRecording = {},
+        onCancelVoiceRecording = {},
+        onSendVoiceRecording = {},
+        onToggleVoicePlay = {},
+        onStartCall = { startedCalls.add(it) },
+        onTypingChange = {},
+        onToggleTheme = {},
+        onGoToHomePanel = {},
+        onSwitchProfile = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    // Tap chat header to open full-screen ContactInfoScreen
+    composeTestRule.onNodeWithTag("chat_header_info_button").performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("contact_info_screen").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Tila del Carmen").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("contact_info_status_pill").assertIsDisplayed()
+    composeTestRule.onNodeWithText("En casa").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Siempre aquí para todos").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Miembro desde 10 nov 2026").assertIsDisplayed()
+
+    // Kinship (roleLabel), birthday, and "Información" card MUST NOT appear
+    composeTestRule.onNodeWithText("Mamá Especial", substring = true).assertDoesNotExist()
+    composeTestRule.onNodeWithText("Cumpleaños", substring = true, ignoreCase = true).assertDoesNotExist()
+    composeTestRule.onNodeWithText("Información", ignoreCase = true).assertDoesNotExist()
+
+    // Recent calls section shows completed + missed calls
+    composeTestRule.onNodeWithTag("contact_info_recent_calls_card").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Entrante · 12 min").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Llamada perdida").assertIsDisplayed()
+
+    // Shared counts (5 photos with +1 overflow, 1 file, 1 link)
+    composeTestRule.onNodeWithTag("contact_info_shared_tabs").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Fotos 5").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Archivos 1").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Enlaces 1").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("contact_shared_photo_3").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("contact_shared_photos_overflow", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("+1", useUnmergedTree = true).assertIsDisplayed()
+
+    // Chat settings card: wallpaper sheet, notification tone default, pin & mute switches
+    composeTestRule.onNodeWithTag("contact_setting_wallpaper").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("contact_wallpaper_sheet").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("contact_wallpaper_option_mint").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals("mint", selectedWallpaper.value)
+    composeTestRule.onNodeWithTag("contact_setting_wallpaper_value", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Menta", useUnmergedTree = true).assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("contact_setting_notification_tone").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Predeterminado", useUnmergedTree = true).assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("contact_setting_pin_chat").performScrollTo().performClick()
+    composeTestRule.onNodeWithTag("contact_setting_mute_chat").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(chatUiState.value.isPinned)
+    assertTrue(chatUiState.value.isMuted)
+
+    // Voice & video actions trigger existing call callbacks
+    composeTestRule.onNodeWithTag("contact_action_voice_call").performScrollTo().performClick()
+    composeTestRule.onNodeWithTag("contact_action_video_call").performClick()
+    assertEquals(listOf(com.example.data.model.CallType.VOICE, com.example.data.model.CallType.VIDEO), startedCalls)
+
+    // System back closes ContactInfoScreen and returns to the chat without leaving chat
+    dispatchSystemBack()
+    composeTestRule.onNodeWithTag("contact_info_screen").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("chat_header_info_button").assertIsDisplayed()
+    assertFalse(leftChat)
+
+    // Reopen ContactInfoScreen and tap "Buscar" -> returns to chat with in-chat search open
+    composeTestRule.onNodeWithTag("chat_header_info_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("contact_action_search").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("contact_info_screen").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("in_chat_search_input").assertIsDisplayed()
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `contact info hides status pill, recent calls, and member since when data is absent`() {
+    val me = sampleMember(id = "m_me", name = "José Manuel", isAdmin = true)
+    val contact = sampleMember(id = "m_hijo", name = "Cristopher").copy(
+      roleLabel = "Hijo 2",
+      bioText = "",
+      isOnline = false,
+      lastSeenText = "No se ha conectado",
+      createdAt = 0L,
+      liveStatusAt = 0L,
+      linkedAuthUid = ""
+    )
+    val chatUi = com.example.ui.viewmodel.ChatThreadUi(
+      chat = com.example.data.model.ChatThreadEntity(
+        id = "direct_cris",
+        type = com.example.data.model.ChatType.DIRECT,
+        title = contact.name,
+        avatarColorHex = contact.avatarColorHex,
+        avatarEmoji = contact.avatarEmoji,
+        participantIdsJson = "[\"${me.id}\",\"${contact.id}\"]"
+      ),
+      displayTitle = contact.name,
+      displayEmoji = contact.avatarEmoji,
+      displayColorHex = contact.avatarColorHex,
+      partnerBioText = "",
+      isOnline = false,
+      subtitleStatus = "No se ha conectado",
+      lastMessagePreview = "Sin mensajes aún",
+      lastMessageTime = "",
+      unreadCount = 0,
+      lastMessageStatus = null,
+      isLastMessageFromMe = false,
+      participants = listOf(me, contact),
+      rightStatusText = "No se ha conectado"
+    )
+
+    composeTestRule.setContent {
+      com.example.ui.screens.ContactInfoScreen(
+        chatUi = chatUi,
+        activeMember = me,
+        allMembers = listOf(me, contact),
+        visibleMessages = emptyList(),
+        calls = emptyList(),
+        selectedWallpaperKey = "default",
+        selectedNotificationToneUri = "",
+        isContactBlocked = false,
+        onSelectWallpaper = {},
+        onSelectNotificationTone = {},
+        onTogglePinChat = {},
+        onToggleMuteChat = {},
+        onStartCall = {},
+        onSearchInChat = {},
+        onOpenImage = {},
+        onOpenDocument = {},
+        onRequestClearChat = {},
+        onRequestToggleBlockContact = {},
+        onBack = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("contact_info_screen").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Cristopher").assertIsDisplayed()
+    composeTestRule.onNodeWithText("No se ha conectado").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("contact_info_status_pill").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("contact_info_member_since").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("contact_info_recent_calls_card").assertDoesNotExist()
+    composeTestRule.onNodeWithText("Hijo 2").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("contact_shared_photos_empty").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Aún no se han compartido fotos en este chat.").assertIsDisplayed()
+  }
 }
 

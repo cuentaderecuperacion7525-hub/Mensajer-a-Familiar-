@@ -27,6 +27,7 @@ class PreferencesManager(private val context: Context) {
         private val KEY_LAST_NOTIFIED_MSG_TS = longPreferencesKey("last_notified_msg_ts")
         private val KEY_PINNED_CHAT_IDS_JSON = stringPreferencesKey("pinned_chat_ids_json")
         private val KEY_MUTED_CHAT_IDS_JSON = stringPreferencesKey("muted_chat_ids_json")
+        private val KEY_CHAT_NOTIFICATION_TONES_JSON = stringPreferencesKey("chat_notification_tones_json")
         private val KEY_TURN_URL = stringPreferencesKey("turn_server_url")
         private val KEY_TURN_USERNAME = stringPreferencesKey("turn_server_username")
         private val KEY_TURN_CREDENTIAL = stringPreferencesKey("turn_server_credential")
@@ -70,6 +71,11 @@ class PreferencesManager(private val context: Context) {
 
     val chatWallpapersFlow: Flow<Map<String, String>> = context.dataStore.data.map { prefs ->
         val raw = prefs[KEY_CHAT_WALLPAPERS_JSON] ?: "{}"
+        com.example.data.model.JsonHelpers.decodeReactions(raw)
+    }
+
+    val chatNotificationTonesFlow: Flow<Map<String, String>> = context.dataStore.data.map { prefs ->
+        val raw = prefs[KEY_CHAT_NOTIFICATION_TONES_JSON] ?: "{}"
         com.example.data.model.JsonHelpers.decodeReactions(raw)
     }
 
@@ -168,6 +174,20 @@ class PreferencesManager(private val context: Context) {
                 current[chatId] = wallpaperKey
             }
             prefs[KEY_CHAT_WALLPAPERS_JSON] = com.example.data.model.JsonHelpers.encodeReactions(current)
+        }
+    }
+
+    suspend fun setChatNotificationTone(chatId: String, toneUri: String) {
+        context.dataStore.edit { prefs ->
+            val current = com.example.data.model.JsonHelpers.decodeReactions(
+                prefs[KEY_CHAT_NOTIFICATION_TONES_JSON] ?: "{}"
+            ).toMutableMap()
+            if (toneUri.isBlank()) {
+                current.remove(chatId)
+            } else {
+                current[chatId] = toneUri
+            }
+            prefs[KEY_CHAT_NOTIFICATION_TONES_JSON] = com.example.data.model.JsonHelpers.encodeReactions(current)
         }
     }
 

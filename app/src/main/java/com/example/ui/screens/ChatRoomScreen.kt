@@ -158,6 +158,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
+import com.example.data.model.CallRecordEntity
 import com.example.data.model.CallType
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.ChatType
@@ -165,7 +166,6 @@ import com.example.data.model.FamilyMemberEntity
 import com.example.data.model.JsonHelpers
 import com.example.data.model.MessageType
 import com.example.data.model.PresenceStatus
-import com.example.ui.components.ChatInfoAndGalleryDialog
 import com.example.ui.components.ChatMessageBubble
 import com.example.ui.components.ChatWallpaperPalette
 import com.example.ui.components.ChatWallpaperPickerDialog
@@ -198,7 +198,9 @@ fun ChatRoomScreen(
     activeMember: FamilyMemberEntity,
     allMembers: List<FamilyMemberEntity>,
     allChatPreviews: List<ChatThreadUi> = emptyList(),
+    calls: List<CallRecordEntity> = emptyList(),
     selectedWallpaperKey: String = "default",
+    selectedNotificationToneUri: String = "",
     messages: List<ChatMessageEntity>,
     voiceRecording: VoiceRecordingState,
     playingVoiceMessageId: String?,
@@ -224,6 +226,7 @@ fun ChatRoomScreen(
     onEditMessage: (messageId: String, newText: String) -> Unit,
     onForwardMessage: (message: ChatMessageEntity, targetChatId: String) -> Unit = { _, _ -> },
     onSelectWallpaper: (String) -> Unit = {},
+    onSelectNotificationTone: (String) -> Unit = {},
     onToggleReaction: (messageId: String, emoji: String) -> Unit,
     onTogglePin: (messageId: String) -> Unit,
     onTogglePinChat: () -> Unit = {},
@@ -430,6 +433,7 @@ fun ChatRoomScreen(
                 keyboardController?.hide()
                 focusManager.clearFocus()
             }
+            showChatInfoDialog -> showChatInfoDialog = false
             showPrivacyInfoSheet -> showPrivacyInfoSheet = false
             showHeaderMenu -> showHeaderMenu = false
             showAttachmentMenu -> showAttachmentMenu = false
@@ -449,6 +453,32 @@ fun ChatRoomScreen(
         ChatWallpaperPalette.resolveColor(selectedWallpaperKey, isDark)
     }
 
+    if (showChatInfoDialog) {
+        ContactInfoScreen(
+            chatUi = chatUi,
+            activeMember = activeMember,
+            allMembers = allMembers,
+            visibleMessages = visibleMessages,
+            calls = calls,
+            selectedWallpaperKey = selectedWallpaperKey,
+            selectedNotificationToneUri = selectedNotificationToneUri,
+            isContactBlocked = isContactBlocked,
+            onSelectWallpaper = onSelectWallpaper,
+            onSelectNotificationTone = onSelectNotificationTone,
+            onTogglePinChat = onTogglePinChat,
+            onToggleMuteChat = onToggleMuteChat,
+            onStartCall = onStartCall,
+            onSearchInChat = {
+                showChatInfoDialog = false
+                isSearchOpen = true
+            },
+            onOpenImage = { uri -> viewerImageUri = uri },
+            onOpenDocument = onOpenDocument,
+            onRequestClearChat = { showClearChatConfirmDialog = true },
+            onRequestToggleBlockContact = { showBlockContactConfirmDialog = true },
+            onBack = { showChatInfoDialog = false }
+        )
+    } else {
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing.only(
             WindowInsetsSides.Top + WindowInsetsSides.Horizontal
@@ -570,7 +600,11 @@ fun ChatRoomScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(10.dp))
-                                        .clickable { showChatInfoDialog = true }
+                                        .clickable {
+                                            keyboardController?.hide()
+                                            focusManager.clearFocus()
+                                            showChatInfoDialog = true
+                                        }
                                         .padding(end = 6.dp)
                                         .testTag("chat_header_info_button")
                                 ) {
@@ -1637,6 +1671,7 @@ fun ChatRoomScreen(
             }
         }
     }
+    }
 
     actionTargetMessage?.let { target ->
         MessageActionsBottomSheet(
@@ -1687,20 +1722,6 @@ fun ChatRoomScreen(
             message = infoMsg,
             allMembers = allMembers,
             onDismiss = { infoTargetMessage = null }
-        )
-    }
-
-    if (showChatInfoDialog) {
-        val sharedImages = remember(visibleMessages) {
-            visibleMessages.filter { it.type == MessageType.IMAGE && !it.mediaUri.isNullOrBlank() }
-        }
-        ChatInfoAndGalleryDialog(
-            chatUi = chatUi,
-            imageMessages = sharedImages,
-            selectedWallpaperKey = selectedWallpaperKey,
-            onSelectWallpaper = onSelectWallpaper,
-            onOpenImage = { uri -> viewerImageUri = uri },
-            onDismiss = { showChatInfoDialog = false }
         )
     }
 

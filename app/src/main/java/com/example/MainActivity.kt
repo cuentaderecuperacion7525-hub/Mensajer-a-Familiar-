@@ -312,6 +312,7 @@ fun FamiChatApp(
     val switchPin by vm.switchPin.collectAsStateWithLifecycle()
     val notificationsEnabled by vm.notificationsEnabled.collectAsStateWithLifecycle()
     val chatWallpapers by vm.chatWallpapers.collectAsStateWithLifecycle()
+    val chatNotificationTones by vm.chatNotificationTones.collectAsStateWithLifecycle()
     val pendingNotificationChatId by vm.pendingNotificationChatId.collectAsStateWithLifecycle()
     val updateRepoSlug by vm.updateRepoSlug.collectAsStateWithLifecycle()
     val updateState by vm.updateState.collectAsStateWithLifecycle()
@@ -614,7 +615,9 @@ fun FamiChatApp(
                         activeMember = member,
                         allMembers = members,
                         allChatPreviews = chatPreviews,
+                        calls = calls,
                         selectedWallpaperKey = chatWallpapers[chatId] ?: "default",
+                        selectedNotificationToneUri = chatNotificationTones[chatId].orEmpty(),
                         messages = chatMessages,
                         voiceRecording = voiceRecording,
                         playingVoiceMessageId = playingVoiceId,
@@ -645,6 +648,7 @@ fun FamiChatApp(
                         onEditMessage = vm::editMessage,
                         onForwardMessage = vm::forwardMessage,
                         onSelectWallpaper = { key -> vm.setChatWallpaper(chatId, key) },
+                        onSelectNotificationTone = { uri -> vm.setChatNotificationTone(chatId, uri) },
                         onToggleReaction = vm::toggleReaction,
                         onTogglePin = { msgId -> vm.togglePinMessage(chatId, msgId) },
                         onTogglePinChat = { vm.togglePinChat(chatId) },

@@ -124,6 +124,65 @@ object TimeFormatters {
         return "Últ. vez ${formatShortDayMonth(timestamp, nowMs)}"
     }
 
+    fun formatDayMonthYear(timestamp: Long): String {
+        val spanish = Locale.forLanguageTag("es-ES")
+        val calThen = Calendar.getInstance().apply { timeInMillis = timestamp }
+        val monthShort = SimpleDateFormat("MMM", spanish).format(Date(timestamp))
+            .lowercase(spanish)
+            .replace(".", "")
+            .trim()
+        val day = calThen.get(Calendar.DAY_OF_MONTH)
+        val year = calThen.get(Calendar.YEAR)
+        return "$day $monthShort $year"
+    }
+
+    fun formatCallDateTime(timestamp: Long, nowMs: Long = System.currentTimeMillis()): String {
+        if (timestamp <= 0L) return ""
+        val spanish = Locale.forLanguageTag("es-ES")
+        val calNow = Calendar.getInstance().apply { timeInMillis = nowMs }
+        val calThen = Calendar.getInstance().apply { timeInMillis = timestamp }
+        val hour24 = calThen.get(Calendar.HOUR_OF_DAY)
+        val hour12 = when {
+            hour24 == 0 -> 12
+            hour24 > 12 -> hour24 - 12
+            else -> hour24
+        }
+        val minute = calThen.get(Calendar.MINUTE)
+        val amPm = if (hour24 < 12) "am" else "pm"
+        val time12 = String.format(Locale.US, "%d:%02d %s", hour12, minute, amPm)
+
+        val sameDay = calNow.get(Calendar.YEAR) == calThen.get(Calendar.YEAR) &&
+            calNow.get(Calendar.DAY_OF_YEAR) == calThen.get(Calendar.DAY_OF_YEAR)
+        if (sameDay) return "Hoy $time12"
+
+        calNow.add(Calendar.DAY_OF_YEAR, -1)
+        val isYesterday = calNow.get(Calendar.YEAR) == calThen.get(Calendar.YEAR) &&
+            calNow.get(Calendar.DAY_OF_YEAR) == calThen.get(Calendar.DAY_OF_YEAR)
+        if (isYesterday) return "Ayer $time12"
+
+        val monthShort = SimpleDateFormat("MMM", spanish).format(Date(timestamp))
+            .lowercase(spanish)
+            .replace(".", "")
+            .trim()
+        val day = calThen.get(Calendar.DAY_OF_MONTH)
+        val nowYear = Calendar.getInstance().apply { timeInMillis = nowMs }.get(Calendar.YEAR)
+        return if (nowYear == calThen.get(Calendar.YEAR)) {
+            "$day $monthShort $time12"
+        } else {
+            "$day $monthShort ${calThen.get(Calendar.YEAR)}"
+        }
+    }
+
+    fun formatCallDurationShort(seconds: Int): String {
+        if (seconds <= 0) return ""
+        if (seconds < 60) return "$seconds seg"
+        val totalMinutes = seconds / 60
+        if (totalMinutes < 60) return "$totalMinutes min"
+        val hours = totalMinutes / 60
+        val remMin = totalMinutes % 60
+        return if (remMin > 0) "${hours} h $remMin min" else "$hours h"
+    }
+
     fun formatDuration(seconds: Int): String {
         val mins = seconds / 60
         val secs = seconds % 60

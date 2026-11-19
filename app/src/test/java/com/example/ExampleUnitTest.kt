@@ -274,4 +274,45 @@ class ExampleUnitTest {
       TimeFormatters.formatLastSeen(0L, calNow.timeInMillis)
     )
   }
+
+  @Test
+  fun `contact info formatters and status resolvers match Spanish specs`() {
+    val calNow = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 18, 18, 0, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val calMemberSince = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 10, 9, 0, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val calYesterdayCall = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 17, 17, 40, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    assertEquals("10 nov 2026", TimeFormatters.formatDayMonthYear(calMemberSince.timeInMillis))
+    assertEquals("Ayer 5:40 pm", TimeFormatters.formatCallDateTime(calYesterdayCall.timeInMillis, calNow.timeInMillis))
+    assertEquals("12 min", TimeFormatters.formatCallDurationShort(720))
+    assertEquals("45 seg", TimeFormatters.formatCallDurationShort(45))
+    assertEquals("", TimeFormatters.formatCallDurationShort(0))
+
+    val atHomeMember = FamilyMemberEntity(
+      id = "m_1",
+      name = "Tila del Carmen",
+      roleLabel = "Mamá",
+      isAdmin = false,
+      avatarColorHex = "#6B4FD8",
+      avatarEmoji = "👩🏽",
+      isOnline = true,
+      lastSeenText = "En casa",
+      liveStatusAt = calNow.timeInMillis
+    )
+    assertEquals("En casa", com.example.ui.screens.resolveContactStatusPill(atHomeMember))
+
+    val offlineNoStatus = atHomeMember.copy(
+      isOnline = false,
+      lastSeenText = "Últ. vez 16 nov 18:52",
+      liveStatusAt = calYesterdayCall.timeInMillis
+    )
+    assertNull(com.example.ui.screens.resolveContactStatusPill(offlineNoStatus))
+  }
 }

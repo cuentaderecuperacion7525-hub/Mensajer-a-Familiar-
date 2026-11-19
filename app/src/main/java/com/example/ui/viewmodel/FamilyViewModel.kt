@@ -369,6 +369,9 @@ class FamilyViewModel(
     val chatWallpapers: StateFlow<Map<String, String>> = prefs.chatWallpapersFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
+    val chatNotificationTones: StateFlow<Map<String, String>> = prefs.chatNotificationTonesFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
     val pinnedChatIds: StateFlow<Set<String>> = prefs.pinnedChatIdsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
@@ -1225,6 +1228,12 @@ class FamilyViewModel(
     fun setChatWallpaper(chatId: String, wallpaperKey: String) {
         viewModelScope.launch {
             prefs.setChatWallpaper(chatId, wallpaperKey)
+        }
+    }
+
+    fun setChatNotificationTone(chatId: String, toneUri: String) {
+        viewModelScope.launch {
+            prefs.setChatNotificationTone(chatId, toneUri)
         }
     }
 
