@@ -94,6 +94,7 @@ import com.example.ui.theme.DangerRed
 import com.example.ui.theme.OnlineGreen
 import com.example.util.parseHexColor
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 @Composable
 fun GoogleSignInScreen(
@@ -107,7 +108,9 @@ fun GoogleSignInScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        val silentUser = GoogleAuthHelper.attemptSilentSignIn(context)
+        val silentUser = withTimeoutOrNull(5_000L) {
+            GoogleAuthHelper.attemptSilentSignIn(context)
+        }
         isBusy = false
         if (silentUser != null) {
             onSignedIn()

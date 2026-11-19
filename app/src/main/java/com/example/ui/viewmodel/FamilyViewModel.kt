@@ -216,6 +216,7 @@ class FamilyViewModel(
     private val _isResolvingFamilySpace = MutableStateFlow(true)
     private val _membersRetryTick = MutableStateFlow(0)
     private val _optimisticRegisteredMember = MutableStateFlow<Pair<String, FamilyMemberEntity>?>(null)
+    private val _bootstrapFallbackMembers = MutableStateFlow<Pair<String, List<FamilyMemberEntity>>?>(null)
     private var membersLoadingTimeoutJob: Job? = null
 
     private val rawMembers: StateFlow<List<FamilyMemberEntity>> = combine(
@@ -227,17 +228,34 @@ class FamilyViewModel(
             membersLoadingTimeoutJob?.cancel()
             if (fid.isNullOrBlank()) {
                 _isMembersLoading.value = resolving
+                if (resolving) {
+                    membersLoadingTimeoutJob = viewModelScope.launch {
+                        delay(14_000L)
+                        if (_activeFamilyId.value.isNullOrBlank()) {
+                            _isResolvingFamilySpace.value = false
+                            _isMembersLoading.value = false
+                        }
+                    }
+                }
                 flowOf(emptyList())
             } else {
                 _isMembersLoading.value = true
                 membersLoadingTimeoutJob = viewModelScope.launch {
-                    delay(4500L)
+                    delay(5_500L)
                     if (_activeFamilyId.value == fid) {
                         _isMembersLoading.value = false
                     }
                 }
                 cloudRepo.observeMembers(fid, currentUserId)
                     .onEach { list ->
+                        if (list.isEmpty()) {
+                            // Fallback via direct document get (allowed by isFamilyMemberByDoc) in case
+                            // memberUids array sync on a joining device hasn't finished or skipped a legacy doc
+                            val fallback = cloudRepo.fetchBootstrapMembersById(fid)
+                            if (fallback.isNotEmpty()) {
+                                _bootstrapFallbackMembers.value = fid to fallback
+                            }
+                        }
                         _isMembersLoading.value = false
                         val opt = _optimisticRegisteredMember.value
                         if (opt != null && opt.first == fid && list.any { it.id == opt.second.id }) {
@@ -245,6 +263,10 @@ class FamilyViewModel(
                         }
                     }
                     .catch { err ->
+                        val fallback = cloudRepo.fetchBootstrapMembersById(fid)
+                        if (fallback.isNotEmpty()) {
+                            _bootstrapFallbackMembers.value = fid to fallback
+                        }
                         _isMembersLoading.value = false
                         val fsErr = err.unwrapFirestoreException()
                         if (fsErr == null && err is CancellationException) throw err
@@ -264,13 +286,21 @@ class FamilyViewModel(
 
     private val effectiveRawMembers: Flow<List<FamilyMemberEntity>> = combine(
         rawMembers,
+        _bootstrapFallbackMembers,
         _optimisticRegisteredMember,
         _activeFamilyId
-    ) { list, optimistic, famId ->
-        if (optimistic != null && optimistic.first == famId && list.none { it.id == optimistic.second.id }) {
-            list + optimistic.second
+    ) { list, fallbackPair, optimistic, famId ->
+        val fallbackList = if (fallbackPair != null && fallbackPair.first == famId) fallbackPair.second else emptyList()
+        val existingIds = list.map { it.id }.toSet()
+        val merged = if (fallbackList.isNotEmpty()) {
+            list + fallbackList.filter { it.id !in existingIds }
         } else {
             list
+        }
+        if (optimistic != null && optimistic.first == famId && merged.none { it.id == optimistic.second.id }) {
+            merged + optimistic.second
+        } else {
+            merged
         }
     }
 
@@ -659,40 +689,58 @@ class FamilyViewModel(
             VideoMediaHelper.cleanupExpiredStatusVideos(appContext)
         }
         viewModelScope.launch {
-            val savedFamilyId = prefs.activeFamilyIdFlow.first()
-            val savedMemberId = prefs.activeMemberIdFlow.first()
-            if (savedMemberId == null) {
-                // Show ProfileSelectorScreen immediately in "Cargando perfiles…" state on fresh device
-                _isMembersLoading.value = true
+            try {
+                val savedFamilyId = prefs.activeFamilyIdFlow.first()
+                val savedMemberId = prefs.activeMemberIdFlow.first()
+                if (savedMemberId == null) {
+                    // Show ProfileSelectorScreen immediately in "Cargando perfiles…" state on fresh device
+                    _isMembersLoading.value = true
+                    _isSessionReady.value = true
+                }
+                val resolvedFamilyId = resolveInitialFamilySpace(savedFamilyId)
+                _isResolvingFamilySpace.value = false
+                if (resolvedFamilyId != null) {
+                    _activeFamilyId.value = resolvedFamilyId
+                    prefs.setActiveFamilyId(resolvedFamilyId)
+                    // Sync chats in the background so the profile selector never waits on chat docs
+                    viewModelScope.launch {
+                        cloudRepo.syncJoiningChats(resolvedFamilyId, currentUserId)
+                    }
+                    if (savedMemberId != null) {
+                        // Wait briefly for initial member list so saved profile restores straight to HOME
+                        val loadedMembers = runCatching {
+                            withTimeoutOrNull(4_000L) {
+                                cloudRepo.observeMembers(resolvedFamilyId, currentUserId).first()
+                            }
+                        }.getOrNull().orEmpty()
+                        if (loadedMembers.any { it.id == savedMemberId }) {
+                            _activeMemberId.value = savedMemberId
+                            withTimeoutOrNull(1000L) {
+                                activeMember.first { it?.id == savedMemberId }
+                            }
+                            syncPushAndBackgroundWork(resolvedFamilyId, savedMemberId)
+                            if (_isAppForeground.value && !_manualOffline.value) {
+                                startPresenceHeartbeat()
+                            }
+                        } else {
+                            prefs.setActiveMemberId(null)
+                        }
+                    }
+                } else {
+                    _isMembersLoading.value = false
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                showMessage(e.localizedMessage ?: "No se pudieron cargar los perfiles")
+                _isMembersLoading.value = false
+            } finally {
+                _isResolvingFamilySpace.value = false
+                if (_activeFamilyId.value.isNullOrBlank()) {
+                    _isMembersLoading.value = false
+                }
                 _isSessionReady.value = true
             }
-            val resolvedFamilyId = resolveInitialFamilySpace(savedFamilyId)
-            _isResolvingFamilySpace.value = false
-            if (resolvedFamilyId != null) {
-                _activeFamilyId.value = resolvedFamilyId
-                prefs.setActiveFamilyId(resolvedFamilyId)
-                if (savedMemberId != null) {
-                    // Wait briefly for initial member list so saved profile restores straight to HOME
-                    val loadedMembers = runCatching {
-                        cloudRepo.observeMembers(resolvedFamilyId, currentUserId).first()
-                    }.getOrDefault(emptyList())
-                    if (loadedMembers.any { it.id == savedMemberId }) {
-                        _activeMemberId.value = savedMemberId
-                        withTimeoutOrNull(1000L) {
-                            activeMember.first { it?.id == savedMemberId }
-                        }
-                        syncPushAndBackgroundWork(resolvedFamilyId, savedMemberId)
-                        if (_isAppForeground.value && !_manualOffline.value) {
-                            startPresenceHeartbeat()
-                        }
-                    } else {
-                        prefs.setActiveMemberId(null)
-                    }
-                }
-            } else {
-                _isMembersLoading.value = false
-            }
-            _isSessionReady.value = true
         }
 
         // Automatically backfill new family UIDs onto existing docs only when a new phone joins (owner device only)
@@ -912,13 +960,13 @@ class FamilyViewModel(
     // --- Family Setup / Join ---
 
     private suspend fun resolveInitialFamilySpace(savedFamilyId: String?): String? {
-        val fams = runCatching {
-            cloudRepo.observeMyFamilies(currentUserId).first()
-        }.getOrDefault(emptyList())
+        val fams = withTimeoutOrNull(6_000L) {
+            cloudRepo.fetchMyFamiliesOnce(currentUserId)
+        } ?: emptyList()
         val verifiedSavedFamilyId = savedFamilyId?.takeIf { id -> fams.any { it.id == id } }
         return verifiedSavedFamilyId
             ?: fams.firstOrNull { it.inviteCode == "NIDO01" }?.id
-            ?: cloudRepo.ensureFixedFamily(currentUserId).getOrNull()
+            ?: withTimeoutOrNull(12_000L) { cloudRepo.ensureFixedFamily(currentUserId).getOrNull() }
             ?: fams.firstOrNull()?.id
             ?: savedFamilyId
     }
@@ -937,17 +985,28 @@ class FamilyViewModel(
                     }
                 } else {
                     val code = activeFamily.value?.inviteCode?.ifBlank { "NIDO01" } ?: "NIDO01"
-                    cloudRepo.joinFamilyByInviteCode(currentUserId, code).getOrNull() ?: currentFamId
+                    withTimeoutOrNull(10_000L) {
+                        cloudRepo.joinFamilyByInviteCode(currentUserId, code).getOrNull()
+                    } ?: currentFamId
                 }
                 _isResolvingFamilySpace.value = false
                 if (!targetFamId.isNullOrBlank()) {
                     _membersRetryTick.value += 1
-                    cloudRepo.fetchMembersOnce(targetFamId, currentUserId)
+                    val fallback = cloudRepo.fetchBootstrapMembersById(targetFamId)
+                    if (fallback.isNotEmpty()) {
+                        _bootstrapFallbackMembers.value = targetFamId to fallback
+                    }
+                    viewModelScope.launch {
+                        cloudRepo.syncJoiningChats(targetFamId, currentUserId)
+                    }
                 } else {
                     _isMembersLoading.value = false
                 }
             } finally {
                 _isResolvingFamilySpace.value = false
+                if (_activeFamilyId.value.isNullOrBlank()) {
+                    _isMembersLoading.value = false
+                }
             }
         }
     }

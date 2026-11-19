@@ -1906,5 +1906,51 @@ class ExampleRobolectricTest {
     assertTrue(hiddenKeys.contains(com.example.data.local.PreferencesManager.hiddenMessageKey("m_me", "m_single_1")))
     assertTrue(hiddenKeys.contains(com.example.data.local.PreferencesManager.hiddenMessageKey("m_me", "m_single_2")))
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `profile selector transitions cleanly from loading to retry or loaded profiles without sticking on spinner`() {
+    val isLoading = androidx.compose.runtime.mutableStateOf(true)
+    val membersState = androidx.compose.runtime.mutableStateOf<List<FamilyMemberEntity>>(emptyList())
+    val snackbar = androidx.compose.runtime.mutableStateOf<String?>(null)
+    var retryCount = 0
+
+    composeTestRule.setContent {
+      ProfileSelectorScreen(
+        members = membersState.value,
+        isMembersLoading = isLoading.value,
+        snackbarMessage = snackbar.value,
+        onClearSnackbar = { snackbar.value = null },
+        onSelectMember = {},
+        onRetryLoad = {
+          retryCount++
+          membersState.value = listOf(
+            sampleMember(id = "m_admin", name = "José Manuel", isAdmin = true),
+            sampleMember(id = "m_hijo", name = "Cristian Fernando", isAdmin = false)
+          )
+        }
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    // Initial loading state shows spinner
+    composeTestRule.onNodeWithTag("selector_loading_state").assertIsDisplayed()
+
+    // Once loading finishes with empty list, spinner disappears and retry card stays visible even after snackbar clears
+    isLoading.value = false
+    snackbar.value = "Error temporal de red"
+    composeTestRule.waitForIdle()
+    snackbar.value = null
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("selector_loading_state").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("selector_empty_state").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("selector_retry_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(1, retryCount)
+    composeTestRule.onNodeWithText("José Manuel").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Cristian Fernando").assertIsDisplayed()
+  }
 }
 

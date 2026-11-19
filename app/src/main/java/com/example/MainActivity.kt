@@ -63,6 +63,7 @@ import com.example.ui.screens.AdminPanelScreen
 import com.example.ui.screens.CallOverlayScreen
 import com.example.ui.screens.ChatRoomScreen
 import com.example.ui.screens.FamilySetupScreen
+import com.example.ui.screens.GoogleSignInScreen
 import com.example.ui.screens.IncomingCallOverlay
 import com.example.ui.screens.MainHomeScreen
 import com.example.ui.screens.NotificationSettingsScreen
@@ -73,10 +74,10 @@ import com.example.ui.viewmodel.FamilyViewModel
 import com.example.ui.viewmodel.MainTab
 import com.example.util.FamiChatNotificationHelper
 import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 
 object Routes {
     const val SELECTOR = "selector"
@@ -135,59 +136,21 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             ) {
-                val signedInUser = currentUser
-                val savedMemberState by produceState<Pair<Boolean, String?>>(initialValue = false to null, prefs) {
-                    val id = runCatching { prefs.activeMemberIdFlow.first() }.getOrNull()
-                    value = true to id
-                }
+                var signedInOverride by remember { mutableStateOf<FirebaseUser?>(null) }
+                val signedInUser = currentUser ?: signedInOverride
                 if (signedInUser == null) {
-                    var authError by remember { mutableStateOf<String?>(null) }
-                    var retryTick by remember { mutableStateOf(0) }
-
-                    LaunchedEffect(retryTick) {
-                        authError = null
-                        try {
-                            Firebase.auth.signInAnonymously().await()
-                        } catch (e: Exception) {
-                            authError = e.localizedMessage ?: "No se pudo conectar"
-                        }
-                    }
-
-                    val (prefsLoaded, savedMemberId) = savedMemberState
-                    if (prefsLoaded && savedMemberId == null) {
-                        ProfileSelectorScreen(
-                            members = emptyList(),
-                            isMembersLoading = authError == null,
-                            snackbarMessage = authError,
-                            onClearSnackbar = { authError = null },
-                            onSelectMember = {},
-                            onRetryLoad = { retryTick++ }
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.background),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (authError == null) {
-                                CircularProgressIndicator()
-                            } else {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Text(
-                                        text = authError ?: "Error de conexión",
-                                        color = MaterialTheme.colorScheme.onBackground
-                                    )
-                                    Button(onClick = { retryTick++ }) {
-                                        Text("Reintentar")
-                                    }
-                                }
+                    GoogleSignInScreen(
+                        isDarkTheme = isDarkTheme,
+                        onToggleTheme = {
+                            scope.launch {
+                                val current = prefs.isDarkThemeFlow.first()
+                                prefs.setDarkTheme(!current)
                             }
+                        },
+                        onSignedIn = {
+                            signedInOverride = Firebase.auth.currentUser
                         }
-                    }
+                    )
                 } else {
                     val vm: FamilyViewModel = viewModel(
                         key = "family_vm_${signedInUser.uid}",
@@ -214,6 +177,7 @@ class MainActivity : ComponentActivity() {
                         onConsumeExternalOpenChatId = { pendingNotifChatId = null },
                         onSignOutGoogle = {
                             scope.launch {
+                                signedInOverride = null
                                 prefs.setActiveMemberId(null)
                                 prefs.setActiveFamilyId(null)
                                 GoogleAuthHelper.signOut(appContext)
