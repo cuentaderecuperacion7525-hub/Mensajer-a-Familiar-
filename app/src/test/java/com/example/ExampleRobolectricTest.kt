@@ -3,13 +3,18 @@ package com.example
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertWidthIsEqualTo
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -1333,6 +1338,201 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithText("Hijo 2").assertDoesNotExist()
     composeTestRule.onNodeWithTag("contact_shared_photos_empty").performScrollTo().assertIsDisplayed()
     composeTestRule.onNodeWithText("Aún no se han compartido fotos en este chat.").assertIsDisplayed()
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `emoji only messages render without bubble at 64 48 40 dp while 4+ and mixed text keep normal bubble`() {
+    com.example.util.NotoAnimatedEmojiSession.clearForTest()
+    val longPressedIds = mutableListOf<String>()
+    val now = 1_763_480_000_000L
+
+    val msg1Mine = com.example.data.model.ChatMessageEntity(
+      id = "e1", chatId = "c1", senderId = "me",
+      type = com.example.data.model.MessageType.TEXT, text = "😎",
+      status = com.example.data.model.MessageStatus.READ, timestamp = now
+    )
+    val msg2Recv = com.example.data.model.ChatMessageEntity(
+      id = "e2", chatId = "c1", senderId = "other",
+      type = com.example.data.model.MessageType.TEXT, text = "😎😎",
+      status = com.example.data.model.MessageStatus.DELIVERED, timestamp = now + 1000
+    )
+    val msg3Mine = com.example.data.model.ChatMessageEntity(
+      id = "e3", chatId = "c1", senderId = "me",
+      type = com.example.data.model.MessageType.TEXT, text = "👍🏽 🇲🇽 👨‍👩‍👧‍👦",
+      status = com.example.data.model.MessageStatus.SENT, timestamp = now + 2000
+    )
+    val msg4Normal = com.example.data.model.ChatMessageEntity(
+      id = "e4", chatId = "c1", senderId = "me",
+      type = com.example.data.model.MessageType.TEXT, text = "😎😎😎😎",
+      status = com.example.data.model.MessageStatus.SENT, timestamp = now + 3000
+    )
+    val msgMixedNormal = com.example.data.model.ChatMessageEntity(
+      id = "e5", chatId = "c1", senderId = "other",
+      type = com.example.data.model.MessageType.TEXT, text = "hola 😎",
+      status = com.example.data.model.MessageStatus.READ, timestamp = now + 4000
+    )
+
+    composeTestRule.setContent {
+      androidx.compose.runtime.CompositionLocalProvider(
+        com.example.ui.components.LocalNotoEmojiLoaderOverride provides { _, _ ->
+          com.example.util.NotoEmojiLoadResult.NotAnimated
+        }
+      ) {
+        androidx.compose.foundation.layout.Column {
+          listOf(
+            msg1Mine to true,
+            msg2Recv to false,
+            msg3Mine to true,
+            msg4Normal to true,
+            msgMixedNormal to false
+          ).forEach { (msg, isMine) ->
+            com.example.ui.components.ChatMessageBubble(
+              message = msg,
+              isMine = isMine,
+              isGroupChat = false,
+              sender = null,
+              repliedMessage = null,
+              repliedSenderName = null,
+              activeMemberId = "me",
+              isSelected = false,
+              isMultiSelectMode = false,
+              isPlayingVoice = false,
+              voicePlaybackProgress = 0f,
+              searchQuery = "",
+              onToggleSelect = {},
+              onLongPress = { longPressedIds.add(msg.id) },
+              onReplyClick = {},
+              onImageClick = {},
+              onToggleVoicePlay = {},
+              onVotePoll = {},
+              onToggleReaction = {}
+            )
+          }
+        }
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // 1, 2, 3 emojis render without message_bubble_* and with emoji_only_message_* + exact sizes
+    composeTestRule.onNodeWithTag("emoji_only_message_e1").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("message_bubble_e1").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("emoji_only_glyph_e1_0", useUnmergedTree = true).assertWidthIsEqualTo(64.dp)
+    composeTestRule.onNodeWithTag("emoji_only_meta_e1", useUnmergedTree = true).assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("emoji_only_message_e2").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("message_bubble_e2").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("emoji_only_glyph_e2_0", useUnmergedTree = true).assertWidthIsEqualTo(48.dp)
+    composeTestRule.onNodeWithTag("emoji_only_glyph_e2_1", useUnmergedTree = true).assertWidthIsEqualTo(48.dp)
+
+    composeTestRule.onNodeWithTag("emoji_only_message_e3").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("message_bubble_e3").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("emoji_only_glyph_e3_0", useUnmergedTree = true).assertWidthIsEqualTo(40.dp)
+    composeTestRule.onNodeWithTag("emoji_only_glyph_e3_2", useUnmergedTree = true).assertWidthIsEqualTo(40.dp)
+
+    // Right alignment for mine vs left alignment for received
+    val mineBounds = composeTestRule.onNodeWithTag("emoji_only_message_e1").getUnclippedBoundsInRoot()
+    val recvBounds = composeTestRule.onNodeWithTag("emoji_only_message_e2").getUnclippedBoundsInRoot()
+    assertTrue("Mine emoji should be aligned to the right", mineBounds.left > recvBounds.left)
+
+    // 4+ emojis and mixed text keep normal chat bubble
+    composeTestRule.onNodeWithTag("message_bubble_e4").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("emoji_only_message_e4").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("message_bubble_e5").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("emoji_only_message_e5").assertDoesNotExist()
+
+    // Tap replays without opening menu; long-press opens message actions
+    composeTestRule.onNodeWithTag("emoji_only_message_e1").performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(longPressedIds.isEmpty())
+
+    composeTestRule.onNodeWithTag("emoji_only_message_e1").performTouchInput { longClick() }
+    composeTestRule.waitForIdle()
+    assertEquals(listOf("e1"), longPressedIds)
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `emoji only messages render statically on offline error and reduce motion across all wallpapers`() {
+    com.example.util.NotoAnimatedEmojiSession.clearForTest()
+    val msgOffline = com.example.data.model.ChatMessageEntity(
+      id = "e_off", chatId = "c1", senderId = "me",
+      type = com.example.data.model.MessageType.TEXT, text = "❤️",
+      status = com.example.data.model.MessageStatus.DELIVERED, timestamp = 1_763_480_000_000L
+    )
+
+    composeTestRule.setContent {
+      androidx.compose.runtime.CompositionLocalProvider(
+        com.example.ui.components.LocalReduceMotionOverride provides true,
+        com.example.ui.components.LocalNotoEmojiLoaderOverride provides { _, _ ->
+          com.example.util.NotoEmojiLoadResult.NetworkError
+        }
+      ) {
+        androidx.compose.foundation.layout.Column {
+          com.example.ui.components.ChatWallpaperPalette.options.forEach { wallpaper ->
+            androidx.compose.foundation.layout.Box {
+              com.example.ui.components.ChatMessageBubble(
+                message = msgOffline.copy(id = "e_${wallpaper.key}"),
+                isMine = true,
+                isGroupChat = false,
+                sender = null,
+                repliedMessage = null,
+                repliedSenderName = null,
+                activeMemberId = "me",
+                isSelected = false,
+                isMultiSelectMode = false,
+                isPlayingVoice = false,
+                voicePlaybackProgress = 0f,
+                searchQuery = "",
+                onToggleSelect = {},
+                onLongPress = {},
+                onReplyClick = {},
+                onImageClick = {},
+                onToggleVoicePlay = {},
+                onVotePoll = {},
+                onToggleReaction = {}
+              )
+            }
+          }
+        }
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    com.example.ui.components.ChatWallpaperPalette.options.forEach { wallpaper ->
+      composeTestRule.onNodeWithTag("emoji_only_message_e_${wallpaper.key}").assertIsDisplayed()
+      composeTestRule.onNodeWithTag("emoji_only_meta_e_${wallpaper.key}", useUnmergedTree = true).assertIsDisplayed()
+    }
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `settings screen shows Acerca de section with Google Noto Emoji credit for all members`() {
+    composeTestRule.setContent {
+      SettingsScreen(
+        isAdmin = false,
+        isDarkTheme = false,
+        notificationsEnabled = true,
+        updateRepoSlug = "",
+        updateState = AppUpdateUiState.Idle,
+        onBack = {},
+        onOpenNotifications = {},
+        onToggleTheme = {},
+        onCheckForUpdate = {},
+        onSaveUpdateRepoSlug = {},
+        onDownloadUpdate = {},
+        onResetUpdateState = {},
+        onOpenAdvanced = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithText("ACERCA DE").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("settings_about_card").performScrollTo().assertIsDisplayed()
+    composeTestRule
+      .onNodeWithText("Emojis animados: Noto Emoji Animation de Google, licencia CC BY 4.0")
+      .performScrollTo()
+      .assertIsDisplayed()
   }
 }
 

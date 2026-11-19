@@ -13,8 +13,10 @@ import com.example.ui.viewmodel.validateMemberBeforeSave
 import com.example.util.AppUpdateChecker
 import com.example.util.AppUpdateUiState
 import com.example.util.DocumentMediaHelper
+import com.example.util.EmojiMessageHelper
 import com.example.util.LinkPreviewHelper
 import com.example.util.MessageFormatter
+import com.example.util.NotoAnimatedEmojiSession
 import com.example.util.PresenceResolver
 import com.example.util.TimeFormatters
 import kotlinx.coroutines.test.runTest
@@ -314,5 +316,55 @@ class ExampleUnitTest {
       liveStatusAt = calYesterdayCall.timeInMillis
     )
     assertNull(com.example.ui.screens.resolveContactStatusPill(offlineNoStatus))
+  }
+
+  @Test
+  fun `emoji message helper detects 1 to 3 emojis including compound sequences and rejects text or 4+`() {
+    // 1 emoji cases (single, VS16, skin tone, flag, ZWJ family, ZWJ heart on fire, ZWJ woman technologist, keycap, rainbow flag)
+    assertEquals(listOf("😎"), EmojiMessageHelper.parseEmojiOnlyMessage("😎"))
+    assertEquals(listOf("❤️"), EmojiMessageHelper.parseEmojiOnlyMessage("  ❤️  "))
+    assertEquals(listOf("👍🏽"), EmojiMessageHelper.parseEmojiOnlyMessage("👍🏽"))
+    assertEquals(listOf("🇲🇽"), EmojiMessageHelper.parseEmojiOnlyMessage("🇲🇽"))
+    assertEquals(listOf("👨‍👩‍👧‍👦"), EmojiMessageHelper.parseEmojiOnlyMessage("👨‍👩‍👧‍👦"))
+    assertEquals(listOf("❤️‍🔥"), EmojiMessageHelper.parseEmojiOnlyMessage("❤️‍🔥"))
+    assertEquals(listOf("👩🏽‍💻"), EmojiMessageHelper.parseEmojiOnlyMessage("👩🏽‍💻"))
+    assertEquals(listOf("1️⃣"), EmojiMessageHelper.parseEmojiOnlyMessage("1️⃣"))
+    assertEquals(listOf("🏳️‍🌈"), EmojiMessageHelper.parseEmojiOnlyMessage("🏳️‍🌈"))
+
+    // 2 and 3 emoji cases (with and without spaces)
+    assertEquals(listOf("😎", "😎"), EmojiMessageHelper.parseEmojiOnlyMessage("😎😎"))
+    assertEquals(listOf("👍🏽", "🇲🇽"), EmojiMessageHelper.parseEmojiOnlyMessage("👍🏽  🇲🇽"))
+    assertEquals(listOf("😎", "❤️", "🔥"), EmojiMessageHelper.parseEmojiOnlyMessage("😎❤️🔥"))
+    assertEquals(listOf("👨‍👩‍👧‍👦", "👍🏽", "🇲🇽"), EmojiMessageHelper.parseEmojiOnlyMessage("👨‍👩‍👧‍👦 👍🏽 🇲🇽"))
+
+    // 4+ emojis or mixed text / plain digits / blank must return empty (normal bubble)
+    assertTrue(EmojiMessageHelper.parseEmojiOnlyMessage("😎😎😎😎").isEmpty())
+    assertTrue(EmojiMessageHelper.parseEmojiOnlyMessage("hola 😎").isEmpty())
+    assertTrue(EmojiMessageHelper.parseEmojiOnlyMessage("😎!").isEmpty())
+    assertTrue(EmojiMessageHelper.parseEmojiOnlyMessage("123").isEmpty())
+    assertTrue(EmojiMessageHelper.parseEmojiOnlyMessage("#*").isEmpty())
+    assertTrue(EmojiMessageHelper.parseEmojiOnlyMessage("").isEmpty())
+    assertTrue(EmojiMessageHelper.parseEmojiOnlyMessage("   ").isEmpty())
+
+    // Display sizing
+    assertEquals(64, EmojiMessageHelper.emojiDisplaySizeDp(1))
+    assertEquals(48, EmojiMessageHelper.emojiDisplaySizeDp(2))
+    assertEquals(40, EmojiMessageHelper.emojiDisplaySizeDp(3))
+
+    // Noto Animated Emoji CDN URL formatting
+    assertEquals("1f60e", EmojiMessageHelper.emojiToNotoCodepointSequence("😎"))
+    assertEquals(
+      "https://fonts.gstatic.com/s/e/notoemoji/latest/1f60e/512.webp",
+      EmojiMessageHelper.buildNotoAnimatedWebpUrl("😎")
+    )
+    assertEquals("2764", EmojiMessageHelper.emojiToNotoCodepointSequence("❤️"))
+    assertEquals("1f44d_1f3fd", EmojiMessageHelper.emojiToNotoCodepointSequence("👍🏽"))
+    assertEquals("0031_20e3", EmojiMessageHelper.emojiToNotoCodepointSequence("1️⃣"))
+
+    // Session play-once tracker
+    NotoAnimatedEmojiSession.clearForTest()
+    assertTrue(NotoAnimatedEmojiSession.consumeShouldAutoPlay("msg_emoji_1"))
+    assertFalse(NotoAnimatedEmojiSession.consumeShouldAutoPlay("msg_emoji_1"))
+    assertTrue(NotoAnimatedEmojiSession.consumeShouldAutoPlay("msg_emoji_2"))
   }
 }

@@ -115,6 +115,7 @@ import com.example.ui.theme.OutgoingBubbleDark
 import com.example.ui.theme.OutgoingBubbleLight
 import com.example.ui.theme.ReadBlue
 import com.example.util.DocumentMediaHelper
+import com.example.util.EmojiMessageHelper
 import com.example.util.ImageCompressionHelper
 import com.example.util.ImageGalleryAndShareHelper
 import com.example.util.LinkPreviewData
@@ -192,6 +193,13 @@ fun ChatMessageBubble(
     val groupedReactions = remember(reactionsMap) {
         reactionsMap.values.groupingBy { it }.eachCount()
     }
+    val emojiOnlyList = remember(message.type, message.text) {
+        if (message.type == MessageType.TEXT) {
+            EmojiMessageHelper.parseEmojiOnlyMessage(message.text)
+        } else {
+            emptyList()
+        }
+    }
 
     val swipeThresholdPx = 115f
     Box(
@@ -256,6 +264,21 @@ fun ChatMessageBubble(
                 .padding(horizontal = 12.dp, vertical = 3.dp),
             horizontalAlignment = if (isMine) Alignment.End else Alignment.Start
         ) {
+            if (emojiOnlyList.isNotEmpty()) {
+                EmojiOnlyMessageContent(
+                    message = message,
+                    emojis = emojiOnlyList,
+                    isMine = isMine,
+                    isGroupChat = isGroupChat,
+                    sender = sender,
+                    repliedMessage = repliedMessage,
+                    repliedSenderName = repliedSenderName,
+                    isMultiSelectMode = isMultiSelectMode,
+                    onToggleSelect = onToggleSelect,
+                    onLongPress = onLongPress,
+                    onReplyClick = onReplyClick
+                )
+            } else {
             Surface(
                 shape = bubbleShape,
                 color = bubbleBg,
@@ -1071,6 +1094,7 @@ fun ChatMessageBubble(
                 }
             }
         }
+            }
 
         if (groupedReactions.isNotEmpty() && message.type != MessageType.DELETED) {
             FlowRow(
