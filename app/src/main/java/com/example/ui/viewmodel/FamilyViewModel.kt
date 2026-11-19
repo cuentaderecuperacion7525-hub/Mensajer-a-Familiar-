@@ -149,13 +149,9 @@ internal fun validateMemberBeforeSave(
         return "Ingresa el parentesco o rol familiar."
     }
     val normName = normalizeProfileKey(trimmedName)
-    val normRole = normalizeProfileKey(trimmedRole)
     val others = existingMembers.filter { it.id != editingId }
     if (others.any { normalizeProfileKey(it.name) == normName }) {
         return "Ya existe un perfil con el nombre \"$trimmedName\"."
-    }
-    if (others.any { normalizeProfileKey(it.roleLabel) == normRole }) {
-        return "Ya existe un perfil con el parentesco \"$trimmedRole\"."
     }
     return null
 }

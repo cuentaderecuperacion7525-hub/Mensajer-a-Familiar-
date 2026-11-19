@@ -240,10 +240,9 @@ class ExampleUnitTest {
     assertTrue(validateMemberBeforeSave(all, null, "Abuela", "  ", isCallerAdmin = true) != null)
     // Duplicate name blocked (accent/case insensitive)
     assertTrue(validateMemberBeforeSave(all, null, "Mamá", "Tía", isCallerAdmin = true) != null)
-    // Duplicate role blocked (accent/case insensitive)
-    assertTrue(validateMemberBeforeSave(all, null, "Carlos", "Papa", isCallerAdmin = true) != null)
-    // Valid new unique member passes
-    assertTrue(validateMemberBeforeSave(all, null, "Ángel de Jesús", "Hijo menor", isCallerAdmin = true) == null)
+    // Repeated role (e.g. multiple profiles with "Hijo") is allowed when name is unique
+    assertNull(validateMemberBeforeSave(all, null, "Carlos", "Hijo", isCallerAdmin = true))
+    assertNull(validateMemberBeforeSave(all, null, "Ángel de Jesús", "Hijo", isCallerAdmin = true))
     // Editing same member keeps passing
     assertTrue(validateMemberBeforeSave(all, "m_mama", "Mamá", "Mamá", isCallerAdmin = true) == null)
   }
