@@ -63,7 +63,6 @@ import com.example.ui.screens.AdminPanelScreen
 import com.example.ui.screens.CallOverlayScreen
 import com.example.ui.screens.ChatRoomScreen
 import com.example.ui.screens.FamilySetupScreen
-import com.example.ui.screens.GoogleSignInScreen
 import com.example.ui.screens.IncomingCallOverlay
 import com.example.ui.screens.MainHomeScreen
 import com.example.ui.screens.NotificationSettingsScreen
@@ -78,6 +77,8 @@ import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeout
 
 object Routes {
     const val SELECTOR = "selector"
@@ -139,18 +140,52 @@ class MainActivity : ComponentActivity() {
                 var signedInOverride by remember { mutableStateOf<FirebaseUser?>(null) }
                 val signedInUser = currentUser ?: signedInOverride
                 if (signedInUser == null) {
-                    GoogleSignInScreen(
-                        isDarkTheme = isDarkTheme,
-                        onToggleTheme = {
-                            scope.launch {
-                                val current = prefs.isDarkThemeFlow.first()
-                                prefs.setDarkTheme(!current)
+                    var isAuthLoading by remember { mutableStateOf(true) }
+                    var authError by remember { mutableStateOf<String?>(null) }
+                    var authRetryTick by remember { mutableStateOf(0) }
+
+                    LaunchedEffect(authRetryTick) {
+                        isAuthLoading = true
+                        authError = null
+                        try {
+                            withTimeout(12_000L) {
+                                Firebase.auth.signInAnonymously().await()
                             }
-                        },
-                        onSignedIn = {
                             signedInOverride = Firebase.auth.currentUser
+                        } catch (e: Exception) {
+                            authError = e.localizedMessage ?: "No se pudo conectar. Verifica tu internet."
+                        } finally {
+                            isAuthLoading = false
                         }
-                    )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.background),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            if (isAuthLoading) {
+                                CircularProgressIndicator()
+                                Text(
+                                    text = "Conectando a FamiChat...",
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                            } else {
+                                Text(
+                                    text = authError ?: "No se pudo conectar",
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Button(onClick = { authRetryTick++ }) {
+                                    Text("Reintentar")
+                                }
+                            }
+                        }
+                    }
                 } else {
                     val vm: FamilyViewModel = viewModel(
                         key = "family_vm_${signedInUser.uid}",
