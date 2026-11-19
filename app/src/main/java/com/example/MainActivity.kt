@@ -313,6 +313,8 @@ fun FamiChatApp(
     val notificationsEnabled by vm.notificationsEnabled.collectAsStateWithLifecycle()
     val chatWallpapers by vm.chatWallpapers.collectAsStateWithLifecycle()
     val chatNotificationTones by vm.chatNotificationTones.collectAsStateWithLifecycle()
+    val chatClearedAtMap by vm.chatClearedAtMap.collectAsStateWithLifecycle()
+    val locallyHiddenMessageKeys by vm.locallyHiddenMessageKeys.collectAsStateWithLifecycle()
     val pendingNotificationChatId by vm.pendingNotificationChatId.collectAsStateWithLifecycle()
     val updateRepoSlug by vm.updateRepoSlug.collectAsStateWithLifecycle()
     val updateState by vm.updateState.collectAsStateWithLifecycle()
@@ -604,8 +606,22 @@ fun FamiChatApp(
                 if (member == null || chatUi == null) {
                     LaunchedEffect(Unit) { safePopBack(Routes.CHAT) }
                 } else {
-                    val chatMessages = remember(allMessages, chatId) {
-                        allMessages.filter { it.chatId == chatId }
+                    val chatMessages = remember(
+                        allMessages,
+                        chatId,
+                        member.id,
+                        chatClearedAtMap,
+                        locallyHiddenMessageKeys
+                    ) {
+                        allMessages.filter { msg ->
+                            msg.chatId == chatId &&
+                                FamilyViewModel.isMessageVisibleForMember(
+                                    msg = msg,
+                                    memberId = member.id,
+                                    clearedAtMap = chatClearedAtMap,
+                                    locallyHiddenKeys = locallyHiddenMessageKeys
+                                )
+                        }
                     }
                     LaunchedEffect(chatMessages.size, member.id) {
                         vm.markChatMessagesAsRead(chatId)
@@ -654,6 +670,7 @@ fun FamiChatApp(
                         onTogglePinChat = { vm.togglePinChat(chatId) },
                         onToggleMuteChat = { vm.toggleMuteChat(chatId) },
                         onDeleteForMe = vm::deleteMessagesForMe,
+                        onClearChat = { vm.clearChatForMe(chatId) },
                         onDeleteForEveryone = vm::deleteMessagesForEveryone,
                         onStartVoiceRecording = { vm.startVoiceRecording(chatId) },
                         onCancelVoiceRecording = vm::cancelVoiceRecording,

@@ -378,6 +378,12 @@ class FamilyViewModel(
     val mutedChatIds: StateFlow<Set<String>> = prefs.mutedChatIdsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
+    val chatClearedAtMap: StateFlow<Map<String, Long>> = prefs.chatClearedAtFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    val locallyHiddenMessageKeys: StateFlow<Set<String>> = prefs.locallyHiddenMessageKeysFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
     val fcmToken: StateFlow<String?> = prefs.fcmTokenFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
@@ -478,8 +484,9 @@ class FamilyViewModel(
         rawChats,
         allMessages,
         members,
-        _activeMemberId
-    ) { chatsList, msgsList, membersList, currentId ->
+        _activeMemberId,
+        combine(chatClearedAtMap, locallyHiddenMessageKeys) { cleared, localHidden -> cleared to localHidden }
+    ) { chatsList, msgsList, membersList, currentId, (clearedMap, localHiddenKeys) ->
         if (currentId == null) return@combine emptyList()
         val membersMap = membersList.associateBy { it.id }
         val now = System.currentTimeMillis()
@@ -492,7 +499,12 @@ class FamilyViewModel(
             val participants = participantIds.mapNotNull { membersMap[it] }
             val visibleMsgs = msgsList.filter { msg ->
                 msg.chatId == chat.id &&
-                    !JsonHelpers.decodeStringList(msg.hiddenForMemberIdsJson).contains(currentId)
+                    isMessageVisibleForMember(
+                        msg = msg,
+                        memberId = currentId,
+                        clearedAtMap = clearedMap,
+                        locallyHiddenKeys = localHiddenKeys
+                    )
             }
             val lastMsg = visibleMsgs.lastOrNull()
             val unreadCount = visibleMsgs.count { msg ->
@@ -1320,10 +1332,13 @@ class FamilyViewModel(
     fun markChatMessagesAsRead(chatId: String) {
         val famId = _activeFamilyId.value ?: return
         val currentId = _activeMemberId.value ?: return
+        val clearedMap = chatClearedAtMap.value
+        val localHiddenKeys = locallyHiddenMessageKeys.value
         val toMark = allMessages.value.filter {
             it.chatId == chatId &&
                 it.senderId != currentId &&
                 it.type != MessageType.DELETED &&
+                isMessageVisibleForMember(it, currentId, clearedMap, localHiddenKeys) &&
                 (it.status != MessageStatus.READ ||
                     !JsonHelpers.decodeStringList(it.readByMemberIdsJson).contains(currentId))
         }
@@ -2429,17 +2444,41 @@ class FamilyViewModel(
         }
     }
 
+    fun clearChatForMe(chatId: String) {
+        val famId = _activeFamilyId.value ?: return
+        val currentId = _activeMemberId.value ?: return
+        val clearedMap = chatClearedAtMap.value
+        val localHiddenKeys = locallyHiddenMessageKeys.value
+        val chatMsgs = allMessages.value.filter { msg ->
+            msg.chatId == chatId &&
+                isMessageVisibleForMember(msg, currentId, clearedMap, localHiddenKeys)
+        }
+        val targetIds = chatMsgs.map { it.id }
+        val clearTs = System.currentTimeMillis()
+        val skewedIds = chatMsgs.filter { it.timestamp > clearTs }.map { it.id }
+        viewModelScope.launch {
+            prefs.setChatClearedAt(
+                memberId = currentId,
+                chatId = chatId,
+                clearedAtMs = clearTs,
+                extraHiddenMessageIds = skewedIds
+            )
+            showMessage("Chat vaciado")
+            if (targetIds.isNotEmpty()) {
+                cloudRepo.hideMessagesForMember(famId, targetIds, currentId)
+            }
+        }
+    }
+
     fun deleteMessagesForMe(messageIds: List<String>) {
         val famId = _activeFamilyId.value ?: return
         val currentId = _activeMemberId.value ?: return
+        val targetIds = messageIds.distinct().filter { it.isNotBlank() }
+        if (targetIds.isEmpty()) return
         viewModelScope.launch {
-            messageIds.forEach { id ->
-                val msg = allMessages.value.find { it.id == id } ?: return@forEach
-                val hidden = JsonHelpers.decodeStringList(msg.hiddenForMemberIdsJson).toMutableSet()
-                hidden.add(currentId)
-                cloudRepo.updateMessageFields(famId, id, mapOf("hiddenForMemberIds" to hidden.toList()))
-            }
+            prefs.addLocallyHiddenMessages(currentId, targetIds)
             showMessage("Eliminado para ti")
+            cloudRepo.hideMessagesForMember(famId, targetIds, currentId)
         }
     }
 
@@ -3420,5 +3459,20 @@ class FamilyViewModel(
         liveLocationJobs.clear()
         webRtcCallManager.closeSession()
         voiceAudio.releaseAll()
+    }
+
+    companion object {
+        fun isMessageVisibleForMember(
+            msg: ChatMessageEntity,
+            memberId: String,
+            clearedAtMap: Map<String, Long>,
+            locallyHiddenKeys: Set<String>
+        ): Boolean {
+            if (JsonHelpers.decodeStringList(msg.hiddenForMemberIdsJson).contains(memberId)) return false
+            if (locallyHiddenKeys.contains(PreferencesManager.hiddenMessageKey(memberId, msg.id))) return false
+            val clearedAt = clearedAtMap[PreferencesManager.chatClearedAtKey(memberId, msg.chatId)] ?: 0L
+            if (clearedAt > 0L && msg.timestamp <= clearedAt) return false
+            return true
+        }
     }
 }

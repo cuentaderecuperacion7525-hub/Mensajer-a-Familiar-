@@ -232,6 +232,7 @@ fun ChatRoomScreen(
     onTogglePinChat: () -> Unit = {},
     onToggleMuteChat: () -> Unit = {},
     onDeleteForMe: (List<String>) -> Unit,
+    onClearChat: (() -> Unit)? = null,
     onDeleteForEveryone: (List<String>) -> Unit,
     onStartVoiceRecording: () -> Unit,
     onCancelVoiceRecording: () -> Unit,
@@ -1793,13 +1794,23 @@ fun ChatRoomScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val allIds = visibleMessages.map { it.id }
-                        if (allIds.isNotEmpty()) {
-                            onDeleteForMe(allIds)
-                        }
                         showClearChatConfirmDialog = false
-                        scope.launch { snackbarHostState.showSnackbar("Chat vaciado") }
-                    }
+                        selectedIds.clear()
+                        replyingTo = null
+                        editingMessage = null
+                        isSearchOpen = false
+                        inChatQuery = ""
+                        if (onClearChat != null) {
+                            onClearChat()
+                        } else {
+                            val allIds = visibleMessages.map { it.id }
+                            if (allIds.isNotEmpty()) {
+                                onDeleteForMe(allIds)
+                            }
+                            scope.launch { snackbarHostState.showSnackbar("Chat vaciado") }
+                        }
+                    },
+                    modifier = Modifier.testTag("clear_chat_confirm_button")
                 ) {
                     Text("Vaciar chat", color = DangerRed)
                 }

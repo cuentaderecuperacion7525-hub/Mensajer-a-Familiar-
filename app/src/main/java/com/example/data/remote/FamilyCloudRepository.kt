@@ -25,6 +25,9 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
@@ -746,6 +749,58 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             handleFirestoreError(e, OperationType.UPDATE, docRef.path)
             Result.failure(e)
         }
+    }
+
+    suspend fun hideMessagesForMember(
+        familyId: String,
+        messageIds: List<String>,
+        memberId: String
+    ): Result<Unit> {
+        val uniqueIds = messageIds.distinct().filter { it.isNotBlank() }
+        if (uniqueIds.isEmpty() || memberId.isBlank()) return Result.success(Unit)
+        val messagesCol = familyRef(familyId).collection("messages")
+        var lastError: Exception? = null
+        uniqueIds.chunked(200).forEach { chunk ->
+            try {
+                val batch = db.batch()
+                chunk.forEach { msgId ->
+                    batch.update(
+                        messagesCol.document(msgId),
+                        mapOf(
+                            "hiddenForMemberIds" to FieldValue.arrayUnion(memberId),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+                batch.commit().await()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (batchErr: Exception) {
+                // If a single legacy or deleted document aborts the batch, fall back to parallel per-doc updates
+                // so every valid message in the chunk still gets hidden on Firestore.
+                lastError = batchErr
+                coroutineScope {
+                    chunk.map { msgId ->
+                        async {
+                            val docRef = messagesCol.document(msgId)
+                            try {
+                                docRef.update(
+                                    mapOf(
+                                        "hiddenForMemberIds" to FieldValue.arrayUnion(memberId),
+                                        "updatedAt" to FieldValue.serverTimestamp()
+                                    )
+                                ).await()
+                            } catch (ce: CancellationException) {
+                                throw ce
+                            } catch (docErr: Exception) {
+                                handleFirestoreError(docErr, OperationType.UPDATE, docRef.path)
+                            }
+                        }
+                    }.awaitAll()
+                }
+            }
+        }
+        return if (lastError == null) Result.success(Unit) else Result.failure(lastError!!)
     }
 
     suspend fun deleteMessage(familyId: String, messageId: String): Result<Unit> {

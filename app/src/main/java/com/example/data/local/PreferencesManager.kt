@@ -32,11 +32,16 @@ class PreferencesManager(private val context: Context) {
         private val KEY_TURN_USERNAME = stringPreferencesKey("turn_server_username")
         private val KEY_TURN_CREDENTIAL = stringPreferencesKey("turn_server_credential")
         private val KEY_LAST_SYNCED_UIDS_HASH = stringPreferencesKey("last_synced_uids_hash")
+        private val KEY_CHAT_CLEARED_AT_JSON = stringPreferencesKey("chat_cleared_at_json")
+        private val KEY_LOCALLY_HIDDEN_MESSAGE_KEYS_JSON = stringPreferencesKey("locally_hidden_message_keys_json")
         const val DEFAULT_PIN = "7525"
         const val DEFAULT_SWITCH_PIN = "2580"
         const val DEFAULT_TURN_URL = "turn:openrelay.metered.ca:80"
         const val DEFAULT_TURN_USERNAME = "openrelayproject"
         const val DEFAULT_TURN_CREDENTIAL = "openrelayproject"
+
+        fun chatClearedAtKey(memberId: String, chatId: String): String = "$memberId::$chatId"
+        fun hiddenMessageKey(memberId: String, messageId: String): String = "$memberId::$messageId"
     }
 
     val masterPinFlow: Flow<String> = context.dataStore.data.map { prefs ->
@@ -111,6 +116,15 @@ class PreferencesManager(private val context: Context) {
 
     val lastSyncedUidsHashFlow: Flow<String?> = context.dataStore.data.map { prefs ->
         prefs[KEY_LAST_SYNCED_UIDS_HASH]
+    }
+
+    val chatClearedAtFlow: Flow<Map<String, Long>> = context.dataStore.data.map { prefs ->
+        decodeLongMap(prefs[KEY_CHAT_CLEARED_AT_JSON] ?: "{}")
+    }
+
+    val locallyHiddenMessageKeysFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
+        val raw = prefs[KEY_LOCALLY_HIDDEN_MESSAGE_KEYS_JSON] ?: "[]"
+        com.example.data.model.JsonHelpers.decodeStringList(raw).toSet()
     }
 
     suspend fun updateMasterPin(newPin: String) {
@@ -259,5 +273,73 @@ class PreferencesManager(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[KEY_LAST_SYNCED_UIDS_HASH] = hash
         }
+    }
+
+    suspend fun setChatClearedAt(
+        memberId: String,
+        chatId: String,
+        clearedAtMs: Long,
+        extraHiddenMessageIds: Collection<String> = emptyList()
+    ) {
+        if (memberId.isBlank() || chatId.isBlank() || clearedAtMs <= 0L) return
+        context.dataStore.edit { prefs ->
+            val currentMap = decodeLongMap(prefs[KEY_CHAT_CLEARED_AT_JSON] ?: "{}").toMutableMap()
+            val key = chatClearedAtKey(memberId, chatId)
+            val prev = currentMap[key] ?: 0L
+            currentMap[key] = maxOf(prev, clearedAtMs)
+            prefs[KEY_CHAT_CLEARED_AT_JSON] = encodeLongMap(currentMap)
+
+            if (extraHiddenMessageIds.isNotEmpty()) {
+                val hiddenList = com.example.data.model.JsonHelpers.decodeStringList(
+                    prefs[KEY_LOCALLY_HIDDEN_MESSAGE_KEYS_JSON] ?: "[]"
+                ).toMutableList()
+                val hiddenSet = hiddenList.toMutableSet()
+                extraHiddenMessageIds.forEach { msgId ->
+                    if (msgId.isNotBlank()) {
+                        val hKey = hiddenMessageKey(memberId, msgId)
+                        if (hiddenSet.add(hKey)) hiddenList.add(hKey)
+                    }
+                }
+                val trimmed = if (hiddenList.size > 2000) hiddenList.takeLast(2000) else hiddenList
+                prefs[KEY_LOCALLY_HIDDEN_MESSAGE_KEYS_JSON] =
+                    com.example.data.model.JsonHelpers.encodeStringList(trimmed)
+            }
+        }
+    }
+
+    suspend fun addLocallyHiddenMessages(memberId: String, messageIds: Collection<String>) {
+        if (memberId.isBlank() || messageIds.isEmpty()) return
+        context.dataStore.edit { prefs ->
+            val hiddenList = com.example.data.model.JsonHelpers.decodeStringList(
+                prefs[KEY_LOCALLY_HIDDEN_MESSAGE_KEYS_JSON] ?: "[]"
+            ).toMutableList()
+            val hiddenSet = hiddenList.toMutableSet()
+            messageIds.forEach { msgId ->
+                if (msgId.isNotBlank()) {
+                    val hKey = hiddenMessageKey(memberId, msgId)
+                    if (hiddenSet.add(hKey)) hiddenList.add(hKey)
+                }
+            }
+            val trimmed = if (hiddenList.size > 2000) hiddenList.takeLast(2000) else hiddenList
+            prefs[KEY_LOCALLY_HIDDEN_MESSAGE_KEYS_JSON] =
+                com.example.data.model.JsonHelpers.encodeStringList(trimmed)
+        }
+    }
+
+    private fun decodeLongMap(json: String): Map<String, Long> = runCatching {
+        val obj = org.json.JSONObject(json)
+        val result = mutableMapOf<String, Long>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            result[k] = obj.optLong(k, 0L)
+        }
+        result
+    }.getOrDefault(emptyMap())
+
+    private fun encodeLongMap(map: Map<String, Long>): String {
+        val obj = org.json.JSONObject()
+        map.forEach { (k, v) -> obj.put(k, v) }
+        return obj.toString()
     }
 }

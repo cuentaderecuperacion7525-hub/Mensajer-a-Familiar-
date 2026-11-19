@@ -31,6 +31,7 @@ import com.example.ui.viewmodel.ActiveCallUiState
 import com.example.ui.viewmodel.MainTab
 import com.example.util.AppUpdateChecker
 import com.example.util.AppUpdateUiState
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -1738,6 +1739,172 @@ class ExampleRobolectricTest {
     assertFalse(com.example.ui.screens.hasUnviewedFamilyStatuses(listOf(own), me.id))
     assertTrue(com.example.ui.screens.hasUnviewedFamilyStatuses(listOf(own, unseen), me.id))
     assertFalse(com.example.ui.screens.hasUnviewedFamilyStatuses(listOf(own, seen), me.id))
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `vaciar chat desde menu de tres puntos limpia toda la conversacion y permite mensajes nuevos`() {
+    val me = sampleMember(id = "m_me", name = "José Manuel", isAdmin = true)
+    val other = sampleMember(id = "m_other", name = "Cristian Fernando")
+    val chatId = "chat_direct_clear_test"
+    val chatUi = com.example.ui.viewmodel.ChatThreadUi(
+      chat = com.example.data.model.ChatThreadEntity(
+        id = chatId,
+        type = com.example.data.model.ChatType.DIRECT,
+        title = other.name,
+        avatarColorHex = other.avatarColorHex,
+        avatarEmoji = other.avatarEmoji,
+        participantIdsJson = "[\"${me.id}\",\"${other.id}\"]"
+      ),
+      displayTitle = other.name,
+      displayEmoji = other.avatarEmoji,
+      displayColorHex = other.avatarColorHex,
+      isOnline = true,
+      subtitleStatus = "En línea",
+      lastMessagePreview = "Cuarto mensaje",
+      lastMessageTime = "18:00",
+      unreadCount = 0,
+      lastMessageStatus = null,
+      isLastMessageFromMe = false,
+      participants = listOf(me, other)
+    )
+    val baseTs = 1_700_000_000_000L
+
+    val rawMessages = androidx.compose.runtime.mutableStateOf(
+      listOf(
+        com.example.data.model.ChatMessageEntity(id = "msg_1", chatId = chatId, senderId = me.id, text = "Primer mensaje", timestamp = baseTs + 1_000L),
+        com.example.data.model.ChatMessageEntity(id = "msg_2", chatId = chatId, senderId = other.id, text = "Segundo mensaje", timestamp = baseTs + 2_000L),
+        com.example.data.model.ChatMessageEntity(id = "msg_3", chatId = chatId, senderId = me.id, text = "Tercer mensaje", timestamp = baseTs + 3_000L),
+        com.example.data.model.ChatMessageEntity(id = "msg_4", chatId = chatId, senderId = other.id, text = "Cuarto mensaje", timestamp = baseTs + 4_000L),
+        // Clock-skewed message slightly ahead of clear timestamp
+        com.example.data.model.ChatMessageEntity(id = "msg_skew", chatId = chatId, senderId = other.id, text = "Mensaje adelantado", timestamp = baseTs + 15_000L)
+      )
+    )
+    val clearedAtMap = androidx.compose.runtime.mutableStateOf<Map<String, Long>>(emptyMap())
+    val locallyHidden = androidx.compose.runtime.mutableStateOf<Set<String>>(emptySet())
+    var clearInvocations = 0
+
+    composeTestRule.setContent {
+      val visibleForMe = rawMessages.value.filter { msg ->
+        com.example.ui.viewmodel.FamilyViewModel.isMessageVisibleForMember(
+          msg = msg,
+          memberId = me.id,
+          clearedAtMap = clearedAtMap.value,
+          locallyHiddenKeys = locallyHidden.value
+        )
+      }
+      com.example.ui.screens.ChatRoomScreen(
+        chatUi = chatUi,
+        activeMember = me,
+        allMembers = listOf(me, other),
+        messages = visibleForMe,
+        voiceRecording = com.example.ui.viewmodel.VoiceRecordingState(),
+        playingVoiceMessageId = null,
+        playingVoiceProgress = 0f,
+        snackbarMessage = null,
+        onClearSnackbar = {},
+        onBack = {},
+        onSendText = { _, _ -> },
+        onSendImage = { _, _, _ -> },
+        onSendLocation = { _, _, _, _, _, _ -> },
+        onSendPoll = { _, _ -> },
+        onVotePoll = { _, _ -> },
+        onEditMessage = { _, _ -> },
+        onToggleReaction = { _, _ -> },
+        onTogglePin = {},
+        onDeleteForMe = {},
+        onClearChat = {
+          clearInvocations++
+          val clearTs = baseTs + 10_000L
+          val skewed = rawMessages.value.filter { it.timestamp > clearTs }.map {
+            com.example.data.local.PreferencesManager.hiddenMessageKey(me.id, it.id)
+          }
+          clearedAtMap.value = clearedAtMap.value + (
+            com.example.data.local.PreferencesManager.chatClearedAtKey(me.id, chatId) to clearTs
+            )
+          locallyHidden.value = locallyHidden.value + skewed
+        },
+        onDeleteForEveryone = {},
+        onStartVoiceRecording = {},
+        onCancelVoiceRecording = {},
+        onSendVoiceRecording = {},
+        onToggleVoicePlay = {},
+        onStartCall = {},
+        onTypingChange = {},
+        onToggleTheme = {},
+        onGoToHomePanel = {},
+        onSwitchProfile = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    // All 5 messages initially visible; privacy notice hidden
+    composeTestRule.onNodeWithText("Primer mensaje").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Cuarto mensaje").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Mensaje adelantado").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("empty_chat_privacy_notice").assertDoesNotExist()
+
+    // Open 3-dots menu -> tap "Vaciar chat" -> confirm
+    composeTestRule.onNodeWithTag("chat_more_menu_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("chat_menu_clear_chat").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("clear_chat_confirm_button").performClick()
+    composeTestRule.waitForIdle()
+
+    // ALL messages are cleared at once (not just one) and empty-chat notice reappears
+    assertEquals(1, clearInvocations)
+    composeTestRule.onNodeWithText("Primer mensaje").assertDoesNotExist()
+    composeTestRule.onNodeWithText("Segundo mensaje").assertDoesNotExist()
+    composeTestRule.onNodeWithText("Tercer mensaje").assertDoesNotExist()
+    composeTestRule.onNodeWithText("Cuarto mensaje").assertDoesNotExist()
+    composeTestRule.onNodeWithText("Mensaje adelantado").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("empty_chat_privacy_notice").assertIsDisplayed()
+
+    // Other participant still sees all messages unaffected
+    assertTrue(
+      rawMessages.value.all { msg ->
+        com.example.ui.viewmodel.FamilyViewModel.isMessageVisibleForMember(
+          msg = msg,
+          memberId = other.id,
+          clearedAtMap = clearedAtMap.value,
+          locallyHiddenKeys = locallyHidden.value
+        )
+      }
+    )
+
+    // New message arriving after clear displays normally and hides empty notice again
+    rawMessages.value = rawMessages.value + com.example.data.model.ChatMessageEntity(
+      id = "msg_after",
+      chatId = chatId,
+      senderId = other.id,
+      text = "Mensaje nuevo después de vaciar",
+      timestamp = baseTs + 20_000L
+    )
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Mensaje nuevo después de vaciar").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("empty_chat_privacy_notice").assertDoesNotExist()
+  }
+
+  @Test
+  fun `preferences manager persists chatClearedAt and locallyHiddenMessageKeys`() = kotlinx.coroutines.runBlocking {
+    val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+    val prefs = com.example.data.local.PreferencesManager(context)
+    val ts = 1_750_000_000_000L
+    prefs.setChatClearedAt(
+      memberId = "m_me",
+      chatId = "chat_persisted",
+      clearedAtMs = ts,
+      extraHiddenMessageIds = listOf("m_skew_1")
+    )
+    prefs.addLocallyHiddenMessages("m_me", listOf("m_single_1", "m_single_2"))
+
+    val clearedMap = prefs.chatClearedAtFlow.first()
+    val hiddenKeys = prefs.locallyHiddenMessageKeysFlow.first()
+    assertEquals(ts, clearedMap[com.example.data.local.PreferencesManager.chatClearedAtKey("m_me", "chat_persisted")])
+    assertTrue(hiddenKeys.contains(com.example.data.local.PreferencesManager.hiddenMessageKey("m_me", "m_skew_1")))
+    assertTrue(hiddenKeys.contains(com.example.data.local.PreferencesManager.hiddenMessageKey("m_me", "m_single_1")))
+    assertTrue(hiddenKeys.contains(com.example.data.local.PreferencesManager.hiddenMessageKey("m_me", "m_single_2")))
   }
 }
 
