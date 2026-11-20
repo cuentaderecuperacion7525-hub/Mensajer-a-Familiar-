@@ -12,6 +12,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -78,6 +80,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -96,7 +99,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.BuildConfig
 import com.example.data.local.PreferencesManager
-import com.example.ui.components.AppUpdateDialog
 import com.example.ui.theme.OnlineGreen
 import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateUiState
@@ -117,14 +119,14 @@ fun SettingsScreen(
     onSaveUpdateRepoSlug: (String) -> Unit,
     onDownloadUpdate: (AppReleaseInfo) -> Unit,
     onResetUpdateState: () -> Unit,
-    onOpenAdvanced: () -> Unit
+    onOpenAdvanced: () -> Unit,
+    onOpenUpdates: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var systemNotifGranted by remember {
         mutableStateOf(FamiChatNotificationHelper.canPostNotifications(context))
     }
-    var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner, context) {
         val observer = LifecycleEventObserver { _, event ->
@@ -137,11 +139,13 @@ fun SettingsScreen(
     }
 
     val notificationsActive = systemNotifGranted && notificationsEnabled
+    val hasUpdateBadge = updateState is AppUpdateUiState.UpdateAvailable ||
+        updateState is AppUpdateUiState.ReadyToInstall
     val updateSubtitle = when (updateState) {
-        is AppUpdateUiState.UpdateAvailable -> "Nueva versión v${updateState.release.versionName}"
+        is AppUpdateUiState.UpdateAvailable -> "Nueva versión ${updateState.release.versionName}"
         is AppUpdateUiState.Downloading -> "Descargando ${updateState.progressPercent.coerceAtLeast(0)}%"
         is AppUpdateUiState.ReadyToInstall -> "Lista para instalar"
-        else -> "Estás al día"
+        else -> "Versión ${BuildConfig.VERSION_NAME}"
     }
 
     Scaffold(
@@ -235,13 +239,16 @@ fun SettingsScreen(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
                         SettingsActionRow(
                             icon = Icons.Outlined.FileDownload,
-                            title = "Buscar actualización",
+                            title = "Actualizaciones",
                             subtitle = updateSubtitle,
+                            subtitleColor = if (hasUpdateBadge) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            showBadgeDot = hasUpdateBadge,
                             testTag = "settings_update_row",
-                            onClick = {
-                                showUpdateDialog = true
-                                onCheckForUpdate()
-                            }
+                            onClick = onOpenUpdates
                         )
                     }
                 }
@@ -318,21 +325,6 @@ fun SettingsScreen(
                 }
             }
         }
-    }
-
-    if (showUpdateDialog) {
-        AppUpdateDialog(
-            isAdmin = isAdmin,
-            currentRepoSlug = updateRepoSlug,
-            updateState = updateState,
-            onCheckAgain = onCheckForUpdate,
-            onSaveRepoSlug = onSaveUpdateRepoSlug,
-            onDownloadUpdate = onDownloadUpdate,
-            onDismiss = {
-                showUpdateDialog = false
-                onResetUpdateState()
-            }
-        )
     }
 }
 
@@ -981,6 +973,7 @@ private fun SettingsActionRow(
     title: String,
     subtitle: String,
     subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    showBadgeDot: Boolean = false,
     testTag: String,
     onClick: () -> Unit
 ) {
@@ -1009,6 +1002,16 @@ private fun SettingsActionRow(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = subtitleColor
+            )
+        }
+        if (showBadgeDot) {
+            Box(
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+                    .testTag("${testTag}_badge_dot")
             )
         }
         Icon(

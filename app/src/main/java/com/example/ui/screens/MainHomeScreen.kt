@@ -136,7 +136,6 @@ import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.ShoppingItemEntity
 import androidx.compose.material.icons.filled.NotificationsActive
-import com.example.ui.components.AppUpdateDialog
 import com.example.ui.components.CreateStatusDialog
 import com.example.ui.components.FamilyStatusStrip
 import com.example.ui.components.MemberAvatar
@@ -218,9 +217,10 @@ fun MainHomeScreen(
     var showNewChatDialog by remember { mutableStateOf(false) }
     var showProfileOptionsDialog by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
-    var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
     var showCreateStatusDialog by remember { mutableStateOf(false) }
     var viewingStatusMemberId by remember { mutableStateOf<String?>(null) }
+    val hasUpdateAvailable = updateState is AppUpdateUiState.UpdateAvailable ||
+        updateState is AppUpdateUiState.ReadyToInstall
 
     var isExitArmed by remember { mutableStateOf(false) }
     var exitArmToken by remember { mutableIntStateOf(0) }
@@ -238,7 +238,6 @@ fun MainHomeScreen(
         showNewChatDialog,
         showProfileOptionsDialog,
         showCreateStatusDialog,
-        showUpdateDialog,
         viewingStatusMemberId,
         isImeVisible
     ) {
@@ -247,7 +246,6 @@ fun MainHomeScreen(
             showNewChatDialog ||
             showProfileOptionsDialog ||
             showCreateStatusDialog ||
-            showUpdateDialog ||
             viewingStatusMemberId != null ||
             isImeVisible
         ) {
@@ -261,7 +259,6 @@ fun MainHomeScreen(
         !showNewChatDialog &&
         !showProfileOptionsDialog &&
         !showCreateStatusDialog &&
-        !showUpdateDialog &&
         viewingStatusMemberId == null &&
         !isImeVisible
 
@@ -393,11 +390,23 @@ fun MainHomeScreen(
                                 onClick = { showOverflowMenu = !showOverflowMenu },
                                 modifier = Modifier.testTag("home_more_menu_button")
                             ) {
-                                Icon(
-                                    imageVector = Icons.Filled.MoreVert,
-                                    contentDescription = "Opciones de perfil",
-                                    tint = textPrimary
-                                )
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Filled.MoreVert,
+                                        contentDescription = "Opciones de perfil",
+                                        tint = textPrimary
+                                    )
+                                    if (hasUpdateAvailable) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .size(7.dp)
+                                                .clip(CircleShape)
+                                                .background(brandBlue)
+                                                .testTag("home_more_menu_update_dot")
+                                        )
+                                    }
+                                }
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
@@ -653,12 +662,6 @@ fun MainHomeScreen(
                     }
 
                     if (showOverflowMenu) {
-                        val updateSubtitle = when (updateState) {
-                            is AppUpdateUiState.UpdateAvailable -> "Nueva versión v${updateState.release.versionName}"
-                            is AppUpdateUiState.Downloading -> "Descargando ${updateState.progressPercent.coerceAtLeast(0)}%"
-                            is AppUpdateUiState.ReadyToInstall -> "Lista para instalar"
-                            else -> "Estás al día"
-                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -835,8 +838,18 @@ fun MainHomeScreen(
                                         Text(
                                             text = "Ajustes",
                                             style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurface
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f)
                                         )
+                                        if (hasUpdateAvailable) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .clip(CircleShape)
+                                                    .background(brandBlue)
+                                                    .testTag("menu_settings_update_dot")
+                                            )
+                                        }
                                     }
 
                                     if (activeMember.isAdmin) {
@@ -890,54 +903,6 @@ fun MainHomeScreen(
                                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                                                 )
                                             }
-                                        }
-                                    }
-
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(vertical = 6.dp),
-                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                                    )
-
-                                    // Section: AYUDA
-                                    Text(
-                                        text = "AYUDA",
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 0.8.sp
-                                        ),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp)
-                                    )
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                showOverflowMenu = false
-                                                showUpdateDialog = true
-                                                onCheckForUpdate()
-                                            }
-                                            .padding(horizontal = 20.dp, vertical = 10.dp)
-                                            .testTag("menu_check_update"),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.FileDownload,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(16.dp))
-                                        Column {
-                                            Text(
-                                                text = "Buscar actualización",
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = updateSubtitle,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
                                         }
                                     }
                                 }
@@ -1047,21 +1012,6 @@ fun MainHomeScreen(
             onPublishVideo = { uri, caption ->
                 onPublishVideoStatus(uri, caption)
                 showCreateStatusDialog = false
-            }
-        )
-    }
-
-    if (showUpdateDialog) {
-        AppUpdateDialog(
-            isAdmin = activeMember.isAdmin,
-            currentRepoSlug = updateRepoSlug,
-            updateState = updateState,
-            onCheckAgain = onCheckForUpdate,
-            onSaveRepoSlug = onSaveUpdateRepoSlug,
-            onDownloadUpdate = onDownloadUpdate,
-            onDismiss = {
-                showUpdateDialog = false
-                onResetUpdateState()
             }
         )
     }

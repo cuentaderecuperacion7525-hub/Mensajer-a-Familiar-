@@ -60,6 +60,7 @@ import com.example.ui.components.PinVerificationDialog
 import com.example.ui.screens.AdminAdvancedSettingsScreen
 import com.example.ui.screens.AdminDiagnosticsScreen
 import com.example.ui.screens.AdminPanelScreen
+import com.example.ui.screens.AppUpdatesScreen
 import com.example.ui.screens.CallOverlayScreen
 import com.example.ui.screens.ChatRoomScreen
 import com.example.ui.screens.FamilySetupScreen
@@ -84,6 +85,7 @@ object Routes {
     const val SELECTOR = "selector"
     const val HOME = "home"
     const val SETTINGS = "settings"
+    const val UPDATES = "updates"
     const val NOTIFICATIONS = "notifications"
     const val ADMIN_ADVANCED = "admin_advanced"
     const val ADMIN_DIAGNOSTICS = "admin_diagnostics"
@@ -324,6 +326,7 @@ fun FamiChatApp(
     val pendingNotificationChatId by vm.pendingNotificationChatId.collectAsStateWithLifecycle()
     val updateRepoSlug by vm.updateRepoSlug.collectAsStateWithLifecycle()
     val updateState by vm.updateState.collectAsStateWithLifecycle()
+    val lastUpdateCheckAt by vm.lastUpdateCheckAt.collectAsStateWithLifecycle()
     val activeCall by vm.activeCall.collectAsStateWithLifecycle()
     val incomingCall by vm.incomingCall.collectAsStateWithLifecycle()
     val voiceRecording by vm.voiceRecording.collectAsStateWithLifecycle()
@@ -503,7 +506,7 @@ fun FamiChatApp(
                                 navigateToChatSingleTop(chatId)
                             }
                         },
-                        onCheckForUpdate = vm::checkForAppUpdate,
+                        onCheckForUpdate = { vm.checkForAppUpdate() },
                         onSaveUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = true) },
                         onDownloadUpdate = vm::downloadAndInstallUpdate,
                         onResetUpdateState = vm::resetUpdateState,
@@ -568,7 +571,7 @@ fun FamiChatApp(
                         onBack = { safePopBack(Routes.SETTINGS) },
                         onOpenNotifications = { navigateSingleTop(Routes.NOTIFICATIONS) },
                         onToggleTheme = vm::toggleTheme,
-                        onCheckForUpdate = vm::checkForAppUpdate,
+                        onCheckForUpdate = { vm.checkForAppUpdate() },
                         onSaveUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = true) },
                         onDownloadUpdate = vm::downloadAndInstallUpdate,
                         onResetUpdateState = vm::resetUpdateState,
@@ -576,7 +579,27 @@ fun FamiChatApp(
                             if (member.isAdmin) {
                                 navigateSingleTop(Routes.ADMIN_ADVANCED)
                             }
-                        }
+                        },
+                        onOpenUpdates = { navigateSingleTop(Routes.UPDATES) }
+                    )
+                }
+            }
+
+            composable(Routes.UPDATES) {
+                val member = activeMember
+                if (member == null) {
+                    LaunchedEffect(Unit) { safePopBack(Routes.UPDATES) }
+                } else {
+                    AppUpdatesScreen(
+                        isAdmin = member.isAdmin,
+                        isDarkTheme = isDarkTheme,
+                        currentRepoSlug = updateRepoSlug,
+                        updateState = updateState,
+                        lastCheckedAtMs = lastUpdateCheckAt,
+                        onCheckForUpdate = { vm.checkForAppUpdate(isAutoCheck = false) },
+                        onDownloadUpdate = vm::downloadAndInstallUpdate,
+                        onCancelDownload = vm::cancelUpdateDownload,
+                        onBack = { safePopBack(Routes.UPDATES) }
                     )
                 }
             }

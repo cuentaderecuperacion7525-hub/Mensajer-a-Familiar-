@@ -45,6 +45,7 @@ class PreferencesManager(private val context: Context) {
         private val KEY_LOCALLY_HIDDEN_MESSAGE_KEYS_JSON = stringPreferencesKey("locally_hidden_message_keys_json")
         private val KEY_CACHED_MEMBERS_JSON = stringPreferencesKey("cached_members_json")
         private val KEY_SHOW_LAST_SEEN_MAP_JSON = stringPreferencesKey("show_last_seen_map_json")
+        private val KEY_LAST_UPDATE_CHECK_AT = longPreferencesKey("last_update_check_at")
         const val DEFAULT_PIN = "7525"
         const val DEFAULT_SWITCH_PIN = "2580"
         const val DEFAULT_TURN_URL = "turn:openrelay.metered.ca:80"
@@ -79,6 +80,10 @@ class PreferencesManager(private val context: Context) {
 
     val updateRepoSlugFlow: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_UPDATE_REPO_SLUG] ?: ""
+    }
+
+    val lastUpdateCheckAtFlow: Flow<Long> = context.dataStore.data.map { prefs ->
+        prefs[KEY_LAST_UPDATE_CHECK_AT] ?: 0L
     }
 
     val notificationsEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
@@ -273,6 +278,13 @@ class PreferencesManager(private val context: Context) {
     suspend fun setUpdateRepoSlug(slug: String) {
         context.dataStore.edit { prefs ->
             prefs[KEY_UPDATE_REPO_SLUG] = slug
+        }
+    }
+
+    suspend fun setLastUpdateCheckAt(timestampMs: Long) {
+        if (timestampMs <= 0L) return
+        context.dataStore.edit { prefs ->
+            prefs[KEY_LAST_UPDATE_CHECK_AT] = timestampMs
         }
     }
 

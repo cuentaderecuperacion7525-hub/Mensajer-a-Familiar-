@@ -88,8 +88,54 @@ sealed interface AppUpdateUiState {
 
 object AppUpdateChecker {
 
+    const val DAILY_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L
+
     private const val EXPECTED_DEBUG_SHA256 =
         "33D2C0F213FED29E496863488A303962B27C80F5C8C17F10C59B47DFFA15385C"
+
+    private val TRUSTED_DOWNLOAD_HOSTS = setOf(
+        "github.com",
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+        "github-releases.githubusercontent.com"
+    )
+
+    fun isTrustedDownloadUrl(rawUrl: String): Boolean {
+        val url = rawUrl.trim()
+        if (!url.startsWith("https://", ignoreCase = true)) return false
+        val host = runCatching { java.net.URI(url).host?.lowercase().orEmpty() }.getOrDefault("")
+        if (host.isBlank()) return false
+        return host in TRUSTED_DOWNLOAD_HOSTS || host.endsWith(".githubusercontent.com")
+    }
+
+    fun shouldAutoCheckForUpdate(
+        lastCheckedAtMs: Long,
+        nowMs: Long = System.currentTimeMillis()
+    ): Boolean {
+        if (lastCheckedAtMs <= 0L) return true
+        return (nowMs - lastCheckedAtMs) >= DAILY_CHECK_INTERVAL_MS
+    }
+
+    fun formatLastCheckedLabel(
+        lastCheckedAtMs: Long,
+        nowMs: Long = System.currentTimeMillis()
+    ): String {
+        if (lastCheckedAtMs <= 0L) return ""
+        val calNow = java.util.Calendar.getInstance().apply { timeInMillis = nowMs }
+        val calThen = java.util.Calendar.getInstance().apply { timeInMillis = lastCheckedAtMs }
+        val timeFmt = java.text.SimpleDateFormat("H:mm", java.util.Locale("es", "MX"))
+        val timeStr = timeFmt.format(java.util.Date(lastCheckedAtMs))
+        val sameYear = calNow.get(java.util.Calendar.YEAR) == calThen.get(java.util.Calendar.YEAR)
+        val dayDiff = calNow.get(java.util.Calendar.DAY_OF_YEAR) - calThen.get(java.util.Calendar.DAY_OF_YEAR)
+        return when {
+            sameYear && dayDiff == 0 -> "Última búsqueda: hoy $timeStr"
+            sameYear && dayDiff == 1 -> "Última búsqueda: ayer $timeStr"
+            else -> {
+                val dateFmt = java.text.SimpleDateFormat("d MMM H:mm", java.util.Locale("es", "MX"))
+                "Última búsqueda: ${dateFmt.format(java.util.Date(lastCheckedAtMs)).lowercase(java.util.Locale("es", "MX"))}"
+            }
+        }
+    }
 
     private fun extractPackageSha256(info: PackageInfo?): String? {
         info ?: return null
@@ -517,7 +563,7 @@ object AppUpdateChecker {
                         return@withContext latestEvaluatedState!!
                     } else if (apiReturnedNotFound) {
                         return@withContext AppUpdateUiState.Error(
-                            message = "No se encontró ningún Release publicado en \"$slug\" o el repositorio es privado. Verifica en GitHub → Releases que exista una versión con archivo .apk."
+                            message = "No se encontraron actualizaciones disponibles por el momento. Intenta de nuevo más tarde."
                         )
                     }
                 }
@@ -554,7 +600,7 @@ object AppUpdateChecker {
                         tagName = tagName,
                         versionName = remoteVerName,
                         versionCode = remoteVerCode,
-                        releaseNotes = "Nueva compilación disponible en GitHub ($tagName).",
+                        releaseNotes = "Mejoras de estabilidad y rendimiento.",
                         downloadUrl = resolvedApkUrl,
                         releasePageUrl = releasePage
                     )
@@ -584,14 +630,14 @@ object AppUpdateChecker {
                                 tagName = tagFromUrl.ifBlank { "latest" },
                                 versionName = rName,
                                 versionCode = rCode,
-                                releaseNotes = "Nueva compilación disponible en GitHub.",
+                                releaseNotes = "Mejoras de estabilidad y rendimiento.",
                                 downloadUrl = htmlApk,
                                 releasePageUrl = repoWebUrl
                             )
                             return@withContext evaluateRelease(rel, installedVersionName, installedVersionCode)
                         }
                         return@withContext AppUpdateUiState.Error(
-                            message = "No se encontró un Release publicado en \"$slug\" o el repositorio es privado. Verifica que el repositorio sea público y tenga un Release con el archivo .apk."
+                            message = "No se encontraron actualizaciones disponibles por el momento. Intenta de nuevo más tarde."
                         )
                     }
                 }
@@ -602,15 +648,21 @@ object AppUpdateChecker {
 
         if (sawLatestWithoutApk) {
             return@withContext AppUpdateUiState.Error(
-                message = "El último Release en \"$slug\" aún no tiene archivo .apk adjunto."
+                message = "La nueva versión aún se está preparando. Intenta de nuevo en unos minutos."
             )
         }
 
-        val detail = lastException?.let { "${it.javaClass.simpleName}: ${it.localizedMessage.orEmpty()}".trim() }
-            ?: "sin respuesta"
-        AppUpdateUiState.Error(
-            message = "No se pudo verificar la actualización ($detail). Revisa tu internet e intenta nuevamente."
-        )
+        val friendlyError = when (lastException) {
+            is java.net.UnknownHostException,
+            is java.net.ConnectException,
+            is java.net.NoRouteToHostException ->
+                "Sin conexión a internet. Revisa tu Wi-Fi o datos móviles e intenta de nuevo."
+            is java.net.SocketTimeoutException ->
+                "La conexión tardó demasiado. Intenta de nuevo en un momento."
+            else ->
+                "No se pudo buscar actualizaciones ahora. Revisa tu conexión e intenta nuevamente."
+        }
+        AppUpdateUiState.Error(message = friendlyError)
     }
 
     private fun parseTotalBytesFromContentRange(contentRange: String?): Long {
@@ -660,6 +712,11 @@ object AppUpdateChecker {
         onProgress: (progressPercent: Int, downloadedBytes: Long, totalBytes: Long, statusLabel: String) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
         val url = release.downloadUrl.trim()
+        if (!isTrustedDownloadUrl(url)) {
+            return@withContext Result.failure(
+                SecurityException("La descarga fue bloqueada porque el enlace no es un origen HTTPS verificado.")
+            )
+        }
         val isLikelyApk = url.contains(".apk", ignoreCase = true) ||
             url.contains("/releases/download/", ignoreCase = true)
         if (!isLikelyApk) {

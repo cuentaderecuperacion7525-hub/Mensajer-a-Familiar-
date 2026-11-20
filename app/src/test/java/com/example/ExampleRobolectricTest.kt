@@ -2257,6 +2257,207 @@ class ExampleRobolectricTest {
     )
     assertTrue(snapshot2.cachedMembers.any { it.id == admin.id })
   }
+
+  @Test
+  fun `app updates screen hides repo editor hides technical details for non admin and expands read only details for admin`() {
+    val isAdminState = androidx.compose.runtime.mutableStateOf(false)
+    val updateState = androidx.compose.runtime.mutableStateOf<AppUpdateUiState>(
+      AppUpdateUiState.UpToDate(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
+    )
+    var checkClicks = 0
+    val repoSlug = "privado-owner/FamiChat-Privado"
+
+    composeTestRule.setContent {
+      com.example.ui.screens.AppUpdatesScreen(
+        isAdmin = isAdminState.value,
+        isDarkTheme = false,
+        currentRepoSlug = repoSlug,
+        updateState = updateState.value,
+        lastCheckedAtMs = System.currentTimeMillis(),
+        onCheckForUpdate = { checkClicks++ },
+        onDownloadUpdate = {},
+        onCancelDownload = {},
+        onBack = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    // Core clean layout
+    composeTestRule.onNodeWithText("Actualizaciones").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Versión ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Tienes la última versión").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_last_checked_text").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Buscar actualizaciones").performScrollTo().assertIsDisplayed()
+
+    // "Cambiar repositorio" and repo/build info must NOT appear for non-admin
+    assertEquals(0, composeTestRule.onAllNodesWithText("Cambiar repositorio", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
+    assertEquals(0, composeTestRule.onAllNodesWithText("Detalles técnicos", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
+    assertEquals(0, composeTestRule.onAllNodesWithText(repoSlug, substring = true).fetchSemanticsNodes().size)
+
+    // Tap "Buscar actualizaciones"
+    composeTestRule.onNodeWithTag("updates_check_button").performScrollTo().performClick()
+    assertEquals(1, checkClicks)
+
+    // Switch to admin: "Detalles técnicos" appears collapsed; expanding reveals read-only origin & build without repo editor
+    composeTestRule.runOnUiThread { isAdminState.value = true }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("updates_technical_details_toggle").performScrollTo().assertIsDisplayed()
+    assertEquals(0, composeTestRule.onAllNodesWithText(repoSlug, substring = true).fetchSemanticsNodes().size)
+
+    composeTestRule.onNodeWithTag("updates_technical_details_toggle").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Compilación: ${BuildConfig.VERSION_CODE}").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Origen: $repoSlug").performScrollTo().assertIsDisplayed()
+    assertEquals(0, composeTestRule.onAllNodesWithText("Cambiar repositorio", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
+
+    // Switch to UpdateAvailable state -> shows Novedades, Actualizar ahora, Más tarde
+    val release = com.example.util.AppReleaseInfo(
+      tagName = "v2.9.0",
+      versionName = "2.9.0",
+      versionCode = BuildConfig.VERSION_CODE + 1,
+      releaseNotes = "Mejoras de llamadas y seguridad.",
+      downloadUrl = "https://github.com/privado-owner/FamiChat-Privado/releases/download/v2.9.0/FamiChat.apk",
+      releasePageUrl = "https://github.com/privado-owner/FamiChat-Privado/releases/tag/v2.9.0"
+    )
+    composeTestRule.runOnUiThread {
+      updateState.value = AppUpdateUiState.UpdateAvailable(
+        installedVersionName = BuildConfig.VERSION_NAME,
+        installedVersionCode = BuildConfig.VERSION_CODE,
+        release = release
+      )
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Novedades de esta versión").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Actualizar ahora").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Más tarde").performScrollTo().assertIsDisplayed()
+
+    // Switch to Downloading state -> shows progress percentage and cancel button
+    composeTestRule.runOnUiThread {
+      updateState.value = AppUpdateUiState.Downloading(
+        release = release,
+        progressPercent = 42,
+        downloadedBytes = 4L * 1024L * 1024L,
+        totalBytes = 10L * 1024L * 1024L
+      )
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("updates_progress_percent").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_cancel_download_button").performScrollTo().assertIsDisplayed()
+
+    // Switch to Error state -> shows Reintentar
+    composeTestRule.runOnUiThread {
+      updateState.value = AppUpdateUiState.Error("Sin conexión a internet. Verifica tu red e inténtalo de nuevo.")
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Reintentar").performScrollTo().assertIsDisplayed()
+  }
+
+  @Test
+  fun `settings shows Actualizaciones row with update dot and home menu omits Buscar actualizacion`() {
+    var openedUpdates = false
+    val release = com.example.util.AppReleaseInfo(
+      tagName = "v2.9.0",
+      versionName = "2.9.0",
+      versionCode = BuildConfig.VERSION_CODE + 1,
+      releaseNotes = "Novedades",
+      downloadUrl = "https://github.com/owner/repo/releases/download/v2.9.0/app.apk",
+      releasePageUrl = "https://github.com/owner/repo/releases/tag/v2.9.0"
+    )
+    val availableState = AppUpdateUiState.UpdateAvailable(
+      installedVersionName = BuildConfig.VERSION_NAME,
+      installedVersionCode = BuildConfig.VERSION_CODE,
+      release = release
+    )
+
+    val showHome = androidx.compose.runtime.mutableStateOf(false)
+    val member = sampleMember(id = "m_u1", name = "José Manuel", isAdmin = true)
+
+    composeTestRule.setContent {
+      if (!showHome.value) {
+        SettingsScreen(
+          isAdmin = true,
+          isDarkTheme = false,
+          notificationsEnabled = true,
+          updateRepoSlug = "owner/repo",
+          updateState = availableState,
+          onBack = {},
+          onOpenNotifications = {},
+          onToggleTheme = {},
+          onCheckForUpdate = {},
+          onSaveUpdateRepoSlug = {},
+          onDownloadUpdate = {},
+          onResetUpdateState = {},
+          onOpenAdvanced = {},
+          onOpenUpdates = { openedUpdates = true }
+        )
+      } else {
+        MainHomeScreen(
+          activeMember = member,
+          allMembers = listOf(member),
+          userGroupsCount = 1,
+          isDarkTheme = false,
+          notificationsEnabled = true,
+          updateRepoSlug = "owner/repo",
+          updateState = availableState,
+          selectedTab = MainTab.CHATS,
+          searchQuery = "",
+          chatPreviews = emptyList(),
+          statuses = emptyList(),
+          calls = emptyList(),
+          shoppingItems = emptyList(),
+          events = emptyList(),
+          notes = emptyList(),
+          snackbarMessage = null,
+          onClearSnackbar = {},
+          onToggleTheme = {},
+          onToggleNotifications = {},
+          onUpdateOwnProfile = { _, _, _, _, _, _, _ -> },
+          onPublishTextStatus = { _, _ -> },
+          onPublishPhotoStatus = { _, _ -> },
+          onMarkStatusViewed = {},
+          onDeleteStatus = {},
+          onReplyToStatus = { _, _ -> },
+          onCheckForUpdate = {},
+          onSaveUpdateRepoSlug = {},
+          onDownloadUpdate = {},
+          onResetUpdateState = {},
+          onSelectTab = {},
+          onSearchChange = {},
+          onOpenChat = {},
+          onStartDirectChat = {},
+          onSwitchProfile = {},
+          onOpenAdminPanel = {},
+          onStartCall = { _, _, _, _, _ -> },
+          onAddShoppingItem = { _, _, _ -> },
+          onToggleShoppingItem = {},
+          onDeleteShoppingItem = {},
+          onClearCheckedShopping = {},
+          onAddEvent = { _, _, _, _, _, _ -> },
+          onDeleteEvent = {},
+          onSaveNote = { _, _, _, _, _ -> },
+          onDeleteNote = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // In Settings: row is "Actualizaciones", shows badge dot, and opens dedicated screen on tap
+    composeTestRule.onNodeWithText("Actualizaciones").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("settings_update_row_badge_dot", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("settings_update_row").performClick()
+    assertTrue(openedUpdates)
+
+    // In MainHomeScreen: 3-dot icon shows subtle blue dot, overflow menu shows dot on Ajustes and NO Buscar actualización
+    composeTestRule.runOnUiThread { showHome.value = true }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("home_more_menu_update_dot", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("home_more_menu_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("menu_settings").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("menu_settings_update_dot", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("menu_check_update").assertDoesNotExist()
+    assertEquals(0, composeTestRule.onAllNodesWithText("Buscar actualización", substring = true).fetchSemanticsNodes().size)
+  }
 }
 
 

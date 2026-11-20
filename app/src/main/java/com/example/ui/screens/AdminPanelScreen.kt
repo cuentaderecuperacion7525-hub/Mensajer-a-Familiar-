@@ -441,10 +441,6 @@ private fun AdminPinSettings(
     var newSwitchPin by remember { mutableStateOf("") }
     var switchFeedback by remember { mutableStateOf<String?>(null) }
 
-    var repoInput by remember(currentUpdateRepo) {
-        mutableStateOf(currentUpdateRepo.ifBlank { BuildConfig.GITHUB_REPO })
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -717,54 +713,6 @@ private fun AdminPinSettings(
                     modifier = Modifier.fillMaxWidth().testTag("admin_save_pin_button")
                 ) {
                     Text("Guardar nuevo PIN")
-                }
-            }
-        }
-
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Filled.SystemUpdate,
-                        contentDescription = "Actualizaciones de la app",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        "Actualizaciones desde GitHub",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                }
-                Text(
-                    "Versión actual: v${BuildConfig.VERSION_NAME} (compilación ${BuildConfig.VERSION_CODE}). Configura tu repositorio de GitHub para que toda la familia pueda buscar actualizaciones desde el menú.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                OutlinedTextField(
-                    value = repoInput,
-                    onValueChange = { repoInput = it },
-                    label = { Text("Repositorio (usuario/repositorio)") },
-                    placeholder = { Text("ej. usuario/Mensajer-a-Familiar-") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("admin_update_repo_input")
-                )
-
-                Button(
-                    onClick = { onUpdateRepoSlug(repoInput) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("admin_save_update_repo_button")
-                ) {
-                    Text("Guardar repositorio")
                 }
             }
         }

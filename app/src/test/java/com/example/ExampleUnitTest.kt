@@ -453,4 +453,58 @@ class ExampleUnitTest {
     assertTrue(tunedInserted.contains("a=fmtp:111 "))
     assertTrue(tunedInserted.contains("useinbandfec=1"))
   }
+
+  @Test
+  fun `app update checker enforces trusted HTTPS GitHub URLs daily throttling and friendly last checked labels`() {
+    assertTrue(
+      AppUpdateChecker.isTrustedDownloadUrl(
+        "https://github.com/owner/repo/releases/download/v2.8.23/FamiChat.apk"
+      )
+    )
+    assertTrue(
+      AppUpdateChecker.isTrustedDownloadUrl(
+        "https://objects.githubusercontent.com/github-production-release-asset/123/FamiChat.apk"
+      )
+    )
+    assertFalse(
+      AppUpdateChecker.isTrustedDownloadUrl(
+        "http://github.com/owner/repo/releases/download/v2.8.23/FamiChat.apk"
+      )
+    )
+    assertFalse(AppUpdateChecker.isTrustedDownloadUrl("https://evil.example.com/FamiChat.apk"))
+    assertFalse(AppUpdateChecker.isTrustedDownloadUrl("https://github.com.evil.com/FamiChat.apk"))
+    assertFalse(AppUpdateChecker.isTrustedDownloadUrl(""))
+
+    val calNow = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 20, 14, 0, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val calToday913 = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 20, 9, 13, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val calYesterday1805 = java.util.Calendar.getInstance().apply {
+      set(2026, java.util.Calendar.NOVEMBER, 19, 18, 5, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+
+    assertTrue(AppUpdateChecker.shouldAutoCheckForUpdate(0L, calNow.timeInMillis))
+    assertFalse(AppUpdateChecker.shouldAutoCheckForUpdate(calToday913.timeInMillis, calNow.timeInMillis))
+    assertTrue(
+      AppUpdateChecker.shouldAutoCheckForUpdate(
+        calNow.timeInMillis - AppUpdateChecker.DAILY_CHECK_INTERVAL_MS - 1_000L,
+        calNow.timeInMillis
+      )
+    )
+
+    assertEquals("", AppUpdateChecker.formatLastCheckedLabel(0L, calNow.timeInMillis))
+    assertEquals(
+      "Última búsqueda: hoy 9:13",
+      AppUpdateChecker.formatLastCheckedLabel(calToday913.timeInMillis, calNow.timeInMillis)
+    )
+    assertEquals(
+      "Última búsqueda: ayer 18:05",
+      AppUpdateChecker.formatLastCheckedLabel(calYesterday1805.timeInMillis, calNow.timeInMillis)
+    )
+  }
 }

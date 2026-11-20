@@ -485,6 +485,8 @@ class FamilyViewModel(
 
     private val _updateState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
     val updateState: StateFlow<AppUpdateUiState> = _updateState.asStateFlow()
+    val lastUpdateCheckAt: StateFlow<Long> = prefs.lastUpdateCheckAtFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
     private var updateCheckJob: Job? = null
     private var updateDownloadJob: Job? = null
 
@@ -747,6 +749,12 @@ class FamilyViewModel(
         FamiChatNotificationHelper.ensureChannels(appContext)
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             VideoMediaHelper.cleanupExpiredStatusVideos(appContext)
+        }
+        // Silent automatic update check at most once every 24 hours after session is ready
+        viewModelScope.launch {
+            isSessionReady.first { it }
+            kotlinx.coroutines.delay(4_000L)
+            checkForAppUpdate(isAutoCheck = true)
         }
         // Race-free presence controller: always starts heartbeat once family, profile, and foreground are active
         viewModelScope.launch {
@@ -1812,19 +1820,47 @@ class FamilyViewModel(
         }
     }
 
-    fun checkForAppUpdate() {
+    fun checkForAppUpdate(isAutoCheck: Boolean = false) {
+        val currentState = _updateState.value
+        if (isAutoCheck && (
+                currentState is AppUpdateUiState.Checking ||
+                currentState is AppUpdateUiState.Downloading ||
+                currentState is AppUpdateUiState.ReadyToInstall
+            )
+        ) {
+            return
+        }
         updateCheckJob?.cancel()
         updateCheckJob = viewModelScope.launch {
-            _updateState.value = AppUpdateUiState.Checking
+            if (isAutoCheck) {
+                val lastChecked = prefs.lastUpdateCheckAtFlow.first()
+                if (!AppUpdateChecker.shouldAutoCheckForUpdate(lastChecked)) {
+                    return@launch
+                }
+            } else {
+                _updateState.value = AppUpdateUiState.Checking
+            }
             val savedSlug = prefs.updateRepoSlugFlow.first()
             val effectiveSlug = savedSlug
                 .ifBlank { activeFamily.value?.updateRepoSlug.orEmpty() }
                 .ifBlank { BuildConfig.GITHUB_REPO }
-            _updateState.value = AppUpdateChecker.checkLatestRelease(
+            val result = AppUpdateChecker.checkLatestRelease(
                 rawRepoSlug = effectiveSlug,
                 installedVersionName = BuildConfig.VERSION_NAME,
                 installedVersionCode = BuildConfig.VERSION_CODE
             )
+            when (result) {
+                is AppUpdateUiState.UpToDate,
+                is AppUpdateUiState.UpdateAvailable -> {
+                    prefs.setLastUpdateCheckAt(System.currentTimeMillis())
+                    _updateState.value = result
+                }
+                else -> {
+                    if (!isAutoCheck) {
+                        _updateState.value = result
+                    }
+                }
+            }
         }
     }
 
@@ -1886,6 +1922,21 @@ class FamilyViewModel(
                     )
                 }
             )
+        }
+    }
+
+    fun cancelUpdateDownload() {
+        updateDownloadJob?.cancel()
+        updateDownloadJob = null
+        val current = _updateState.value
+        _updateState.value = if (current is AppUpdateUiState.Downloading) {
+            AppUpdateUiState.UpdateAvailable(
+                installedVersionName = BuildConfig.VERSION_NAME,
+                installedVersionCode = BuildConfig.VERSION_CODE,
+                release = current.release
+            )
+        } else {
+            AppUpdateUiState.Idle
         }
     }
 
