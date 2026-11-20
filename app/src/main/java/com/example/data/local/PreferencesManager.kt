@@ -8,10 +8,19 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.data.model.FamilyMemberEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "nidofamiliar_prefs")
+
+data class InitialSessionSnapshot(
+    val activeFamilyId: String?,
+    val activeMemberId: String?,
+    val cachedFamilyId: String?,
+    val cachedMembers: List<FamilyMemberEntity>
+)
 
 class PreferencesManager(private val context: Context) {
     companion object {
@@ -34,6 +43,7 @@ class PreferencesManager(private val context: Context) {
         private val KEY_LAST_SYNCED_UIDS_HASH = stringPreferencesKey("last_synced_uids_hash")
         private val KEY_CHAT_CLEARED_AT_JSON = stringPreferencesKey("chat_cleared_at_json")
         private val KEY_LOCALLY_HIDDEN_MESSAGE_KEYS_JSON = stringPreferencesKey("locally_hidden_message_keys_json")
+        private val KEY_CACHED_MEMBERS_JSON = stringPreferencesKey("cached_members_json")
         const val DEFAULT_PIN = "7525"
         const val DEFAULT_SWITCH_PIN = "2580"
         const val DEFAULT_TURN_URL = "turn:openrelay.metered.ca:80"
@@ -156,6 +166,33 @@ class PreferencesManager(private val context: Context) {
             } else {
                 prefs[KEY_ACTIVE_FAMILY_ID] = familyId
             }
+        }
+    }
+
+    suspend fun readInitialSessionSnapshot(): InitialSessionSnapshot {
+        val prefs = context.dataStore.data.first()
+        val cachedPair = decodeCachedMembers(prefs[KEY_CACHED_MEMBERS_JSON])
+        return InitialSessionSnapshot(
+            activeFamilyId = prefs[KEY_ACTIVE_FAMILY_ID],
+            activeMemberId = prefs[KEY_ACTIVE_MEMBER_ID],
+            cachedFamilyId = cachedPair?.first,
+            cachedMembers = cachedPair?.second.orEmpty()
+        )
+    }
+
+    suspend fun saveCachedFamilyMembers(familyId: String, members: List<FamilyMemberEntity>) {
+        if (familyId.isBlank() || members.isEmpty()) return
+        val encoded = encodeCachedMembers(familyId, members)
+        context.dataStore.edit { prefs ->
+            if (prefs[KEY_CACHED_MEMBERS_JSON] != encoded) {
+                prefs[KEY_CACHED_MEMBERS_JSON] = encoded
+            }
+        }
+    }
+
+    suspend fun clearCachedFamilyMembers() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(KEY_CACHED_MEMBERS_JSON)
         }
     }
 
@@ -341,5 +378,60 @@ class PreferencesManager(private val context: Context) {
         val obj = org.json.JSONObject()
         map.forEach { (k, v) -> obj.put(k, v) }
         return obj.toString()
+    }
+
+    private fun encodeCachedMembers(familyId: String, members: List<FamilyMemberEntity>): String {
+        val root = org.json.JSONObject()
+        root.put("familyId", familyId)
+        val arr = org.json.JSONArray()
+        members.forEach { m ->
+            val obj = org.json.JSONObject()
+            obj.put("id", m.id)
+            obj.put("name", m.name)
+            obj.put("roleLabel", m.roleLabel)
+            obj.put("isAdmin", m.isAdmin)
+            obj.put("avatarColorHex", m.avatarColorHex)
+            obj.put("avatarEmoji", m.avatarEmoji)
+            obj.put("bioText", m.bioText)
+            obj.put("phoneNumber", m.phoneNumber)
+            obj.put("createdAt", m.createdAt)
+            obj.put("authorUid", m.authorUid)
+            arr.put(obj)
+        }
+        root.put("members", arr)
+        return root.toString()
+    }
+
+    private fun decodeCachedMembers(json: String?): Pair<String, List<FamilyMemberEntity>>? {
+        if (json.isNullOrBlank()) return null
+        return runCatching {
+            val root = org.json.JSONObject(json)
+            val familyId = root.optString("familyId", "").trim()
+            if (familyId.isBlank()) return null
+            val arr = root.optJSONArray("members") ?: return null
+            val list = buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val id = obj.optString("id", "").trim()
+                    val name = obj.optString("name", "").trim()
+                    if (id.isBlank() || name.isBlank()) continue
+                    add(
+                        FamilyMemberEntity(
+                            id = id,
+                            name = name,
+                            roleLabel = obj.optString("roleLabel", "Familiar"),
+                            isAdmin = obj.optBoolean("isAdmin", false),
+                            avatarColorHex = obj.optString("avatarColorHex", "#1A73E8"),
+                            avatarEmoji = obj.optString("avatarEmoji", "👤"),
+                            bioText = obj.optString("bioText", ""),
+                            phoneNumber = obj.optString("phoneNumber", ""),
+                            createdAt = obj.optLong("createdAt", 0L),
+                            authorUid = obj.optString("authorUid", "")
+                        )
+                    )
+                }
+            }
+            familyId to list
+        }.getOrNull()
     }
 }

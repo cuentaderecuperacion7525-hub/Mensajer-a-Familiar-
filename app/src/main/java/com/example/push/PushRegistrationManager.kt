@@ -115,7 +115,16 @@ object PushRegistrationManager {
         }
     }
 
+    fun startRealtimeService(context: Context) {
+        FamiChatRealtimeService.start(context)
+    }
+
+    fun stopRealtimeService(context: Context) {
+        FamiChatRealtimeService.stop(context)
+    }
+
     fun cancelBackgroundSync(context: Context) {
+        stopRealtimeService(context)
         runCatching {
             val wm = WorkManager.getInstance(context.applicationContext)
             wm.cancelUniqueWork(UNIQUE_PERIODIC_WORK)

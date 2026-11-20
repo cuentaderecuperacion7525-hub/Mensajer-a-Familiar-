@@ -235,7 +235,7 @@ class FamilyViewModel(
                 }
                 flowOf(emptyList())
             } else {
-                _isMembersLoading.value = true
+                _isMembersLoading.value = _bootstrapFallbackMembers.value?.let { it.first != fid || it.second.isEmpty() } ?: true
                 membersLoadingTimeoutJob = viewModelScope.launch {
                     delay(12_000L)
                     if (_activeFamilyId.value == fid) {
@@ -263,9 +263,18 @@ class FamilyViewModel(
                             }
                             if (fallback.isNotEmpty()) {
                                 _bootstrapFallbackMembers.value = fid to fallback
+                                viewModelScope.launch {
+                                    prefs.saveCachedFamilyMembers(fid, fallback)
+                                }
                             }
                         } else {
                             membersLoadingTimeoutJob?.cancel()
+                            if (_bootstrapFallbackMembers.value != null) {
+                                _bootstrapFallbackMembers.value = null
+                            }
+                            viewModelScope.launch {
+                                prefs.saveCachedFamilyMembers(fid, list)
+                            }
                         }
                         _isMembersLoading.value = false
                         val opt = _optimisticRegisteredMember.value
@@ -701,8 +710,76 @@ class FamilyViewModel(
         }
         viewModelScope.launch {
             try {
-                val savedFamilyId = prefs.activeFamilyIdFlow.first()
-                val savedMemberId = prefs.activeMemberIdFlow.first()
+                val snapshot = prefs.readInitialSessionSnapshot()
+                val savedFamilyId = snapshot.activeFamilyId
+                val savedMemberId = snapshot.activeMemberId
+                val cachedForSavedFamily = if (!savedFamilyId.isNullOrBlank() && snapshot.cachedFamilyId == savedFamilyId) {
+                    snapshot.cachedMembers
+                } else {
+                    emptyList()
+                }
+
+                // Fast Path 1: Returning device with a saved family & profile -> open Chats immediately
+                // from local DataStore / Firestore disk cache (zero network blocking, no 3s white spinner).
+                if (!savedFamilyId.isNullOrBlank() && !savedMemberId.isNullOrBlank()) {
+                    val instantMembers = cachedForSavedFamily.ifEmpty {
+                        cloudRepo.fetchMembersFromCache(savedFamilyId, currentUserId)
+                    }
+                    if (instantMembers.any { it.id == savedMemberId }) {
+                        _bootstrapFallbackMembers.value = savedFamilyId to instantMembers
+                        _activeFamilyId.value = savedFamilyId
+                        _isResolvingFamilySpace.value = false
+                        _isMembersLoading.value = false
+                        _activeMemberId.value = savedMemberId
+                        withTimeoutOrNull(300L) {
+                            activeMember.first { it?.id == savedMemberId }
+                        }
+                        _isSessionReady.value = true
+                        if (cachedForSavedFamily.isEmpty()) {
+                            viewModelScope.launch {
+                                prefs.saveCachedFamilyMembers(savedFamilyId, instantMembers)
+                            }
+                        }
+                        viewModelScope.launch {
+                            syncPushAndBackgroundWork(savedFamilyId, savedMemberId)
+                            if (_isAppForeground.value && !_manualOffline.value) {
+                                startPresenceHeartbeat()
+                            }
+                            cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
+                            val serverMembers = cloudRepo.fetchMembersOnceFromServer(savedFamilyId, currentUserId)
+                            if (serverMembers.isNotEmpty()) {
+                                prefs.saveCachedFamilyMembers(savedFamilyId, serverMembers)
+                                if (serverMembers.none { it.id == savedMemberId }) {
+                                    // Profile was deleted by admin while device was offline
+                                    _activeMemberId.value = null
+                                    prefs.setActiveMemberId(null)
+                                }
+                            } else {
+                                // Device UID may need re-syncing (e.g. after reinstall with Auto Backup)
+                                val rejoined = resolveInitialFamilySpace(savedFamilyId)
+                                if (!rejoined.isNullOrBlank() && rejoined != savedFamilyId) {
+                                    _activeFamilyId.value = rejoined
+                                    prefs.setActiveFamilyId(rejoined)
+                                }
+                            }
+                        }
+                        return@launch
+                    }
+                }
+
+                // Fast Path 2: Selector screen with cached family profiles -> show profiles immediately
+                if (savedMemberId == null && !savedFamilyId.isNullOrBlank() && cachedForSavedFamily.isNotEmpty()) {
+                    _bootstrapFallbackMembers.value = savedFamilyId to cachedForSavedFamily
+                    _activeFamilyId.value = savedFamilyId
+                    _isResolvingFamilySpace.value = false
+                    _isMembersLoading.value = false
+                    _isSessionReady.value = true
+                    viewModelScope.launch {
+                        cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
+                    }
+                    return@launch
+                }
+
                 if (savedMemberId == null) {
                     // Show ProfileSelectorScreen immediately in "Cargando perfiles…" state on fresh device
                     _isMembersLoading.value = true
@@ -722,6 +799,7 @@ class FamilyViewModel(
                         .ifEmpty { cloudRepo.fetchBootstrapMembersById(resolvedFamilyId) }
                     if (prefetchedMembers.isNotEmpty()) {
                         _bootstrapFallbackMembers.value = resolvedFamilyId to prefetchedMembers
+                        prefs.saveCachedFamilyMembers(resolvedFamilyId, prefetchedMembers)
                     }
                     // Set _activeFamilyId BEFORE clearing _isResolvingFamilySpace so combine() never sees (null, false)
                     _activeFamilyId.value = resolvedFamilyId
@@ -1139,9 +1217,13 @@ class FamilyViewModel(
     fun setAppForeground(inForeground: Boolean) {
         if (_isAppForeground.value == inForeground) return
         _isAppForeground.value = inForeground
+        com.example.push.FamiChatAppRuntimeState.isAppForeground = inForeground
         if (inForeground) {
             if (_activeMemberId.value != null && !_manualOffline.value) {
                 startPresenceHeartbeat()
+            }
+            if (_activeFamilyId.value != null && _activeMemberId.value != null && notificationsEnabled.value) {
+                PushRegistrationManager.startRealtimeService(appContext)
             }
         } else {
             heartbeatJob?.cancel()
@@ -1149,6 +1231,7 @@ class FamilyViewModel(
             val famId = _activeFamilyId.value ?: return
             val memberId = _activeMemberId.value ?: return
             if (notificationsEnabled.value) {
+                PushRegistrationManager.startRealtimeService(appContext)
                 PushRegistrationManager.schedulePeriodicBackgroundSync(appContext)
                 PushRegistrationManager.scheduleBackgroundCheckOnStop(appContext)
             }
@@ -1173,6 +1256,7 @@ class FamilyViewModel(
     private fun syncPushAndBackgroundWork(familyId: String, memberId: String) {
         viewModelScope.launch {
             if (notificationsEnabled.value) {
+                PushRegistrationManager.startRealtimeService(appContext)
                 PushRegistrationManager.syncFcmTokenAndTopic(appContext, cloudRepo, prefs, familyId, memberId)
                 PushRegistrationManager.schedulePeriodicBackgroundSync(appContext)
             }
@@ -1246,6 +1330,10 @@ class FamilyViewModel(
         viewModelScope.launch {
             prefs.setActiveMemberId(memberId)
             val famId = _activeFamilyId.value ?: return@launch
+            val currentList = members.value
+            if (currentList.isNotEmpty()) {
+                prefs.saveCachedFamilyMembers(famId, currentList)
+            }
             val now = System.currentTimeMillis()
             val raw = rawMembers.value.find { it.id == memberId }
             val nextLabel = onlineStatusLabelFor(raw?.lastSeenText.orEmpty())
@@ -1275,6 +1363,7 @@ class FamilyViewModel(
         _manualOffline.value = false
         _activeMemberId.value = null
         _activeChatId.value = null
+        com.example.push.FamiChatAppRuntimeState.activeChatId = null
         stopPlayback()
         cancelVoiceRecording()
         PushRegistrationManager.cancelBackgroundSync(appContext)
@@ -1312,6 +1401,7 @@ class FamilyViewModel(
             prefs.setNotificationsEnabled(enabled)
             if (enabled) {
                 if (famId != null && memberId != null) {
+                    PushRegistrationManager.startRealtimeService(appContext)
                     PushRegistrationManager.syncFcmTokenAndTopic(appContext, cloudRepo, prefs, famId, memberId)
                     PushRegistrationManager.schedulePeriodicBackgroundSync(appContext)
                 }
@@ -1362,6 +1452,7 @@ class FamilyViewModel(
 
     fun openChat(chatId: String) {
         _activeChatId.value = chatId
+        com.example.push.FamiChatAppRuntimeState.activeChatId = chatId
         FamiChatNotificationHelper.cancelChatNotifications(appContext, chatId)
         markChatMessagesAsRead(chatId)
     }
@@ -1369,6 +1460,7 @@ class FamilyViewModel(
     fun closeChat() {
         val prevChatId = _activeChatId.value
         _activeChatId.value = null
+        com.example.push.FamiChatAppRuntimeState.activeChatId = null
         stopPlayback()
         cancelVoiceRecording()
         if (prevChatId != null) {

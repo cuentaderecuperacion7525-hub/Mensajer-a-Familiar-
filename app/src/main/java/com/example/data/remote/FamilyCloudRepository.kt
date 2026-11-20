@@ -405,6 +405,23 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         }
     }
 
+    suspend fun fetchMembersFromCache(familyId: String, uid: String): List<FamilyMemberEntity> {
+        if (familyId.isBlank() || uid.isBlank()) return emptyList()
+        return try {
+            val snap = withTimeoutOrNull(800L) {
+                familyRef(familyId).collection("members")
+                    .whereArrayContains("memberUids", uid)
+                    .get(Source.CACHE)
+                    .await()
+            } ?: return emptyList()
+            snap.documents.mapNotNull(FirestoreMappers::toMember).sortedBy { it.createdAt }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun fetchMembersOnceFromServer(familyId: String, uid: String): List<FamilyMemberEntity> {
         if (familyId.isBlank() || uid.isBlank()) return emptyList()
         return try {

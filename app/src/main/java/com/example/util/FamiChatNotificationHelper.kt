@@ -2,6 +2,7 @@ package com.example.util
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -18,6 +19,8 @@ import com.example.R
 object FamiChatNotificationHelper {
     const val CHANNEL_MESSAGES = "famichat_messages"
     const val CHANNEL_CALLS = "famichat_calls"
+    const val CHANNEL_REALTIME_SYNC = "famichat_realtime_sync"
+    const val NOTIFICATION_ID_REALTIME_SYNC = 9001
     const val EXTRA_OPEN_CHAT_ID = "open_chat_id"
 
     fun canPostNotifications(context: Context): Boolean {
@@ -52,8 +55,45 @@ object FamiChatNotificationHelper {
             enableVibration(true)
         }
 
+        val realtimeChannel = NotificationChannel(
+            CHANNEL_REALTIME_SYNC,
+            "Conexión en segundo plano",
+            NotificationManager.IMPORTANCE_MIN
+        ).apply {
+            description = "Mantiene FamiChat conectado para recibir mensajes y llamadas al instante"
+            setShowBadge(false)
+            enableVibration(false)
+            setSound(null, null)
+        }
+
         manager.createNotificationChannel(msgChannel)
         manager.createNotificationChannel(callChannel)
+        manager.createNotificationChannel(realtimeChannel)
+    }
+
+    fun buildRealtimeServiceNotification(context: Context): Notification {
+        ensureChannels(context)
+        val openAppIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            NOTIFICATION_ID_REALTIME_SYNC,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Builder(context, CHANNEL_REALTIME_SYNC)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("FamiChat activo")
+            .setContentText("Recibiendo mensajes en tiempo real")
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setOngoing(true)
+            .setSilent(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setContentIntent(pendingIntent)
+            .build()
     }
 
     @SuppressLint("MissingPermission")

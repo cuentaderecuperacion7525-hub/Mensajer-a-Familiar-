@@ -1970,5 +1970,48 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("google_browser_signin_button").assertIsDisplayed()
     composeTestRule.onNodeWithText("Entrar desde el navegador (sin Servicios de Google)").assertIsDisplayed()
   }
+
+  @Test
+  fun `preferences manager persists and restores initial session snapshot with cached family members`() = kotlinx.coroutines.runBlocking {
+    val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+    val prefs = com.example.data.local.PreferencesManager(context)
+    val members = listOf(
+      sampleMember(id = "m_admin", name = "José Manuel", isAdmin = true).copy(roleLabel = "Papá", avatarEmoji = "👨🏽"),
+      sampleMember(id = "m_hijo_1", name = "Cristian", isAdmin = false).copy(roleLabel = "Hijo", avatarEmoji = "👦🏽"),
+      sampleMember(id = "m_hijo_2", name = "Mateo", isAdmin = false).copy(roleLabel = "Hijo", avatarEmoji = "🧒🏽")
+    )
+    prefs.setActiveFamilyId("fam_fast_boot")
+    prefs.setActiveMemberId("m_hijo_1")
+    prefs.saveCachedFamilyMembers("fam_fast_boot", members)
+
+    val snapshot = prefs.readInitialSessionSnapshot()
+    assertEquals("fam_fast_boot", snapshot.activeFamilyId)
+    assertEquals("m_hijo_1", snapshot.activeMemberId)
+    assertEquals("fam_fast_boot", snapshot.cachedFamilyId)
+    assertEquals(3, snapshot.cachedMembers.size)
+    assertEquals("Cristian", snapshot.cachedMembers.first { it.id == "m_hijo_1" }.name)
+    assertTrue(snapshot.cachedMembers.first { it.id == "m_admin" }.isAdmin)
+
+    prefs.clearCachedFamilyMembers()
+    val cleared = prefs.readInitialSessionSnapshot()
+    assertTrue(cleared.cachedMembers.isEmpty())
+  }
+
+  @Test
+  fun `realtime service notification channel is silent minimal and builds ongoing notification`() {
+    val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+    com.example.util.FamiChatNotificationHelper.ensureChannels(context)
+    val manager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+    val realtimeChannel = manager.getNotificationChannel(com.example.util.FamiChatNotificationHelper.CHANNEL_REALTIME_SYNC)
+    org.junit.Assert.assertNotNull(realtimeChannel)
+    assertEquals(android.app.NotificationManager.IMPORTANCE_MIN, realtimeChannel.importance)
+    assertFalse(realtimeChannel.canShowBadge())
+
+    val notification = com.example.util.FamiChatNotificationHelper.buildRealtimeServiceNotification(context)
+    assertTrue((notification.flags and android.app.Notification.FLAG_ONGOING_EVENT) != 0)
+    assertEquals(com.example.util.FamiChatNotificationHelper.CHANNEL_REALTIME_SYNC, notification.channelId)
+  }
 }
+
+
 
