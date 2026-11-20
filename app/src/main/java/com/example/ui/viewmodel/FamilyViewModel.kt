@@ -3152,38 +3152,50 @@ class FamilyViewModel(
                 connectedAt = System.currentTimeMillis(),
                 directionName = CallDirection.INCOMING.name
             )
-            var answeredOffer = false
+            var lastHandledOfferSdp: String? = null
             fun tryAnswerOffer(offerSdp: String?) {
-                if (answeredOffer || offerSdp.isNullOrBlank()) return
-                answeredOffer = true
-                webRtcCallManager.startCalleeSession(
-                    isVideoCall = call.callType == CallType.VIDEO,
-                    offerSdp = offerSdp,
-                    onAnswerCreated = { answerSdp ->
-                        viewModelScope.launch {
-                            cloudRepo.updateCallSdpAnswer(famId, call.id, answerSdp)
+                if (offerSdp.isNullOrBlank() || offerSdp == lastHandledOfferSdp) return
+                val isFirstOffer = lastHandledOfferSdp == null
+                lastHandledOfferSdp = offerSdp
+                if (isFirstOffer) {
+                    webRtcCallManager.startCalleeSession(
+                        isVideoCall = call.callType == CallType.VIDEO,
+                        offerSdp = offerSdp,
+                        onAnswerCreated = { answerSdp ->
+                            viewModelScope.launch {
+                                cloudRepo.updateCallSdpAnswer(famId, call.id, answerSdp)
+                            }
+                        },
+                        onLocalIceCandidate = { cand ->
+                            viewModelScope.launch {
+                                cloudRepo.addCallIceCandidate(
+                                    familyId = famId,
+                                    callId = call.id,
+                                    candidate = CallIceCandidateEntity(
+                                        id = "cand_${UUID.randomUUID().toString().replace("-", "").take(10)}",
+                                        senderMemberId = meId,
+                                        sdpMid = cand.sdpMid ?: "0",
+                                        sdpMLineIndex = cand.sdpMLineIndex,
+                                        candidate = cand.sdp,
+                                        createdAtMs = System.currentTimeMillis(),
+                                        authorUid = currentUserId
+                                    ),
+                                    memberUids = currentMemberUids(),
+                                    callerUid = currentUserId
+                                )
+                            }
                         }
-                    },
-                    onLocalIceCandidate = { cand ->
-                        viewModelScope.launch {
-                            cloudRepo.addCallIceCandidate(
-                                familyId = famId,
-                                callId = call.id,
-                                candidate = CallIceCandidateEntity(
-                                    id = "cand_${UUID.randomUUID().toString().replace("-", "").take(10)}",
-                                    senderMemberId = meId,
-                                    sdpMid = cand.sdpMid ?: "0",
-                                    sdpMLineIndex = cand.sdpMLineIndex,
-                                    candidate = cand.sdp,
-                                    createdAtMs = System.currentTimeMillis(),
-                                    authorUid = currentUserId
-                                ),
-                                memberUids = currentMemberUids(),
-                                callerUid = currentUserId
-                            )
+                    )
+                } else {
+                    webRtcCallManager.handleRemoteIceRestartOffer(
+                        offerSdp = offerSdp,
+                        onAnswerCreated = { answerSdp ->
+                            viewModelScope.launch {
+                                cloudRepo.updateCallSdpAnswer(famId, call.id, answerSdp)
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
             tryAnswerOffer(call.offerSdp)
             monitorCallLifecycle(famId, call.id, isOutgoing = false, onLateOffer = ::tryAnswerOffer)

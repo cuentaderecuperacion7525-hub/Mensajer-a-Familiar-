@@ -1,7 +1,9 @@
 package com.example.ui.screens
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -43,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +59,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -84,6 +88,18 @@ fun CallOverlayScreen(
     var showEndCallConfirm by remember { mutableStateOf(false) }
     BackHandler(enabled = !showEndCallConfirm) { showEndCallConfirm = true }
     val context = LocalContext.current
+    val view = LocalView.current
+
+    DisposableEffect(view) {
+        val window = (view.context as? Activity)?.window
+        val prevKeepScreenOn = view.keepScreenOn
+        view.keepScreenOn = true
+        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            view.keepScreenOn = prevKeepScreenOn
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     val hasRemoteVideo by (webRtcCallManager?.hasRemoteVideo ?: MutableStateFlow(false)).collectAsState()
     val iceStateText by (webRtcCallManager?.iceStateText ?: MutableStateFlow("Señal activa")).collectAsState()
@@ -170,7 +186,7 @@ fun CallOverlayScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (callState.callType == CallType.VIDEO) "VIDEOLLAMADA WEBRTC" else "LLAMADA DE VOZ WEBRTC",
+                            text = if (callState.callType == CallType.VIDEO) "VIDEOLLAMADA HD" else "LLAMADA DE VOZ HD",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color.White
                         )

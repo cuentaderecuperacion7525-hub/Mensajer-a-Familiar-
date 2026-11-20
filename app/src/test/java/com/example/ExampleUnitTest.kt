@@ -418,4 +418,39 @@ class ExampleUnitTest {
     assertEquals("4:51 p. m.", TimeFormatters.formatStatusTime(calTodayPm.timeInMillis, calNow.timeInMillis))
     assertEquals("Ayer 5:58 p. m.", TimeFormatters.formatStatusTime(calYesterdayPm.timeInMillis, calNow.timeInMillis))
   }
+
+  @Test
+  fun `webrtc hd call tuning picks 720p with graceful fallback and enables opus fec`() {
+    val hdProfile = com.example.calls.WebRtcCallManager.selectOptimalCaptureProfile(
+      listOf(320 to 240, 640 to 480, 1280 to 720, 1920 to 1080)
+    )
+    assertEquals(1280, hdProfile.width)
+    assertEquals(720, hdProfile.height)
+    assertEquals(30, hdProfile.fps)
+
+    val fallbackProfile = com.example.calls.WebRtcCallManager.selectOptimalCaptureProfile(
+      listOf(320 to 240, 640 to 480, 960 to 540)
+    )
+    assertEquals(960, fallbackProfile.width)
+    assertEquals(540, fallbackProfile.height)
+
+    val rawSdp = listOf(
+      "v=0",
+      "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+      "a=rtpmap:111 opus/48000/2",
+      "a=fmtp:111 minptime=10;useinbandfec=0"
+    ).joinToString("\r\n")
+    val tuned = com.example.calls.WebRtcCallManager.tuneSdpForHdQuality(rawSdp)
+    assertTrue(tuned.contains("useinbandfec=1"))
+    assertTrue(tuned.contains("usedtx=1"))
+    assertTrue(tuned.contains("maxaveragebitrate=48000"))
+
+    val noFmtpSdp = listOf(
+      "v=0",
+      "a=rtpmap:111 opus/48000/2"
+    ).joinToString("\r\n")
+    val tunedInserted = com.example.calls.WebRtcCallManager.tuneSdpForHdQuality(noFmtpSdp)
+    assertTrue(tunedInserted.contains("a=fmtp:111 "))
+    assertTrue(tunedInserted.contains("useinbandfec=1"))
+  }
 }
