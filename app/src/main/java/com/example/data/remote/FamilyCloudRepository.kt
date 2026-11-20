@@ -405,6 +405,32 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         }
     }
 
+    suspend fun syncJoiningMembers(familyId: String, uid: String) {
+        if (familyId.isBlank() || uid.isBlank()) return
+        val fRef = familyRef(familyId)
+        val bootstrap = runCatching {
+            withTimeoutOrNull(6_000L) { fRef.collection("meta").document("bootstrap").get().await() }
+        }.getOrNull() ?: return
+        val memberIds = (bootstrap.get("memberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+        if (memberIds.isEmpty()) return
+        coroutineScope {
+            memberIds.map { mId ->
+                async {
+                    runCatching {
+                        withTimeoutOrNull(5_000L) {
+                            fRef.collection("members").document(mId).update(
+                                mapOf(
+                                    "memberUids" to FieldValue.arrayUnion(uid),
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                )
+                            ).await()
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+    }
+
     suspend fun fetchMembersFromCache(familyId: String, uid: String): List<FamilyMemberEntity> {
         if (familyId.isBlank() || uid.isBlank()) return emptyList()
         return try {
@@ -555,7 +581,9 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         liveStatus: PresenceStatus,
         liveChatId: String?,
         liveStatusAt: Long,
-        linkedAuthUid: String? = null
+        linkedAuthUid: String? = null,
+        showLastSeen: Boolean? = null,
+        callerUid: String? = null
     ): Result<Unit> {
         val docRef = familyRef(familyId).collection("members").document(memberId)
         val payload = mutableMapOf<String, Any>(
@@ -564,8 +592,12 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             "liveStatus" to liveStatus.name,
             "liveChatId" to (liveChatId?.take(128) ?: FieldValue.delete()),
             "liveStatusAt" to liveStatusAt,
+            "lastActiveAt" to FieldValue.serverTimestamp(),
             "updatedAt" to FieldValue.serverTimestamp()
         )
+        if (showLastSeen != null) {
+            payload["showLastSeen"] = showLastSeen
+        }
         if (!linkedAuthUid.isNullOrBlank()) {
             payload["linkedAuthUid"] = linkedAuthUid.take(128)
         }
@@ -574,8 +606,23 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
-            Result.success(Unit)
+        } catch (e: Exception) {
+            val fsErr = e.unwrapFirestoreException()
+            val uidToSync = callerUid?.takeIf { it.isNotBlank() } ?: linkedAuthUid?.takeIf { it.isNotBlank() }
+            if (fsErr?.code == FirebaseFirestoreException.Code.PERMISSION_DENIED && !uidToSync.isNullOrBlank()) {
+                val healed = runCatching {
+                    docRef.update(
+                        mapOf(
+                            "memberUids" to FieldValue.arrayUnion(uidToSync),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                    docRef.update(payload).await()
+                }
+                if (healed.isSuccess) return Result.success(Unit)
+            }
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
         }
     }
 

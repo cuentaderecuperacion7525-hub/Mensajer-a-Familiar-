@@ -45,6 +45,15 @@ object PresenceResolver {
         isLocalActiveInForeground: Boolean = false,
         manualInvisible: Boolean = false
     ): ResolvedPresence {
+        val rawLabel = member.lastSeenText.trim()
+        val hasCustomLabel = rawLabel !in defaultOnlineLabels && !rawLabel.startsWith("Últ.")
+
+        // Privacy mode: user turned OFF "Mostrar mi última vez"
+        if (!member.showLastSeen || manualInvisible) {
+            val hiddenText = if (hasCustomLabel) rawLabel else ""
+            return ResolvedPresence(isOnline = false, statusText = hiddenText)
+        }
+
         val everConnected = hasEverConnected(member)
         if (!everConnected && !isLocalActiveInForeground) {
             return ResolvedPresence(isOnline = false, statusText = "No se ha conectado")
@@ -53,16 +62,13 @@ object PresenceResolver {
         val freshRemoteHeartbeat = member.isOnline &&
             member.liveStatus != PresenceStatus.LAST_SEEN &&
             member.liveStatusAt > 0L &&
-            (nowMs - member.liveStatusAt) in -60_000L..ONLINE_TTL_MS
+            (nowMs - member.liveStatusAt) in -120_000L..ONLINE_TTL_MS
 
         val effectivelyOnline = if (isLocalActiveInForeground) {
-            !manualInvisible && member.isOnline
+            true
         } else {
             everConnected && freshRemoteHeartbeat
         }
-
-        val rawLabel = member.lastSeenText.trim()
-        val hasCustomLabel = rawLabel !in defaultOnlineLabels && !rawLabel.startsWith("Últ.")
 
         if (effectivelyOnline) {
             val onlineLabel = if (hasCustomLabel && rawLabel !in awayStatusLabels) rawLabel else "En línea"

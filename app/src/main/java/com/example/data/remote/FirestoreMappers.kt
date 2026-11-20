@@ -45,6 +45,10 @@ internal object FirestoreMappers {
         val liveStr = doc.getString("liveStatus") ?: "LAST_SEEN"
         val liveStatus = runCatching { PresenceStatus.valueOf(liveStr) }.getOrDefault(PresenceStatus.LAST_SEEN)
         val fcmTokens = (doc.get("fcmTokens") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+        val serverActiveMs = doc.getTimestamp("lastActiveAt", DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+            ?.toDate()?.time ?: 0L
+        val clientLiveAt = doc.getLong("liveStatusAt") ?: 0L
+        val effectiveLiveStatusAt = if (serverActiveMs > 0L) serverActiveMs else clientLiveAt
         return FamilyMemberEntity(
             id = doc.id,
             name = doc.getString("name") ?: return null,
@@ -55,12 +59,13 @@ internal object FirestoreMappers {
             avatarPhotoData = doc.getString("avatarPhotoData") ?: "",
             bioText = doc.getString("bioText") ?: "",
             isOnline = doc.getBoolean("isOnline") ?: false,
+            showLastSeen = doc.getBoolean("showLastSeen") ?: true,
             lastSeenText = doc.getString("lastSeenText") ?: "",
             createdAt = doc.getLong("createdAtMs") ?: 0L,
             phoneNumber = doc.getString("phoneNumber") ?: "",
             liveStatus = liveStatus,
             liveChatId = doc.getString("liveChatId"),
-            liveStatusAt = doc.getLong("liveStatusAt") ?: 0L,
+            liveStatusAt = effectiveLiveStatusAt,
             linkedAuthUid = doc.getString("linkedAuthUid") ?: "",
             fcmTokens = fcmTokens,
             authorUid = doc.getString("authorUid") ?: ""
@@ -85,6 +90,7 @@ internal object FirestoreMappers {
             "bioText" to member.bioText.take(120),
             "phoneNumber" to member.phoneNumber.take(30),
             "isOnline" to member.isOnline,
+            "showLastSeen" to member.showLastSeen,
             "lastSeenText" to member.lastSeenText.take(80),
             "liveStatus" to member.liveStatus.name,
             "liveChatId" to member.liveChatId?.take(128),

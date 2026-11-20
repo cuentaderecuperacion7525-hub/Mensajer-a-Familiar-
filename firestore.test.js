@@ -634,4 +634,62 @@ test("Messages support VIDEO type, chunkCount, playedByMemberIds, and media_chun
   );
 });
 
+test("Member presence supports showLastSeen privacy toggle and server-stamped lastActiveAt while rejecting invalid values", async () => {
+  const aliceDb = await seedFamilyAsAlice();
+  const memberRef = aliceDb.collection("families").doc("fam_1").collection("members").doc("member_papa");
+
+  // Create member with showLastSeen and server lastActiveAt
+  await assertSucceeds(
+    memberRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      name: "José Manuel",
+      roleLabel: "Papá",
+      isAdmin: true,
+      avatarColorHex: "#1A5FD4",
+      avatarEmoji: "👨🏽",
+      isOnline: true,
+      showLastSeen: true,
+      lastSeenText: "En línea",
+      liveStatus: "ONLINE",
+      liveStatusAt: Date.now(),
+      lastActiveAt: serverTs(),
+      linkedAuthUid: ALICE_UID,
+      createdAtMs: Date.now(),
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Updating showLastSeen to false and updating lastActiveAt with serverTimestamp succeeds
+  await assertSucceeds(
+    memberRef.update({
+      isOnline: false,
+      showLastSeen: false,
+      lastSeenText: "Desconectado",
+      liveStatus: "LAST_SEEN",
+      liveStatusAt: Date.now(),
+      lastActiveAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Invalid showLastSeen type fails
+  await assertFails(
+    memberRef.update({
+      showLastSeen: "false",
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Future tampered lastActiveAt fails
+  await assertFails(
+    memberRef.update({
+      lastActiveAt: new Date(Date.now() + 120000),
+      updatedAt: serverTs(),
+    })
+  );
+});
+
+
 

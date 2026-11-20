@@ -657,15 +657,17 @@ fun ChatRoomScreen(
                                             chatUi.isOnline -> "En línea"
                                             else -> chatUi.subtitleStatus
                                         }
-                                        Text(
-                                            text = cleanHeaderSubtitle,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (isContactBlocked) DangerRed
-                                            else if (isLiveStatus) OnlineGreen
-                                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        if (cleanHeaderSubtitle.isNotBlank()) {
+                                            Text(
+                                                text = cleanHeaderSubtitle,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (isContactBlocked) DangerRed
+                                                else if (isLiveStatus) OnlineGreen
+                                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
                             },

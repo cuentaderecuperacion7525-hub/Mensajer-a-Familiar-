@@ -374,8 +374,9 @@ fun MainHomeScreen(
                                                 else Color(0xFF9AA0A6)
                                             )
                                     )
+                                    val headerStatus = activeMember.lastSeenText.trim()
                                     Text(
-                                        text = "${activeMember.name} · ${activeMember.lastSeenText}",
+                                        text = if (headerStatus.isNotBlank()) "${activeMember.name} · $headerStatus" else activeMember.name,
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             fontFamily = InterFontFamily
                                         ),
@@ -960,6 +961,17 @@ fun MainHomeScreen(
                 onDismiss = { viewingStatusMemberId = null }
             )
         }
+
+        if (showProfileOptionsDialog) {
+            UserProfileOptionsDialog(
+                member = activeMember,
+                onUpdateProfile = { nickname, avatarColorHex, online, statusText, bioText, newPhotoUri, removePhoto ->
+                    onUpdateOwnProfile(nickname, avatarColorHex, online, statusText, bioText, newPhotoUri, removePhoto)
+                    showProfileOptionsDialog = false
+                },
+                onDismiss = { showProfileOptionsDialog = false }
+            )
+        }
     }
 
     if (showNewChatDialog) {
@@ -1017,17 +1029,6 @@ fun MainHomeScreen(
             confirmButton = {
                 TextButton(onClick = { showNewChatDialog = false }) { Text("Cerrar") }
             }
-        )
-    }
-
-    if (showProfileOptionsDialog) {
-        UserProfileOptionsDialog(
-            member = activeMember,
-            onUpdateProfile = { nickname, avatarColorHex, online, statusText, bioText, newPhotoUri, removePhoto ->
-                onUpdateOwnProfile(nickname, avatarColorHex, online, statusText, bioText, newPhotoUri, removePhoto)
-                showProfileOptionsDialog = false
-            },
-            onDismiss = { showProfileOptionsDialog = false }
         )
     }
 
@@ -1430,9 +1431,7 @@ private fun ChatRowItem(
 
     val cleanStatus = item.subtitleStatus.trim()
     val rightPresenceText = if (!isGroup) {
-        item.rightStatusText.trim().ifBlank {
-            cleanStatus.ifBlank { "No se ha conectado" }
-        }
+        item.rightStatusText.trim()
     } else {
         ""
     }

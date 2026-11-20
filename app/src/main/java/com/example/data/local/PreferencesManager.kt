@@ -44,6 +44,7 @@ class PreferencesManager(private val context: Context) {
         private val KEY_CHAT_CLEARED_AT_JSON = stringPreferencesKey("chat_cleared_at_json")
         private val KEY_LOCALLY_HIDDEN_MESSAGE_KEYS_JSON = stringPreferencesKey("locally_hidden_message_keys_json")
         private val KEY_CACHED_MEMBERS_JSON = stringPreferencesKey("cached_members_json")
+        private val KEY_SHOW_LAST_SEEN_MAP_JSON = stringPreferencesKey("show_last_seen_map_json")
         const val DEFAULT_PIN = "7525"
         const val DEFAULT_SWITCH_PIN = "2580"
         const val DEFAULT_TURN_URL = "turn:openrelay.metered.ca:80"
@@ -126,6 +127,19 @@ class PreferencesManager(private val context: Context) {
 
     val lastSyncedUidsHashFlow: Flow<String?> = context.dataStore.data.map { prefs ->
         prefs[KEY_LAST_SYNCED_UIDS_HASH]
+    }
+
+    val memberShowLastSeenMapFlow: Flow<Map<String, Boolean>> = context.dataStore.data.map { prefs ->
+        decodeBooleanMap(prefs[KEY_SHOW_LAST_SEEN_MAP_JSON] ?: "{}")
+    }
+
+    suspend fun setMemberShowLastSeen(memberId: String, showLastSeen: Boolean) {
+        if (memberId.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val current = decodeBooleanMap(prefs[KEY_SHOW_LAST_SEEN_MAP_JSON] ?: "{}").toMutableMap()
+            current[memberId] = showLastSeen
+            prefs[KEY_SHOW_LAST_SEEN_MAP_JSON] = encodeBooleanMap(current)
+        }
     }
 
     val chatClearedAtFlow: Flow<Map<String, Long>> = context.dataStore.data.map { prefs ->
@@ -380,6 +394,23 @@ class PreferencesManager(private val context: Context) {
         return obj.toString()
     }
 
+    private fun decodeBooleanMap(json: String): Map<String, Boolean> = runCatching {
+        val obj = org.json.JSONObject(json)
+        val result = mutableMapOf<String, Boolean>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            result[k] = obj.optBoolean(k, true)
+        }
+        result
+    }.getOrDefault(emptyMap())
+
+    private fun encodeBooleanMap(map: Map<String, Boolean>): String {
+        val obj = org.json.JSONObject()
+        map.forEach { (k, v) -> obj.put(k, v) }
+        return obj.toString()
+    }
+
     private fun encodeCachedMembers(familyId: String, members: List<FamilyMemberEntity>): String {
         val root = org.json.JSONObject()
         root.put("familyId", familyId)
@@ -394,6 +425,10 @@ class PreferencesManager(private val context: Context) {
             obj.put("avatarEmoji", m.avatarEmoji)
             obj.put("bioText", m.bioText)
             obj.put("phoneNumber", m.phoneNumber)
+            obj.put("showLastSeen", m.showLastSeen)
+            obj.put("lastSeenText", m.lastSeenText)
+            obj.put("liveStatusAt", m.liveStatusAt)
+            obj.put("linkedAuthUid", m.linkedAuthUid)
             obj.put("createdAt", m.createdAt)
             obj.put("authorUid", m.authorUid)
             arr.put(obj)
@@ -425,6 +460,10 @@ class PreferencesManager(private val context: Context) {
                             avatarEmoji = obj.optString("avatarEmoji", "👤"),
                             bioText = obj.optString("bioText", ""),
                             phoneNumber = obj.optString("phoneNumber", ""),
+                            showLastSeen = obj.optBoolean("showLastSeen", true),
+                            lastSeenText = obj.optString("lastSeenText", "No se ha conectado"),
+                            liveStatusAt = obj.optLong("liveStatusAt", 0L),
+                            linkedAuthUid = obj.optString("linkedAuthUid", ""),
                             createdAt = obj.optLong("createdAt", 0L),
                             authorUid = obj.optString("authorUid", "")
                         )

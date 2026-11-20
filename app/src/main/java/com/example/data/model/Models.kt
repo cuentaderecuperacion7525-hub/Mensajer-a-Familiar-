@@ -44,6 +44,7 @@ data class FamilyMemberEntity(
     val avatarPhotoData: String = "",
     val bioText: String = "",
     val isOnline: Boolean = false,
+    val showLastSeen: Boolean = true,
     val lastSeenText: String = "No se ha conectado",
     val createdAt: Long = System.currentTimeMillis(),
     val phoneNumber: String = "",

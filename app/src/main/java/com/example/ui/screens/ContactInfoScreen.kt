@@ -1380,6 +1380,7 @@ internal fun resolveContactLastSeen(
     nowMs: Long = System.currentTimeMillis()
 ): String {
     if (member == null) return fallbackSubtitle.trim()
+    if (!member.showLastSeen) return ""
     if (member.isOnline) return "En línea"
     if (member.liveStatusAt > 0L) {
         return TimeFormatters.formatLastSeen(member.liveStatusAt, nowMs)

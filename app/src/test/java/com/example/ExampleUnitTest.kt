@@ -155,6 +155,39 @@ class ExampleUnitTest {
   }
 
   @Test
+  fun `presence resolver hides online and last seen when showLastSeen is false`() {
+    val now = 1_700_000_000_000L
+    val hiddenDefault = FamilyMemberEntity(
+      id = "m_priv",
+      name = "Mamá",
+      roleLabel = "Mamá",
+      isAdmin = false,
+      avatarColorHex = "#B0306A",
+      avatarEmoji = "👩🏽",
+      isOnline = true,
+      showLastSeen = false,
+      lastSeenText = "En línea",
+      liveStatus = PresenceStatus.ONLINE,
+      liveStatusAt = now - 5_000L,
+      linkedAuthUid = "uid_mama"
+    )
+    val resolvedHidden = PresenceResolver.resolve(hiddenDefault, nowMs = now)
+    assertFalse(resolvedHidden.isOnline)
+    assertEquals("", resolvedHidden.statusText)
+
+    val hiddenWithCustomStatus = hiddenDefault.copy(lastSeenText = "En el trabajo")
+    val resolvedCustom = PresenceResolver.resolve(hiddenWithCustomStatus, nowMs = now)
+    assertFalse(resolvedCustom.isOnline)
+    assertEquals("En el trabajo", resolvedCustom.statusText)
+
+    // Local active user in foreground with showLastSeen=true is online even if cached isOnline was false
+    val localReopened = hiddenDefault.copy(isOnline = false, showLastSeen = true, lastSeenText = "Desconectado")
+    val resolvedLocal = PresenceResolver.resolve(localReopened, nowMs = now, isLocalActiveInForeground = true)
+    assertTrue(resolvedLocal.isOnline)
+    assertEquals("En línea", resolvedLocal.statusText)
+  }
+
+  @Test
   fun `push registration manager builds valid FCM topic and member stores fcmTokens`() {
     val topic = PushRegistrationManager.topicForFamily("fam-123/abc")
     assertEquals("famichat_fam-123_abc", topic)

@@ -111,10 +111,12 @@ service cloud.firestore {
              (!('bioText' in data) || data.bioText == null || (data.bioText is string && data.bioText.size() <= 120)) &&
              (!('phoneNumber' in data) || data.phoneNumber == null || (data.phoneNumber is string && data.phoneNumber.size() <= 30)) &&
              data.isOnline is bool &&
+             (!('showLastSeen' in data) || data.showLastSeen == null || data.showLastSeen is bool) &&
              data.lastSeenText is string && data.lastSeenText.size() <= 80 &&
              data.liveStatus in ['ONLINE', 'TYPING', 'RECORDING', 'LAST_SEEN'] &&
              (!('liveChatId' in data) || data.liveChatId == null || (data.liveChatId is string && data.liveChatId.size() <= 128)) &&
              (!('liveStatusAt' in data) || data.liveStatusAt == null || data.liveStatusAt is int) &&
+             (!('lastActiveAt' in data) || data.lastActiveAt == null || isValidTimestamp(data.lastActiveAt)) &&
              (!('linkedAuthUid' in data) || data.linkedAuthUid == null || (data.linkedAuthUid is string && data.linkedAuthUid.size() <= 128)) &&
              (!('fcmTokens' in data) || data.fcmTokens == null || isValidStringList(data.fcmTokens, 10)) &&
              (!('createdAtMs' in data) || data.createdAtMs == null || data.createdAtMs is int) &&
@@ -354,7 +356,7 @@ service cloud.firestore {
                          incoming().authorUid == request.auth.uid &&
                          request.auth.uid in incoming().memberUids &&
                          incoming().keys().hasAll(['memberUids', 'authorUid', 'name', 'roleLabel', 'isAdmin', 'avatarColorHex', 'avatarEmoji', 'isOnline', 'lastSeenText', 'liveStatus', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['memberUids', 'authorUid', 'name', 'roleLabel', 'isAdmin', 'avatarColorHex', 'avatarEmoji', 'avatarPhotoData', 'bioText', 'phoneNumber', 'isOnline', 'lastSeenText', 'liveStatus', 'liveChatId', 'liveStatusAt', 'linkedAuthUid', 'fcmTokens', 'createdAtMs', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['memberUids', 'authorUid', 'name', 'roleLabel', 'isAdmin', 'avatarColorHex', 'avatarEmoji', 'avatarPhotoData', 'bioText', 'phoneNumber', 'isOnline', 'showLastSeen', 'lastSeenText', 'liveStatus', 'liveChatId', 'liveStatusAt', 'lastActiveAt', 'linkedAuthUid', 'fcmTokens', 'createdAtMs', 'createdAt', 'updatedAt']) &&
                          isValidMember(incoming()) &&
                          isFamilyMemberByDoc(familyId);
         allow update: if isSignedIn() &&
@@ -364,7 +366,7 @@ service cloud.firestore {
                          incoming().createdAt == existing().createdAt && (
                            isJoiningMemberSync(familyId) ||
                            (request.auth.uid in existing().memberUids &&
-                            incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'name', 'roleLabel', 'isAdmin', 'avatarColorHex', 'avatarEmoji', 'avatarPhotoData', 'bioText', 'phoneNumber', 'isOnline', 'lastSeenText', 'liveStatus', 'liveChatId', 'liveStatusAt', 'linkedAuthUid', 'fcmTokens', 'updatedAt']))
+                            incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'name', 'roleLabel', 'isAdmin', 'avatarColorHex', 'avatarEmoji', 'avatarPhotoData', 'bioText', 'phoneNumber', 'isOnline', 'showLastSeen', 'lastSeenText', 'liveStatus', 'liveChatId', 'liveStatusAt', 'lastActiveAt', 'linkedAuthUid', 'fcmTokens', 'updatedAt']))
                          );
         allow delete: if isSignedIn() && isValidId(memberId) && request.auth.uid in existing().memberUids;
       }

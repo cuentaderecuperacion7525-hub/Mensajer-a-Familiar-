@@ -3,6 +3,11 @@ package com.example
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -13,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
@@ -2011,7 +2017,211 @@ class ExampleRobolectricTest {
     assertTrue((notification.flags and android.app.Notification.FLAG_ONGOING_EVENT) != 0)
     assertEquals(com.example.util.FamiChatNotificationHelper.CHANNEL_REALTIME_SYNC, notification.channelId)
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `my profile screen matches redesigned layout and saves changes only on button tap`() {
+    var savedNickname: String? = null
+    var savedColor: String? = null
+    var savedOnline: Boolean? = null
+    var savedStatus: String? = null
+    var savedBio: String? = null
+    var savedRemovePhoto: Boolean? = null
+    var dismissed = false
+
+    val adminMember = sampleMember(
+      id = "m_admin",
+      name = "José Manuel Martínez",
+      isAdmin = true
+    ).copy(
+      avatarColorHex = "#1A5FD4",
+      bioText = "",
+      isOnline = true,
+      lastSeenText = "Desconectado",
+      avatarPhotoData = "data:image/jpeg;base64,/9j/4AAQSkZJRg=="
+    )
+
+    composeTestRule.setContent {
+      com.example.ui.screens.MyProfileScreen(
+        member = adminMember,
+        onUpdateProfile = { nickname, colorHex, isOnline, statusText, bioText, _, removePhoto ->
+          savedNickname = nickname
+          savedColor = colorHex
+          savedOnline = isOnline
+          savedStatus = statusText
+          savedBio = bioText
+          savedRemovePhoto = removePhoto
+        },
+        onDismiss = { dismissed = true }
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    // Full-screen header, admin pill, camera hint, and no old standalone photo buttons
+    composeTestRule.onNodeWithTag("profile_options_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Mi perfil").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_admin_badge").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Administrador").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Toca la cámara para editar").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Tomar foto").assertDoesNotExist()
+    composeTestRule.onNodeWithText("Elegir de galería").assertDoesNotExist()
+    composeTestRule.onNodeWithText("Quitar foto").assertDoesNotExist()
+
+    // 6 color swatches present and Save disabled while unchanged
+    for (idx in 0 until 6) {
+      composeTestRule.onNodeWithTag("profile_color_swatch_$idx").assertExists()
+    }
+    composeTestRule.onNodeWithTag("profile_save_status_button").assertIsNotEnabled()
+
+    // No status chip selected initially when lastSeenText is Desconectado
+    listOf("En línea", "En casa", "Ocupado", "En el trabajo", "En la escuela").forEach { chip ->
+      composeTestRule.onNodeWithTag("profile_status_chip_$chip").assertIsNotSelected()
+    }
+
+    // Bio placeholder & 0/80 counter
+    composeTestRule.onNodeWithText("Escribe algo que te represente").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_bio_counter").assertTextEquals("0/80")
+
+    // Photo menu opens on avatar tap with 3 options; Quitar foto asks confirmation first
+    composeTestRule.onNodeWithTag("profile_avatar_photo_menu_trigger").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("profile_take_photo_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_change_photo_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_remove_photo_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithText("¿Quitar foto de perfil?").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_remove_photo_confirm_button").performClick()
+    composeTestRule.waitForIdle()
+
+    // Select 3rd color, enter bio, select "En casa", toggle last seen switch OFF
+    composeTestRule.onNodeWithTag("profile_color_swatch_2").performClick()
+    composeTestRule.onNodeWithTag("profile_bio_input").performTextInput("Siempre con la familia")
+    composeTestRule.onNodeWithTag("profile_status_chip_En casa").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("profile_bio_counter").assertTextEquals("22/80")
+    composeTestRule.onNodeWithTag("profile_status_chip_En casa").assertIsSelected()
+    composeTestRule.onNodeWithTag("profile_status_chip_En línea").assertIsNotSelected()
+
+    composeTestRule.onNodeWithTag("profile_last_seen_subtitle")
+      .assertTextEquals("La familia verá cuándo te conectaste.")
+    composeTestRule.onNodeWithTag("profile_online_switch").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("profile_last_seen_subtitle")
+      .assertTextEquals("Nadie verá cuándo te conectaste.")
+
+    // Nothing saved until tapping Guardar cambios
+    assertEquals(null, savedStatus)
+    composeTestRule.onNodeWithTag("profile_save_status_button").assertIsEnabled().performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals("José Manuel Martínez", savedNickname)
+    assertEquals("#0E7C66", savedColor)
+    assertEquals(false, savedOnline)
+    assertEquals("En casa", savedStatus)
+    assertEquals("Siempre con la familia", savedBio)
+    assertEquals(true, savedRemovePhoto)
+    assertFalse(dismissed)
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `my profile screen asks confirmation before closing with unsaved changes and hides admin badge for non-admin`() {
+    var dismissCount = 0
+    val regularMember = sampleMember(
+      id = "m_member",
+      name = "Sofía",
+      isAdmin = false
+    ).copy(
+      avatarColorHex = "#6B4FD8",
+      avatarPhotoData = "",
+      lastSeenText = "Ocupado"
+    )
+
+    composeTestRule.setContent {
+      com.example.ui.screens.MyProfileScreen(
+        member = regularMember,
+        onUpdateProfile = { _, _, _, _, _, _, _ -> },
+        onDismiss = { dismissCount++ }
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    // Non-admin does not show Administrador pill; saved status is pre-selected
+    composeTestRule.onNodeWithTag("profile_admin_badge").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("profile_status_chip_Ocupado").assertIsSelected()
+
+    // Without photo, photo menu omits "Quitar foto"
+    composeTestRule.onNodeWithTag("profile_avatar_photo_menu_trigger").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("profile_take_photo_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_change_photo_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_remove_photo_button").assertDoesNotExist()
+    // Dismiss menu by clicking avatar/closing
+    composeTestRule.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+    composeTestRule.waitForIdle()
+
+    // Make an edit, then tap X -> discard confirmation appears instead of closing directly
+    composeTestRule.onNodeWithTag("profile_status_chip_En el trabajo").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("profile_close_button").performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(0, dismissCount)
+    composeTestRule.onNodeWithText("¿Salir sin guardar?").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_discard_cancel_button").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(0, dismissCount)
+
+    // Tap X again and confirm Salir -> dismisses
+    composeTestRule.onNodeWithTag("profile_close_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("profile_discard_confirm_button").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(1, dismissCount)
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `my profile last seen switch tracks showLastSeen independently of transient isOnline and hides contact timestamp when off`() {
+    val memberWithShowEnabledWhileOffline = sampleMember(
+      id = "m_priv_check",
+      name = "Carlos",
+      isAdmin = false
+    ).copy(
+      isOnline = false,
+      showLastSeen = true,
+      liveStatusAt = System.currentTimeMillis() - 180_000L,
+      lastSeenText = "Últ. vez hace 3 min"
+    )
+
+    // Even when transient isOnline is false, showLastSeen=true keeps switch ON
+    composeTestRule.setContent {
+      com.example.ui.screens.MyProfileScreen(
+        member = memberWithShowEnabledWhileOffline,
+        onUpdateProfile = { _, _, _, _, _, _, _ -> },
+        onDismiss = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("profile_last_seen_subtitle")
+      .assertTextEquals("La familia verá cuándo te conectaste.")
+
+    // When showLastSeen=false, contact info hides last seen timestamp completely
+    val hiddenMember = memberWithShowEnabledWhileOffline.copy(showLastSeen = false)
+    assertEquals(
+      "",
+      com.example.ui.screens.resolveContactLastSeen(hiddenMember, "Últ. vez hace 3 min")
+    )
+    assertTrue(
+      com.example.ui.screens.resolveContactLastSeen(memberWithShowEnabledWhileOffline, "")
+        .startsWith("Últ. vez")
+    )
+  }
 }
+
+
 
 
 
