@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1387,11 +1388,16 @@ private fun ChatsListSection(
                 )
             }
         } else {
+            val chatDividerColor = if (isDarkTheme) {
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+            } else {
+                Color(0xFFE5E8EE)
+            }
             LazyColumn(
                 contentPadding = PaddingValues(top = 4.dp, bottom = 84.dp),
                 modifier = Modifier.testTag("chats_lazy_column")
             ) {
-                items(filtered, key = { it.chat.id }) { item ->
+                itemsIndexed(filtered, key = { _, item -> item.chat.id }) { index, item ->
                     ChatRowItem(
                         item = item,
                         isDarkTheme = isDarkTheme,
@@ -1399,6 +1405,15 @@ private fun ChatsListSection(
                         onTogglePin = { onTogglePinChat(item.chat.id) },
                         onToggleMute = { onToggleMuteChat(item.chat.id) }
                     )
+                    if (index < filtered.lastIndex) {
+                        HorizontalDivider(
+                            thickness = 0.75.dp,
+                            color = chatDividerColor,
+                            modifier = Modifier
+                                .padding(start = 72.dp)
+                                .testTag("chat_divider_${item.chat.id}")
+                        )
+                    }
                 }
             }
         }
