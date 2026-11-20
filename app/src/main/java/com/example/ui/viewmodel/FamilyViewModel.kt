@@ -197,6 +197,7 @@ class FamilyViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val _activeMemberId = MutableStateFlow<String?>(null)
+    val activeMemberId: StateFlow<String?> = _activeMemberId.asStateFlow()
     private val _isAppForeground = MutableStateFlow(false)
     private val _pendingShowLastSeenOverride = MutableStateFlow<Pair<String, Boolean>?>(null)
 
@@ -270,11 +271,28 @@ class FamilyViewModel(
                             }
                         } else {
                             membersLoadingTimeoutJob?.cancel()
-                            if (_bootstrapFallbackMembers.value != null) {
-                                _bootstrapFallbackMembers.value = null
+                            val activeId = _activeMemberId.value
+                            if (activeId.isNullOrBlank() || list.any { it.id == activeId }) {
+                                if (_bootstrapFallbackMembers.value != null) {
+                                    _bootstrapFallbackMembers.value = null
+                                }
+                            } else {
+                                // Keep the currently active member from fallback so a partial
+                                // Firestore snapshot never drops activeMember to null and bounces
+                                // the user back to the profile selector.
+                                val preserved = _bootstrapFallbackMembers.value
+                                    ?.takeIf { it.first == fid }
+                                    ?.second
+                                    ?.find { it.id == activeId }
+                                if (preserved != null) {
+                                    _bootstrapFallbackMembers.value = fid to listOf(preserved)
+                                }
+                                viewModelScope.launch {
+                                    cloudRepo.syncSingleMemberUid(fid, activeId, currentUserId)
+                                }
                             }
                             viewModelScope.launch {
-                                prefs.saveCachedFamilyMembers(fid, list)
+                                prefs.saveCachedFamilyMembers(fid, list, preserveMemberId = activeId)
                             }
                         }
                         _isMembersLoading.value = false
@@ -771,29 +789,54 @@ class FamilyViewModel(
                         _isResolvingFamilySpace.value = false
                         _isMembersLoading.value = false
                         _activeMemberId.value = savedMemberId
-                        withTimeoutOrNull(300L) {
+                        withTimeoutOrNull(2_000L) {
                             activeMember.first { it?.id == savedMemberId }
                         }
                         _isSessionReady.value = true
                         if (cachedForSavedFamily.isEmpty()) {
                             viewModelScope.launch {
-                                prefs.saveCachedFamilyMembers(savedFamilyId, instantMembers)
+                                prefs.saveCachedFamilyMembers(
+                                    savedFamilyId,
+                                    instantMembers,
+                                    preserveMemberId = savedMemberId
+                                )
                             }
                         }
                         viewModelScope.launch {
                             syncPushAndBackgroundWork(savedFamilyId, savedMemberId)
                             cloudRepo.syncJoiningMembers(savedFamilyId, currentUserId)
+                            cloudRepo.syncSingleMemberUid(savedFamilyId, savedMemberId, currentUserId)
                             cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
                             if (_isAppForeground.value && isShowLastSeenEnabledFor(savedMemberId)) {
                                 startPresenceHeartbeat()
                             }
                             val serverMembers = cloudRepo.fetchMembersOnceFromServer(savedFamilyId, currentUserId)
                             if (serverMembers.isNotEmpty()) {
-                                prefs.saveCachedFamilyMembers(savedFamilyId, serverMembers)
-                                if (serverMembers.none { it.id == savedMemberId }) {
-                                    // Profile was deleted by admin while device was offline
-                                    _activeMemberId.value = null
-                                    prefs.setActiveMemberId(null)
+                                if (serverMembers.any { it.id == savedMemberId }) {
+                                    prefs.saveCachedFamilyMembers(
+                                        savedFamilyId,
+                                        serverMembers,
+                                        preserveMemberId = savedMemberId
+                                    )
+                                } else {
+                                    // Verify positively on server before ever wiping the saved profile
+                                    val confirmedDeleted = cloudRepo.isMemberConfirmedDeletedOnServer(
+                                        familyId = savedFamilyId,
+                                        memberId = savedMemberId,
+                                        uid = currentUserId
+                                    )
+                                    if (confirmedDeleted) {
+                                        _bootstrapFallbackMembers.value = null
+                                        _activeMemberId.value = null
+                                        prefs.setActiveMemberId(null)
+                                        prefs.saveCachedFamilyMembers(savedFamilyId, serverMembers)
+                                    } else {
+                                        prefs.saveCachedFamilyMembers(
+                                            savedFamilyId,
+                                            serverMembers,
+                                            preserveMemberId = savedMemberId
+                                        )
+                                    }
                                 }
                             } else {
                                 // Device UID may need re-syncing (e.g. after reinstall with Auto Backup)
@@ -841,7 +884,11 @@ class FamilyViewModel(
                         .ifEmpty { cloudRepo.fetchBootstrapMembersById(resolvedFamilyId) }
                     if (prefetchedMembers.isNotEmpty()) {
                         _bootstrapFallbackMembers.value = resolvedFamilyId to prefetchedMembers
-                        prefs.saveCachedFamilyMembers(resolvedFamilyId, prefetchedMembers)
+                        prefs.saveCachedFamilyMembers(
+                            resolvedFamilyId,
+                            prefetchedMembers,
+                            preserveMemberId = savedMemberId
+                        )
                     }
                     // Set _activeFamilyId BEFORE clearing _isResolvingFamilySpace so combine() never sees (null, false)
                     _activeFamilyId.value = resolvedFamilyId
@@ -850,27 +897,48 @@ class FamilyViewModel(
                     // Sync members & chats in the background so the profile selector never waits on docs
                     viewModelScope.launch {
                         cloudRepo.syncJoiningMembers(resolvedFamilyId, currentUserId)
+                        if (!savedMemberId.isNullOrBlank()) {
+                            cloudRepo.syncSingleMemberUid(resolvedFamilyId, savedMemberId, currentUserId)
+                        }
                         cloudRepo.syncJoiningChats(resolvedFamilyId, currentUserId)
                     }
                     if (savedMemberId != null) {
-                        // Wait briefly for initial member list so saved profile restores straight to HOME
-                        val loadedMembers = prefetchedMembers.ifEmpty {
-                            runCatching {
+                        // Wait for non-empty member list or fetch the saved member directly by ID
+                        var loadedMembers = prefetchedMembers
+                        if (loadedMembers.none { it.id == savedMemberId }) {
+                            val directMember = cloudRepo.fetchMemberByIdFromServer(resolvedFamilyId, savedMemberId)
+                            if (directMember != null) {
+                                loadedMembers = loadedMembers + directMember
+                            }
+                        }
+                        if (loadedMembers.none { it.id == savedMemberId }) {
+                            val observed = runCatching {
                                 withTimeoutOrNull(4_000L) {
-                                    cloudRepo.observeMembers(resolvedFamilyId, currentUserId).first()
+                                    cloudRepo.observeMembers(resolvedFamilyId, currentUserId)
+                                        .first { list -> list.any { it.id == savedMemberId } }
                                 }
                             }.getOrNull().orEmpty()
+                            if (observed.isNotEmpty()) {
+                                loadedMembers = observed
+                            }
                         }
                         if (loadedMembers.any { it.id == savedMemberId }) {
+                            _bootstrapFallbackMembers.value = resolvedFamilyId to loadedMembers
+                            prefs.saveSelectedSession(resolvedFamilyId, savedMemberId, loadedMembers)
                             _activeMemberId.value = savedMemberId
-                            withTimeoutOrNull(1000L) {
+                            withTimeoutOrNull(2_000L) {
                                 activeMember.first { it?.id == savedMemberId }
                             }
                             syncPushAndBackgroundWork(resolvedFamilyId, savedMemberId)
                             if (_isAppForeground.value && isShowLastSeenEnabledFor(savedMemberId)) {
                                 startPresenceHeartbeat()
                             }
-                        } else {
+                        } else if (cloudRepo.isMemberConfirmedDeletedOnServer(
+                                familyId = resolvedFamilyId,
+                                memberId = savedMemberId,
+                                uid = currentUserId
+                            )
+                        ) {
                             prefs.setActiveMemberId(null)
                         }
                     }
@@ -1383,13 +1451,20 @@ class FamilyViewModel(
         _activeMemberId.value = memberId
         _activeChatId.value = null
         _searchQuery.value = ""
+        val famIdSnapshot = _activeFamilyId.value
+        val currentListSnapshot = members.value
         viewModelScope.launch {
-            prefs.setActiveMemberId(memberId)
-            val famId = _activeFamilyId.value ?: return@launch
-            val currentList = members.value
-            if (currentList.isNotEmpty()) {
-                prefs.saveCachedFamilyMembers(famId, currentList)
+            withContext(NonCancellable) {
+                val famId = famIdSnapshot ?: _activeFamilyId.value
+                val listToCache = currentListSnapshot.ifEmpty { members.value }
+                if (!famId.isNullOrBlank()) {
+                    prefs.saveSelectedSession(famId, memberId, listToCache)
+                } else {
+                    prefs.setActiveMemberId(memberId)
+                }
             }
+            val famId = _activeFamilyId.value ?: return@launch
+            cloudRepo.syncSingleMemberUid(famId, memberId, currentUserId)
             val now = System.currentTimeMillis()
             val raw = rawMembers.value.find { it.id == memberId }
             val allowPresence = isShowLastSeenEnabledFor(memberId)

@@ -493,6 +493,71 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         }
     }
 
+    suspend fun syncSingleMemberUid(familyId: String, memberId: String, uid: String) {
+        if (familyId.isBlank() || memberId.isBlank() || uid.isBlank()) return
+        runCatching {
+            withTimeoutOrNull(5_000L) {
+                familyRef(familyId).collection("members").document(memberId).update(
+                    mapOf(
+                        "memberUids" to FieldValue.arrayUnion(uid),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+        }
+    }
+
+    suspend fun fetchMemberByIdFromServer(familyId: String, memberId: String): FamilyMemberEntity? {
+        if (familyId.isBlank() || memberId.isBlank()) return null
+        return try {
+            val snap = withTimeoutOrNull(6_000L) {
+                familyRef(familyId).collection("members").document(memberId)
+                    .get(Source.SERVER)
+                    .await()
+            } ?: return null
+            if (!snap.exists()) null else FirestoreMappers.toMember(snap)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Returns true ONLY when the Firestore server positively confirms the member profile
+     * no longer exists (absent from both the member document/bootstrap list and server members).
+     * Never returns true on offline/timeout/permission errors so a valid saved profile is never wiped.
+     */
+    suspend fun isMemberConfirmedDeletedOnServer(
+        familyId: String,
+        memberId: String,
+        uid: String
+    ): Boolean {
+        if (familyId.isBlank() || memberId.isBlank()) return false
+        return try {
+            val directMember = fetchMemberByIdFromServer(familyId, memberId)
+            if (directMember != null) return false
+
+            val bootstrapSnap = withTimeoutOrNull(6_000L) {
+                familyRef(familyId).collection("meta").document("bootstrap")
+                    .get(Source.SERVER)
+                    .await()
+            } ?: return false
+            if (!bootstrapSnap.exists()) return false
+            val bootstrapIds = (bootstrapSnap.get("memberIds") as? List<*>)
+                ?.mapNotNull { it as? String }
+                .orEmpty()
+            if (bootstrapIds.isEmpty() || memberId in bootstrapIds) return false
+
+            val serverMembers = fetchMembersOnceFromServer(familyId, uid)
+            serverMembers.isNotEmpty() && serverMembers.none { it.id == memberId }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     suspend fun syncMemberUidsAcrossExistingDocs(familyId: String, allFamilyUids: List<String>, myUid: String) {
         if (allFamilyUids.isEmpty()) return
         val fRef = familyRef(familyId)

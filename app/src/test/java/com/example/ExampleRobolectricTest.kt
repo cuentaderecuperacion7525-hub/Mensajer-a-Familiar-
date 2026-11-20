@@ -2219,7 +2219,46 @@ class ExampleRobolectricTest {
         .startsWith("Últ. vez")
     )
   }
+
+  @Test
+  fun `selected profile session persists atomically and partial member cache updates never drop active member`() = kotlinx.coroutines.test.runTest {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val prefs = com.example.data.local.PreferencesManager(context)
+
+    val admin = sampleMember(id = "m_admin_persist", name = "José Manuel", isAdmin = true)
+    val sister = sampleMember(id = "m_sister_persist", name = "Ana", isAdmin = false)
+
+    // Atomically save selected session as done in FamilyViewModel.selectProfile
+    prefs.saveSelectedSession(
+      familyId = "fam_persist_1",
+      memberId = sister.id,
+      members = listOf(admin, sister)
+    )
+
+    val snapshot1 = prefs.readInitialSessionSnapshot()
+    assertEquals("fam_persist_1", snapshot1.activeFamilyId)
+    assertEquals(sister.id, snapshot1.activeMemberId)
+    assertEquals("fam_persist_1", snapshot1.cachedFamilyId)
+    assertTrue(snapshot1.cachedMembers.any { it.id == sister.id })
+
+    // Simulate a partial Firestore members snapshot that temporarily omits the active member
+    prefs.saveCachedFamilyMembers(
+      familyId = "fam_persist_1",
+      members = listOf(admin),
+      preserveMemberId = sister.id
+    )
+
+    val snapshot2 = prefs.readInitialSessionSnapshot()
+    assertEquals("fam_persist_1", snapshot2.activeFamilyId)
+    assertEquals(sister.id, snapshot2.activeMemberId)
+    assertTrue(
+      "Active member must remain in cachedMembers after partial snapshot so cold restart enters HOME directly",
+      snapshot2.cachedMembers.any { it.id == sister.id }
+    )
+    assertTrue(snapshot2.cachedMembers.any { it.id == admin.id })
+  }
 }
+
 
 
 

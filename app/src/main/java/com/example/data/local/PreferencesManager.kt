@@ -194,14 +194,68 @@ class PreferencesManager(private val context: Context) {
         )
     }
 
-    suspend fun saveCachedFamilyMembers(familyId: String, members: List<FamilyMemberEntity>) {
-        if (familyId.isBlank() || members.isEmpty()) return
-        val encoded = encodeCachedMembers(familyId, members)
+    suspend fun saveSelectedSession(
+        familyId: String,
+        memberId: String,
+        members: List<FamilyMemberEntity>
+    ) {
+        if (memberId.isBlank()) return
         context.dataStore.edit { prefs ->
+            if (familyId.isNotBlank()) {
+                prefs[KEY_ACTIVE_FAMILY_ID] = familyId
+            }
+            prefs[KEY_ACTIVE_MEMBER_ID] = memberId
+            if (familyId.isNotBlank() && members.isNotEmpty()) {
+                val merged = mergePreservingMember(
+                    existingJson = prefs[KEY_CACHED_MEMBERS_JSON],
+                    familyId = familyId,
+                    incoming = members,
+                    preserveMemberId = memberId
+                )
+                val encoded = encodeCachedMembers(familyId, merged)
+                if (prefs[KEY_CACHED_MEMBERS_JSON] != encoded) {
+                    prefs[KEY_CACHED_MEMBERS_JSON] = encoded
+                }
+            }
+        }
+    }
+
+    suspend fun saveCachedFamilyMembers(
+        familyId: String,
+        members: List<FamilyMemberEntity>,
+        preserveMemberId: String? = null
+    ) {
+        if (familyId.isBlank() || members.isEmpty()) return
+        context.dataStore.edit { prefs ->
+            val merged = mergePreservingMember(
+                existingJson = prefs[KEY_CACHED_MEMBERS_JSON],
+                familyId = familyId,
+                incoming = members,
+                preserveMemberId = preserveMemberId
+            )
+            val encoded = encodeCachedMembers(familyId, merged)
             if (prefs[KEY_CACHED_MEMBERS_JSON] != encoded) {
                 prefs[KEY_CACHED_MEMBERS_JSON] = encoded
             }
         }
+    }
+
+    private fun mergePreservingMember(
+        existingJson: String?,
+        familyId: String,
+        incoming: List<FamilyMemberEntity>,
+        preserveMemberId: String?
+    ): List<FamilyMemberEntity> {
+        if (preserveMemberId.isNullOrBlank() || incoming.any { it.id == preserveMemberId }) {
+            return incoming
+        }
+        val prev = decodeCachedMembers(existingJson)
+        val preserved = if (prev != null && prev.first == familyId) {
+            prev.second.find { it.id == preserveMemberId }
+        } else {
+            null
+        }
+        return if (preserved != null) incoming + preserved else incoming
     }
 
     suspend fun clearCachedFamilyMembers() {

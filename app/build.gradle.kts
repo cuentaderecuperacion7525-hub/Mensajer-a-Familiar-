@@ -19,8 +19,8 @@ android {
     applicationId = "com.aistudio.nidofamiliar.mrxqkp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 61
-    versionName = "2.8.19"
+    versionCode = 62
+    versionName = "2.8.20"
 
     val githubRepo = (System.getenv("GITHUB_REPOSITORY") ?: "").trim().replace("\"", "")
     buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")

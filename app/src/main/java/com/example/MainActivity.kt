@@ -266,6 +266,7 @@ fun FamiChatApp(
     val isMembersLoading by vm.isMembersLoading.collectAsStateWithLifecycle()
     val members by vm.members.collectAsStateWithLifecycle()
     val activeMember by vm.activeMember.collectAsStateWithLifecycle()
+    val activeMemberId by vm.activeMemberId.collectAsStateWithLifecycle()
 
     if (!isSessionReady) {
         Box(
@@ -296,7 +297,13 @@ fun FamiChatApp(
     }
 
     val navController = rememberNavController()
-    val initialRoute = remember { if (activeMember != null) Routes.HOME else Routes.SELECTOR }
+    val initialRoute = remember {
+        if (vm.activeMember.value != null || !vm.activeMemberId.value.isNullOrBlank()) {
+            Routes.HOME
+        } else {
+            Routes.SELECTOR
+        }
+    }
     val selectedTab by vm.selectedTab.collectAsStateWithLifecycle()
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val chatPreviews by vm.chatPreviews.collectAsStateWithLifecycle()
@@ -408,6 +415,16 @@ fun FamiChatApp(
             startDestination = initialRoute
         ) {
             composable(Routes.SELECTOR) {
+                LaunchedEffect(activeMember?.id) {
+                    if (activeMember != null &&
+                        navController.currentBackStackEntry?.destination?.route == Routes.SELECTOR
+                    ) {
+                        navController.navigate(Routes.HOME) {
+                            popUpTo(Routes.SELECTOR) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                }
                 ProfileSelectorScreen(
                     members = members,
                     isMembersLoading = isMembersLoading,
@@ -430,10 +447,22 @@ fun FamiChatApp(
 
             composable(Routes.HOME) {
                 val member = activeMember
+                val pendingMemberId = activeMemberId
                 if (member == null) {
-                    LaunchedEffect(Unit) {
-                        navController.navigate(Routes.SELECTOR) {
-                            popUpTo(Routes.HOME) { inclusive = true }
+                    if (pendingMemberId.isNullOrBlank()) {
+                        LaunchedEffect(Unit) {
+                            navController.navigate(Routes.SELECTOR) {
+                                popUpTo(Routes.HOME) { inclusive = true }
+                            }
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
                         }
                     }
                 } else {
