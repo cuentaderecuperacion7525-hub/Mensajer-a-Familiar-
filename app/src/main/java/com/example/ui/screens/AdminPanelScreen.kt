@@ -429,10 +429,6 @@ private fun AdminPinSettings(
     onUpdateRepoSlug: (String) -> Unit,
     onChangeFamilySpace: () -> Unit
 ) {
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
-    var copiedInvite by remember { mutableStateOf(false) }
-
     var currentInput by remember { mutableStateOf("") }
     var newPin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
@@ -448,100 +444,6 @@ private fun AdminPinSettings(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        if (inviteCode.isNotBlank()) {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Filled.FamilyRestroom,
-                            contentDescription = "Invitación familiar",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            "Código de invitación familiar",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    }
-                    Text(
-                        "Comparte este código para que otros teléfonos de la familia se unan a \"$familyName\" desde sus cuentas de Google.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = inviteCode,
-                                style = MaterialTheme.typography.headlineSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 4.sp
-                                ),
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.testTag("admin_invite_code")
-                            )
-                            IconButton(
-                                onClick = {
-                                    clipboard.setText(AnnotatedString(inviteCode))
-                                    copiedInvite = true
-                                }
-                            ) {
-                                Icon(Icons.Filled.ContentCopy, contentDescription = "Copiar código")
-                            }
-                        }
-                    }
-                    if (copiedInvite) {
-                        Text(
-                            "Código copiado al portapapeles",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(
-                                        Intent.EXTRA_TEXT,
-                                        "Únete a nuestra familia \"$familyName\" en FamiChat con el código: $inviteCode"
-                                    )
-                                }
-                                context.startActivity(Intent.createChooser(sendIntent, "Compartir código familiar"))
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Compartir")
-                        }
-                        OutlinedButton(
-                            onClick = onChangeFamilySpace,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Cambiar familia")
-                        }
-                    }
-                }
-            }
-        }
-
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
