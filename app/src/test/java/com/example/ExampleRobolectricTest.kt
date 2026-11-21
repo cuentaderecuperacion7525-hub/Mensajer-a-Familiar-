@@ -2,6 +2,8 @@ package com.example
 
 import android.content.Context
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -2710,6 +2712,87 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("menu_settings").performClick()
     composeTestRule.waitForIdle()
     assertTrue(openedSettings)
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `my profile screen adapts cleanly to dark theme without losing controls or save flow`() {
+    val member = sampleMember(id = "m_dark", name = "José Manuel Martínez", isAdmin = true)
+    var savedNickname = ""
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = true) {
+        com.example.ui.screens.MyProfileScreen(
+          member = member,
+          onUpdateProfile = { nick, _, _, _, _, _, _ -> savedNickname = nick },
+          onDismiss = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("profile_options_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Mi perfil").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_admin_badge").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_online_switch").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_save_status_button").assertIsNotEnabled()
+
+    composeTestRule.onNodeWithTag("profile_status_chip_En casa").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("profile_save_status_button").assertIsEnabled().performClick()
+    assertEquals("José Manuel Martínez", savedNickname)
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `global snackbar host displays confirmation immediately on AdminPanelScreen`() {
+    val snackbarMessageState = androidx.compose.runtime.mutableStateOf<String?>(null)
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = true) {
+        val hostState = androidx.compose.runtime.remember { androidx.compose.material3.SnackbarHostState() }
+        androidx.compose.runtime.LaunchedEffect(snackbarMessageState.value) {
+          val msg = snackbarMessageState.value ?: return@LaunchedEffect
+          hostState.showSnackbar(msg)
+        }
+        androidx.compose.foundation.layout.Box(
+          modifier = androidx.compose.ui.Modifier.fillMaxSize()
+        ) {
+          com.example.ui.screens.AdminPanelScreen(
+            members = listOf(sampleMember(id = "m_admin", name = "José Manuel", isAdmin = true)),
+            chats = emptyList(),
+            currentMemberId = "m_admin",
+            familyName = "Mi Familia",
+            inviteCode = "NIDO01",
+            currentMasterPin = "1234",
+            currentSwitchPin = "2580",
+            currentUpdateRepo = "",
+            onBack = {},
+            onSaveMember = { _, _, _, _, _, _, _, _, _, _ -> },
+            onDeleteMember = {},
+            onSaveGroup = { _, _, _, _, _ -> },
+            onDeleteGroup = {},
+            onUpdateMasterPin = { snackbarMessageState.value = "Contraseña actualizada en este dispositivo" },
+            onUpdateSwitchPin = {},
+            onUpdateRepoSlug = {},
+            onChangeFamilySpace = {}
+          )
+          androidx.compose.material3.SnackbarHost(
+            hostState = hostState,
+            modifier = androidx.compose.ui.Modifier
+              .align(androidx.compose.ui.Alignment.BottomCenter)
+              .testTag("global_snackbar_host")
+          )
+        }
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.runOnUiThread {
+      snackbarMessageState.value = "Contraseña actualizada en este dispositivo"
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithText("Panel de Administración").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Contraseña actualizada en este dispositivo").assertIsDisplayed()
   }
 }
 

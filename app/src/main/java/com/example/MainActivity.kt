@@ -17,9 +17,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -35,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
@@ -361,6 +370,22 @@ fun FamiChatApp(
     val turnUsername by vm.turnUsername.collectAsStateWithLifecycle()
     val turnCredential by vm.turnCredential.collectAsStateWithLifecycle()
     val snackbarMessage by vm.snackbarMessage.collectAsStateWithLifecycle()
+    val globalSnackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(snackbarMessage) {
+        val msg = snackbarMessage ?: return@LaunchedEffect
+        try {
+            globalSnackbarHostState.currentSnackbarData?.dismiss()
+            globalSnackbarHostState.showSnackbar(
+                message = msg,
+                duration = SnackbarDuration.Short
+            )
+        } finally {
+            if (vm.snackbarMessage.value == msg) {
+                vm.clearSnackbar()
+            }
+        }
+    }
 
     var pendingProtectedMember by remember { mutableStateOf<FamilyMemberEntity?>(null) }
     var showSwitchKeyDialog by remember { mutableStateOf(false) }
@@ -451,8 +476,8 @@ fun FamiChatApp(
                 ProfileSelectorScreen(
                     members = members,
                     isMembersLoading = isMembersLoading,
-                    snackbarMessage = snackbarMessage,
-                    onClearSnackbar = vm::clearSnackbar,
+                    snackbarMessage = null,
+                    onClearSnackbar = {},
                     onSelectMember = { member ->
                         if (member.isAdmin) {
                             pendingProtectedMember = member
@@ -508,8 +533,8 @@ fun FamiChatApp(
                         shoppingItems = shoppingItems,
                         events = events,
                         notes = notes,
-                        snackbarMessage = snackbarMessage,
-                        onClearSnackbar = vm::clearSnackbar,
+                        snackbarMessage = null,
+                        onClearSnackbar = {},
                         onToggleTheme = vm::toggleTheme,
                         onToggleNotifications = vm::setNotificationsEnabled,
                         onUpdateOwnProfile = vm::updateOwnProfileDetails,
@@ -687,8 +712,8 @@ fun FamiChatApp(
             composable(Routes.NOTIFICATIONS) {
                 NotificationSettingsScreen(
                     notificationsEnabled = notificationsEnabled,
-                    snackbarMessage = snackbarMessage,
-                    onClearSnackbar = vm::clearSnackbar,
+                    snackbarMessage = null,
+                    onClearSnackbar = {},
                     onToggleNotifications = vm::setNotificationsEnabled,
                     onSendTestNotification = vm::sendTestPushNotification,
                     onBack = { safePopBack(Routes.NOTIFICATIONS) }
@@ -719,8 +744,8 @@ fun FamiChatApp(
                     turnUrl = turnUrl,
                     turnUsername = turnUsername,
                     turnCredential = turnCredential,
-                    snackbarMessage = snackbarMessage,
-                    onClearSnackbar = vm::clearSnackbar,
+                    snackbarMessage = null,
+                    onClearSnackbar = {},
                     onSendTestNotification = vm::sendTestPushNotification,
                     onSaveTurnConfig = vm::saveTurnConfig,
                     onBack = { safePopBack(Routes.ADMIN_DIAGNOSTICS) }
@@ -769,8 +794,8 @@ fun FamiChatApp(
                         voiceRecording = voiceRecording,
                         playingVoiceMessageId = playingVoiceId,
                         playingVoiceProgress = playingVoiceProgress,
-                        snackbarMessage = snackbarMessage,
-                        onClearSnackbar = vm::clearSnackbar,
+                        snackbarMessage = null,
+                        onClearSnackbar = {},
                         onBack = {
                             vm.closeChat()
                             safePopBack(Routes.CHAT)
@@ -933,6 +958,21 @@ fun FamiChatApp(
                     }
                 },
                 onDecline = { vm.declineIncomingCall(call) }
+            )
+        }
+
+        SnackbarHost(
+            hostState = globalSnackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 12.dp, vertical = 12.dp)
+                .testTag("global_snackbar_host")
+        ) { data ->
+            Snackbar(
+                snackbarData = data,
+                shape = RoundedCornerShape(14.dp)
             )
         }
     }

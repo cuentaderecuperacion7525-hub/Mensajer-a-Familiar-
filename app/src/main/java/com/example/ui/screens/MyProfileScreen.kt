@@ -56,6 +56,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -140,13 +141,30 @@ fun MyProfileScreen(
     val view = LocalView.current
     val isDarkTheme = LocalDarkTheme.current
 
-    // Keep status bar icons legible against the pure white full-screen background
+    val bgColor = if (isDarkTheme) MaterialTheme.colorScheme.background else ProfileWhiteBg
+    val cardBg = if (isDarkTheme) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f) else ProfileCardBg
+    val menuBg = if (isDarkTheme) MaterialTheme.colorScheme.surface else ProfileWhiteBg
+    val textPrimary = if (isDarkTheme) MaterialTheme.colorScheme.onSurface else ProfileTextPrimary
+    val textSecondary = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant else ProfileTextSecondary
+    val accentBlue = if (isDarkTheme) MaterialTheme.colorScheme.primary else ProfileAccentBlue
+    val onAccent = if (isDarkTheme) MaterialTheme.colorScheme.onPrimary else Color.White
+    val adminPillBg = if (isDarkTheme) MaterialTheme.colorScheme.primaryContainer else ProfileAdminPillBg
+    val adminPillText = if (isDarkTheme) MaterialTheme.colorScheme.onPrimaryContainer else ProfileAccentBlue
+    val dividerColor = if (isDarkTheme) MaterialTheme.colorScheme.outline.copy(alpha = 0.25f) else ProfileDividerGray
+    val borderColor = if (isDarkTheme) MaterialTheme.colorScheme.outline.copy(alpha = 0.45f) else ProfileBorderGray
+    val dangerRed = if (isDarkTheme) MaterialTheme.colorScheme.error else ProfileDangerRed
+    val cameraBadgeBg = if (isDarkTheme) MaterialTheme.colorScheme.surfaceVariant else ProfileTextPrimary
+    val cameraBadgeIconTint = if (isDarkTheme) MaterialTheme.colorScheme.onSurface else Color.White
+    val disabledBtnBg = if (isDarkTheme) MaterialTheme.colorScheme.surfaceVariant else ProfileBorderGray
+    val disabledBtnText = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f) else Color.White
+
+    // Keep status and navigation bar icons aligned with the active light/dark theme
     if (!view.isInEditMode) {
         DisposableEffect(view, isDarkTheme) {
             val window = (view.context as? Activity)?.window
             val controller = window?.let { WindowCompat.getInsetsController(it, view) }
-            controller?.isAppearanceLightStatusBars = true
-            controller?.isAppearanceLightNavigationBars = true
+            controller?.isAppearanceLightStatusBars = !isDarkTheme
+            controller?.isAppearanceLightNavigationBars = !isDarkTheme
             onDispose {
                 controller?.isAppearanceLightStatusBars = !isDarkTheme
                 controller?.isAppearanceLightNavigationBars = !isDarkTheme
@@ -275,7 +293,7 @@ fun MyProfileScreen(
     val squircleColor = parseHexColor(selectedColorHex)
 
     Surface(
-        color = ProfileWhiteBg,
+        color = bgColor,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
         modifier = Modifier
@@ -285,7 +303,7 @@ fun MyProfileScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(ProfileWhiteBg)
+                .background(bgColor)
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .imePadding()
@@ -303,7 +321,7 @@ fun MyProfileScreen(
                     fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     fontSize = 20.sp,
-                    color = ProfileTextPrimary
+                    color = textPrimary
                 )
                 IconButton(
                     onClick = { attemptClose() },
@@ -314,7 +332,7 @@ fun MyProfileScreen(
                     Icon(
                         imageVector = Icons.Filled.Close,
                         contentDescription = "Cerrar",
-                        tint = ProfileTextPrimary,
+                        tint = textPrimary,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -380,23 +398,23 @@ fun MyProfileScreen(
                             }
                         }
 
-                        // Insignia circular oscura (#1B1F2A, 26dp, borde blanco de 3dp) con cámara blanca
+                        // Insignia circular con borde del color de fondo e icono de cámara
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
                                 .size(32.dp)
                                 .clip(CircleShape)
-                                .background(ProfileWhiteBg)
+                                .background(bgColor)
                                 .padding(3.dp)
                                 .clip(CircleShape)
-                                .background(ProfileTextPrimary)
+                                .background(cameraBadgeBg)
                                 .testTag("profile_camera_badge"),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.PhotoCamera,
                                 contentDescription = "Cambiar foto",
-                                tint = Color.White,
+                                tint = cameraBadgeIconTint,
                                 modifier = Modifier.size(14.dp)
                             )
                         }
@@ -404,7 +422,7 @@ fun MyProfileScreen(
                         DropdownMenu(
                             expanded = showPhotoMenu,
                             onDismissRequest = { showPhotoMenu = false },
-                            containerColor = ProfileWhiteBg,
+                            containerColor = menuBg,
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.testTag("profile_photo_menu")
                         ) {
@@ -415,14 +433,14 @@ fun MyProfileScreen(
                                         fontFamily = InterFontFamily,
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 14.sp,
-                                        color = ProfileTextPrimary
+                                        color = textPrimary
                                     )
                                 },
                                 leadingIcon = {
                                     Icon(
                                         imageVector = Icons.Outlined.PhotoCamera,
                                         contentDescription = null,
-                                        tint = ProfileTextPrimary,
+                                        tint = textPrimary,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 },
@@ -441,14 +459,14 @@ fun MyProfileScreen(
                                         fontFamily = InterFontFamily,
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 14.sp,
-                                        color = ProfileTextPrimary
+                                        color = textPrimary
                                     )
                                 },
                                 leadingIcon = {
                                     Icon(
                                         imageVector = Icons.Outlined.PhotoLibrary,
                                         contentDescription = null,
-                                        tint = ProfileTextPrimary,
+                                        tint = textPrimary,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 },
@@ -470,14 +488,14 @@ fun MyProfileScreen(
                                             fontFamily = InterFontFamily,
                                             fontWeight = FontWeight.Medium,
                                             fontSize = 14.sp,
-                                            color = ProfileDangerRed
+                                            color = dangerRed
                                         )
                                     },
                                     leadingIcon = {
                                         Icon(
                                             imageVector = Icons.Outlined.DeleteOutline,
                                             contentDescription = null,
-                                            tint = ProfileDangerRed,
+                                            tint = dangerRed,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     },
@@ -505,14 +523,14 @@ fun MyProfileScreen(
                             fontWeight = FontWeight.Medium,
                             fontSize = 16.sp,
                             lineHeight = 20.sp,
-                            color = ProfileTextPrimary,
+                            color = textPrimary,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                         if (member.isAdmin) {
                             Surface(
                                 shape = RoundedCornerShape(50),
-                                color = ProfileAdminPillBg,
+                                color = adminPillBg,
                                 tonalElevation = 0.dp,
                                 shadowElevation = 0.dp,
                                 modifier = Modifier.testTag("profile_admin_badge")
@@ -522,7 +540,7 @@ fun MyProfileScreen(
                                     fontFamily = InterFontFamily,
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 12.sp,
-                                    color = ProfileAccentBlue,
+                                    color = adminPillText,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                                 )
                             }
@@ -532,7 +550,7 @@ fun MyProfileScreen(
                             fontFamily = InterFontFamily,
                             fontWeight = FontWeight.Normal,
                             fontSize = 11.sp,
-                            color = ProfileTextSecondary
+                            color = textSecondary
                         )
                     }
                 }
@@ -545,7 +563,7 @@ fun MyProfileScreen(
                     fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     fontSize = 12.sp,
-                    color = ProfileTextSecondary
+                    color = textSecondary
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
@@ -574,7 +592,7 @@ fun MyProfileScreen(
                                         .size(41.dp)
                                         .border(
                                             width = 2.5.dp,
-                                            color = ProfileTextPrimary,
+                                            color = textPrimary,
                                             shape = CircleShape
                                         )
                                         .padding(4.5.dp)
@@ -606,15 +624,15 @@ fun MyProfileScreen(
                     fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Normal,
                     fontSize = 11.sp,
-                    color = ProfileTextSecondary
+                    color = textSecondary
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // TARJETA DE DATOS (#F5F7FB, radio 16dp, padding 16dp)
+                // TARJETA DE DATOS
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = ProfileCardBg,
+                    color = cardBg,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
                     modifier = Modifier.fillMaxWidth()
@@ -639,7 +657,7 @@ fun MyProfileScreen(
                                 fontFamily = InterFontFamily,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 11.sp,
-                                color = ProfileTextSecondary
+                                color = textSecondary
                             )
                             Box(modifier = Modifier.fillMaxWidth()) {
                                 if (nicknameInput.isEmpty()) {
@@ -648,7 +666,7 @@ fun MyProfileScreen(
                                         fontFamily = InterFontFamily,
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 13.sp,
-                                        color = ProfileTextSecondary
+                                        color = textSecondary
                                     )
                                 }
                                 BasicTextField(
@@ -659,9 +677,9 @@ fun MyProfileScreen(
                                         fontFamily = InterFontFamily,
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 13.sp,
-                                        color = ProfileTextPrimary
+                                        color = textPrimary
                                     ),
-                                    cursorBrush = SolidColor(ProfileAccentBlue),
+                                    cursorBrush = SolidColor(accentBlue),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .focusRequester(nicknameFocusRequester)
@@ -672,7 +690,7 @@ fun MyProfileScreen(
 
                         HorizontalDivider(
                             thickness = 1.dp,
-                            color = ProfileDividerGray,
+                            color = dividerColor,
                             modifier = Modifier.padding(vertical = 12.dp)
                         )
 
@@ -696,14 +714,14 @@ fun MyProfileScreen(
                                     fontFamily = InterFontFamily,
                                     fontWeight = FontWeight.Normal,
                                     fontSize = 11.sp,
-                                    color = ProfileTextSecondary
+                                    color = textSecondary
                                 )
                                 Text(
                                     text = "${bioInput.length}/80",
                                     fontFamily = InterFontFamily,
                                     fontWeight = FontWeight.Normal,
                                     fontSize = 11.sp,
-                                    color = ProfileTextSecondary,
+                                    color = textSecondary,
                                     modifier = Modifier.testTag("profile_bio_counter")
                                 )
                             }
@@ -714,7 +732,7 @@ fun MyProfileScreen(
                                         fontFamily = InterFontFamily,
                                         fontWeight = FontWeight.Normal,
                                         fontSize = 13.sp,
-                                        color = ProfileTextSecondary
+                                        color = textSecondary
                                     )
                                 }
                                 BasicTextField(
@@ -726,9 +744,9 @@ fun MyProfileScreen(
                                         fontFamily = InterFontFamily,
                                         fontWeight = FontWeight.Normal,
                                         fontSize = 13.sp,
-                                        color = ProfileTextPrimary
+                                        color = textPrimary
                                     ),
-                                    cursorBrush = SolidColor(ProfileAccentBlue),
+                                    cursorBrush = SolidColor(accentBlue),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .focusRequester(bioFocusRequester)
@@ -747,7 +765,7 @@ fun MyProfileScreen(
                     fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp,
-                    color = ProfileTextPrimary
+                    color = textPrimary
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 FlowRow(
@@ -775,8 +793,8 @@ fun MyProfileScreen(
                         ) {
                             Surface(
                                 shape = RoundedCornerShape(50),
-                                color = if (isSelected) ProfileAccentBlue else ProfileWhiteBg,
-                                border = if (isSelected) null else BorderStroke(1.5.dp, ProfileBorderGray),
+                                color = if (isSelected) accentBlue else bgColor,
+                                border = if (isSelected) null else BorderStroke(1.5.dp, borderColor),
                                 tonalElevation = 0.dp,
                                 shadowElevation = 0.dp,
                                 modifier = Modifier.height(34.dp)
@@ -790,7 +808,7 @@ fun MyProfileScreen(
                                         fontFamily = InterFontFamily,
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 12.sp,
-                                        color = if (isSelected) Color.White else ProfileTextPrimary,
+                                        color = if (isSelected) onAccent else textPrimary,
                                         maxLines = 1
                                     )
                                 }
@@ -801,10 +819,10 @@ fun MyProfileScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // PRIVACIDAD (#F5F7FB, radio 16dp)
+                // PRIVACIDAD
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = ProfileCardBg,
+                    color = cardBg,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
                     modifier = Modifier.fillMaxWidth()
@@ -827,7 +845,7 @@ fun MyProfileScreen(
                                 fontFamily = InterFontFamily,
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 13.sp,
-                                color = ProfileTextPrimary
+                                color = textPrimary
                             )
                             Text(
                                 text = if (showLastSeenInput) {
@@ -838,7 +856,7 @@ fun MyProfileScreen(
                                 fontFamily = InterFontFamily,
                                 fontWeight = FontWeight.Normal,
                                 fontSize = 11.sp,
-                                color = ProfileTextSecondary,
+                                color = textSecondary,
                                 modifier = Modifier.testTag("profile_last_seen_subtitle")
                             )
                         }
@@ -850,15 +868,18 @@ fun MyProfileScreen(
                                     statusInput = ""
                                 }
                             },
+                            activeTrackColor = accentBlue,
+                            inactiveTrackColor = borderColor,
+                            thumbColor = if (isDarkTheme && showLastSeenInput) onAccent else Color.White,
                             modifier = Modifier.testTag("profile_online_switch")
                         )
                     }
                 }
             }
 
-            // BOTÓN GUARDAR fijo abajo (alto 48dp, píldora, #1A5FD4 activo / #C9CED8 deshabilitado)
+            // BOTÓN GUARDAR fijo abajo
             Surface(
-                color = ProfileWhiteBg,
+                color = bgColor,
                 tonalElevation = 0.dp,
                 shadowElevation = 0.dp,
                 modifier = Modifier.fillMaxWidth()
@@ -884,10 +905,10 @@ fun MyProfileScreen(
                     enabled = canSave,
                     shape = RoundedCornerShape(50),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = ProfileAccentBlue,
-                        contentColor = Color.White,
-                        disabledContainerColor = ProfileBorderGray,
-                        disabledContentColor = Color.White
+                        containerColor = accentBlue,
+                        contentColor = onAccent,
+                        disabledContainerColor = disabledBtnBg,
+                        disabledContentColor = disabledBtnText
                     ),
                     elevation = ButtonDefaults.buttonElevation(
                         defaultElevation = 0.dp,
@@ -916,20 +937,20 @@ fun MyProfileScreen(
     if (showRemovePhotoConfirm) {
         AlertDialog(
             onDismissRequest = { showRemovePhotoConfirm = false },
-            containerColor = ProfileWhiteBg,
+            containerColor = menuBg,
             title = {
                 Text(
                     text = "¿Quitar foto de perfil?",
                     fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
-                    color = ProfileTextPrimary
+                    color = textPrimary
                 )
             },
             text = {
                 Text(
                     text = "Tu avatar volverá a mostrar tus iniciales. El cambio se aplicará cuando toques Guardar cambios.",
                     fontFamily = InterFontFamily,
-                    color = ProfileTextSecondary
+                    color = textSecondary
                 )
             },
             confirmButton = {
@@ -945,7 +966,7 @@ fun MyProfileScreen(
                         text = "Quitar foto",
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
-                        color = ProfileDangerRed
+                        color = dangerRed
                     )
                 }
             },
@@ -958,7 +979,7 @@ fun MyProfileScreen(
                         text = "Cancelar",
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
-                        color = ProfileTextPrimary
+                        color = textPrimary
                     )
                 }
             }
@@ -968,20 +989,20 @@ fun MyProfileScreen(
     if (showDiscardConfirm) {
         AlertDialog(
             onDismissRequest = { showDiscardConfirm = false },
-            containerColor = ProfileWhiteBg,
+            containerColor = menuBg,
             title = {
                 Text(
                     text = "¿Salir sin guardar?",
                     fontFamily = InterFontFamily,
                     fontWeight = FontWeight.Medium,
-                    color = ProfileTextPrimary
+                    color = textPrimary
                 )
             },
             text = {
                 Text(
                     text = "Tienes cambios sin guardar en tu perfil. Si cierras ahora, se perderán.",
                     fontFamily = InterFontFamily,
-                    color = ProfileTextSecondary
+                    color = textSecondary
                 )
             },
             confirmButton = {
@@ -996,7 +1017,7 @@ fun MyProfileScreen(
                         text = "Salir",
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
-                        color = ProfileDangerRed
+                        color = dangerRed
                     )
                 }
             },
@@ -1009,7 +1030,7 @@ fun MyProfileScreen(
                         text = "Seguir editando",
                         fontFamily = InterFontFamily,
                         fontWeight = FontWeight.Medium,
-                        color = ProfileAccentBlue
+                        color = accentBlue
                     )
                 }
             }
@@ -1021,10 +1042,13 @@ fun MyProfileScreen(
 private fun CompactFlatSwitch(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    activeTrackColor: Color = ProfileAccentBlue,
+    inactiveTrackColor: Color = ProfileBorderGray,
+    thumbColor: Color = Color.White,
     modifier: Modifier = Modifier
 ) {
     val trackColor by animateColorAsState(
-        targetValue = if (checked) ProfileAccentBlue else ProfileBorderGray,
+        targetValue = if (checked) activeTrackColor else inactiveTrackColor,
         animationSpec = tween(durationMillis = 150),
         label = "switchTrackColor"
     )
@@ -1057,7 +1081,7 @@ private fun CompactFlatSwitch(
                     .offset(x = thumbOffset)
                     .size(16.dp)
                     .clip(CircleShape)
-                    .background(Color.White)
+                    .background(thumbColor)
             )
         }
     }
