@@ -12,6 +12,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -36,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
@@ -45,12 +48,13 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Router
-import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -82,6 +86,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -98,7 +106,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.BuildConfig
+import com.example.data.local.AppFontScale
+import com.example.data.local.AppThemeMode
 import com.example.data.local.PreferencesManager
+import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.OnlineGreen
 import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateUiState
@@ -120,7 +131,15 @@ fun SettingsScreen(
     onDownloadUpdate: (AppReleaseInfo) -> Unit,
     onResetUpdateState: () -> Unit,
     onOpenAdvanced: () -> Unit,
-    onOpenUpdates: () -> Unit = {}
+    onOpenUpdates: () -> Unit = {},
+    themeMode: AppThemeMode = if (isDarkTheme) AppThemeMode.DARK else AppThemeMode.SYSTEM,
+    fontScale: AppFontScale = AppFontScale.NORMAL,
+    onOpenAppearance: () -> Unit = onToggleTheme,
+    onOpenFontSize: () -> Unit = {},
+    onOpenWhatsNew: () -> Unit = {},
+    onOpenAdminPanel: () -> Unit = onOpenAdvanced,
+    onOpenDiagnostics: () -> Unit = onOpenAdvanced,
+    onOpenLicenses: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -139,29 +158,54 @@ fun SettingsScreen(
     }
 
     val notificationsActive = systemNotifGranted && notificationsEnabled
-    val hasUpdateBadge = updateState is AppUpdateUiState.UpdateAvailable ||
+    val hasNewUpdate = updateState is AppUpdateUiState.UpdateAvailable ||
         updateState is AppUpdateUiState.ReadyToInstall
-    val updateSubtitle = when (updateState) {
-        is AppUpdateUiState.UpdateAvailable -> "Nueva versión ${updateState.release.versionName}"
-        is AppUpdateUiState.Downloading -> "Descargando ${updateState.progressPercent.coerceAtLeast(0)}%"
-        is AppUpdateUiState.ReadyToInstall -> "Lista para instalar"
-        else -> "Versión ${BuildConfig.VERSION_NAME}"
-    }
+
+    val surfaceBg = if (isDarkTheme) MaterialTheme.colorScheme.background else Color.White
+    val sectionBlue = if (isDarkTheme) MaterialTheme.colorScheme.primary else Color(0xFF1A5FD4)
+    val inkPrimary = if (isDarkTheme) MaterialTheme.colorScheme.onSurface else Color(0xFF1B1F2A)
+    val inkSecondary = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFF5B6270)
+    val iconTint = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFF5B6270)
+    val chevronTint = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f) else Color(0xFF8E95A2)
+    val dividerColor = if (isDarkTheme) MaterialTheme.colorScheme.outline.copy(alpha = 0.18f) else Color(0xFFECEFF4)
+    val activeGreen = Color(0xFF1E8E4E)
+    val inactiveAmber = Color(0xFFA45F08)
+    val updateDotRed = Color(0xFFD93025)
+    val updateTextRed = Color(0xFFB3261E)
 
     Scaffold(
+        containerColor = surfaceBg,
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             TopAppBar(
-                title = { Text("Ajustes", style = MaterialTheme.typography.titleLarge) },
+                title = {
+                    Text(
+                        text = "Ajustes",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 20.sp
+                        ),
+                        color = inkPrimary
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack, modifier = Modifier.testTag("settings_back_button")) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.testTag("settings_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                            contentDescription = "Volver",
+                            tint = inkPrimary,
+                            modifier = Modifier.size(28.dp)
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface
+                    containerColor = surfaceBg,
+                    titleContentColor = inkPrimary,
+                    navigationIconContentColor = inkPrimary
                 )
             )
         }
@@ -177,154 +221,407 @@ fun SettingsScreen(
                     .fillMaxSize()
                     .widthIn(max = 650.dp)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text(
+                // Section: PREFERENCIAS
+                SettingsSectionHeader(
                     text = "PREFERENCIAS",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp)
+                    color = sectionBlue,
+                    topPadding = 10.dp
+                )
+                SettingsFlatRow(
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Notifications,
+                            contentDescription = null,
+                            tint = iconTint,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    },
+                    title = "Notificaciones",
+                    titleColor = inkPrimary,
+                    trailingContent = {
+                        Text(
+                            text = if (notificationsActive) "Activadas" else "Desactivadas",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = InterFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            ),
+                            color = if (notificationsActive) activeGreen else inactiveAmber,
+                            maxLines = 1
+                        )
+                    },
+                    showChevron = true,
+                    chevronTint = chevronTint,
+                    testTag = "settings_notifications_row",
+                    onClick = onOpenNotifications
+                )
+                SettingsInsetDivider(color = dividerColor)
+                SettingsFlatRow(
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.DarkMode,
+                            contentDescription = null,
+                            tint = iconTint,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    },
+                    title = "Apariencia",
+                    titleColor = inkPrimary,
+                    trailingContent = {
+                        Text(
+                            text = themeMode.label,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = InterFontFamily,
+                                fontSize = 12.sp
+                            ),
+                            color = inkSecondary,
+                            maxLines = 1,
+                            modifier = Modifier.testTag("settings_appearance_value")
+                        )
+                    },
+                    showChevron = true,
+                    chevronTint = chevronTint,
+                    testTag = "settings_appearance_row",
+                    onClick = onOpenAppearance
+                )
+                SettingsInsetDivider(color = dividerColor)
+                SettingsFlatRow(
+                    leadingIcon = {
+                        Text(
+                            text = "Aa",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = InterFontFamily,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium
+                            ),
+                            color = iconTint,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    },
+                    title = "Tamaño de letra",
+                    titleColor = inkPrimary,
+                    trailingContent = {
+                        Text(
+                            text = fontScale.label,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = InterFontFamily,
+                                fontSize = 12.sp
+                            ),
+                            color = inkSecondary,
+                            maxLines = 1,
+                            modifier = Modifier.testTag("settings_font_size_value")
+                        )
+                    },
+                    showChevron = true,
+                    chevronTint = chevronTint,
+                    testTag = "settings_font_size_row",
+                    onClick = onOpenFontSize
                 )
 
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        SettingsActionRow(
-                            icon = Icons.Outlined.Notifications,
-                            title = "Notificaciones",
-                            subtitle = if (notificationsActive) "Activadas" else "Desactivadas",
-                            subtitleColor = if (notificationsActive) OnlineGreen else MaterialTheme.colorScheme.error,
-                            testTag = "settings_notifications_row",
-                            onClick = onOpenNotifications
+                // Section: APLICACIÓN
+                SettingsSectionHeader(
+                    text = "APLICACIÓN",
+                    color = sectionBlue
+                )
+                SettingsFlatRow(
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.FileDownload,
+                            contentDescription = null,
+                            tint = iconTint,
+                            modifier = Modifier.size(22.dp)
                         )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onToggleTheme() }
-                                .padding(horizontal = 16.dp, vertical = 14.dp)
-                                .testTag("settings_theme_row"),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.DarkMode,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
+                    },
+                    title = "Actualizaciones",
+                    titleColor = inkPrimary,
+                    trailingContent = {
+                        when {
+                            hasNewUpdate -> {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(updateDotRed)
+                                            .testTag("settings_update_row_badge_dot")
+                                    )
+                                    Text(
+                                        text = "Nueva",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFamily = InterFontFamily,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        ),
+                                        color = updateTextRed,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                            updateState is AppUpdateUiState.Downloading -> {
                                 Text(
-                                    text = "Tema oscuro",
-                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = if (isDarkTheme) "Activado" else "Desactivado",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = "${updateState.progressPercent.coerceAtLeast(0)}%",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 12.sp
+                                    ),
+                                    color = inkSecondary,
+                                    maxLines = 1
                                 )
                             }
-                            Switch(
-                                checked = isDarkTheme,
-                                onCheckedChange = { onToggleTheme() }
-                            )
+                            else -> {
+                                Text(
+                                    text = "Al día",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 12.sp
+                                    ),
+                                    color = inkSecondary,
+                                    maxLines = 1
+                                )
+                            }
                         }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
-                        SettingsActionRow(
-                            icon = Icons.Outlined.FileDownload,
-                            title = "Actualizaciones",
-                            subtitle = updateSubtitle,
-                            subtitleColor = if (hasUpdateBadge) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            showBadgeDot = hasUpdateBadge,
-                            testTag = "settings_update_row",
-                            onClick = onOpenUpdates
+                    },
+                    showChevron = true,
+                    chevronTint = chevronTint,
+                    testTag = "settings_update_row",
+                    onClick = onOpenUpdates
+                )
+                SettingsInsetDivider(color = dividerColor)
+                SettingsFlatRow(
+                    leadingIcon = {
+                        FourPointSparkleOutlineIcon(
+                            tint = iconTint,
+                            modifier = Modifier.size(22.dp)
                         )
-                    }
-                }
-
-                if (isAdmin) {
-                    Text(
-                        text = "ADMINISTRADOR",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.8.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 4.dp)
-                    )
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
-                    ) {
-                        SettingsActionRow(
-                            icon = Icons.Outlined.AdminPanelSettings,
-                            title = "Avanzado",
-                            subtitle = "Diagnóstico de alertas y llamadas",
-                            testTag = "settings_advanced_row",
-                            onClick = onOpenAdvanced
-                        )
-                    }
-                }
-
-                Text(
-                    text = "ACERCA DE",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp)
+                    },
+                    title = "Novedades de esta versión",
+                    titleColor = inkPrimary,
+                    showChevron = true,
+                    chevronTint = chevronTint,
+                    testTag = "settings_whats_new_row",
+                    onClick = onOpenWhatsNew
                 )
 
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                    ),
-                    modifier = Modifier.testTag("settings_about_card")
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                // Section: ADMINISTRADOR (admin only)
+                if (isAdmin) {
+                    SettingsSectionHeader(
+                        text = "ADMINISTRADOR",
+                        color = sectionBlue
+                    )
+                    SettingsFlatRow(
+                        leadingIcon = {
                             Icon(
-                                imageVector = Icons.Outlined.Info,
+                                imageVector = Icons.Outlined.Shield,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = iconTint,
                                 modifier = Modifier.size(22.dp)
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "FamiChat v${BuildConfig.VERSION_NAME}",
-                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.onSurface
+                        },
+                        title = "Administración",
+                        titleColor = inkPrimary,
+                        showChevron = true,
+                        chevronTint = chevronTint,
+                        testTag = "settings_admin_row",
+                        onClick = onOpenAdminPanel
+                    )
+                    SettingsInsetDivider(color = dividerColor)
+                    SettingsFlatRow(
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.MonitorHeart,
+                                contentDescription = null,
+                                tint = iconTint,
+                                modifier = Modifier.size(22.dp)
                             )
-                        }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
-                        Text(
-                            text = "Emojis animados: Noto Emoji Animation de Google, licencia CC BY 4.0",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.testTag("settings_about_noto_credit")
-                        )
-                    }
+                        },
+                        title = "Diagnóstico",
+                        titleColor = inkPrimary,
+                        showChevron = true,
+                        chevronTint = chevronTint,
+                        testTag = "settings_diagnostics_row",
+                        onClick = onOpenDiagnostics
+                    )
                 }
+
+                // Section: ACERCA DE
+                SettingsSectionHeader(
+                    text = "ACERCA DE",
+                    color = sectionBlue
+                )
+                SettingsFlatRow(
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = null,
+                            tint = iconTint,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    },
+                    title = "Versión",
+                    titleColor = inkPrimary,
+                    trailingContent = {
+                        Text(
+                            text = BuildConfig.VERSION_NAME,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = InterFontFamily,
+                                fontSize = 12.sp
+                            ),
+                            color = inkSecondary,
+                            maxLines = 1,
+                            modifier = Modifier.testTag("settings_version_value")
+                        )
+                    },
+                    showChevron = false,
+                    chevronTint = chevronTint,
+                    testTag = "settings_version_row",
+                    onClick = null
+                )
+                SettingsInsetDivider(color = dividerColor)
+                SettingsFlatRow(
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Description,
+                            contentDescription = null,
+                            tint = iconTint,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    },
+                    title = "Licencias",
+                    titleColor = inkPrimary,
+                    showChevron = true,
+                    chevronTint = chevronTint,
+                    testTag = "settings_licenses_row",
+                    onClick = onOpenLicenses
+                )
+
+                // Generous bottom breathing room so the last row never sticks to the bottom edge
+                Spacer(modifier = Modifier.height(44.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsSectionHeader(
+    text: String,
+    color: Color,
+    topPadding: androidx.compose.ui.unit.Dp = 22.dp
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall.copy(
+            fontFamily = InterFontFamily,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.6.sp
+        ),
+        color = color,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = topPadding, bottom = 6.dp)
+    )
+}
+
+@Composable
+private fun SettingsInsetDivider(color: Color) {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 60.dp, end = 20.dp),
+        thickness = 0.75.dp,
+        color = color
+    )
+}
+
+@Composable
+private fun SettingsFlatRow(
+    leadingIcon: @Composable () -> Unit,
+    title: String,
+    titleColor: Color,
+    trailingContent: (@Composable () -> Unit)? = null,
+    showChevron: Boolean,
+    chevronTint: Color,
+    testTag: String,
+    onClick: (() -> Unit)?
+) {
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .heightIn(min = 48.dp)
+        .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+        .padding(horizontal = 20.dp, vertical = 12.dp)
+        .testTag(testTag)
+
+    Row(
+        modifier = rowModifier,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .widthIn(min = 24.dp)
+                .heightIn(min = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            leadingIcon()
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontFamily = InterFontFamily,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Normal
+            ),
+            color = titleColor,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        if (trailingContent != null) {
+            Spacer(modifier = Modifier.width(10.dp))
+            trailingContent()
+        }
+        if (showChevron) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = chevronTint,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun FourPointSparkleOutlineIcon(
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+        val cy = h / 2f
+        val outer = minOf(w, h) * 0.42f
+        val ctrl = minOf(w, h) * 0.08f
+        val path = Path().apply {
+            moveTo(cx, cy - outer)
+            quadraticTo(cx + ctrl, cy - ctrl, cx + outer, cy)
+            quadraticTo(cx + ctrl, cy + ctrl, cx, cy + outer)
+            quadraticTo(cx - ctrl, cy + ctrl, cx - outer, cy)
+            quadraticTo(cx - ctrl, cy - ctrl, cx, cy - outer)
+            close()
+        }
+        drawPath(
+            path = path,
+            color = tint,
+            style = Stroke(
+                width = 1.7.dp.toPx(),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
+        )
     }
 }
 

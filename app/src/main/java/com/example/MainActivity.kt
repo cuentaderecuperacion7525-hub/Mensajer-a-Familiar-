@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.data.local.AppFontScale
+import com.example.data.local.AppThemeMode
 import com.example.data.local.PreferencesManager
 import com.example.data.model.CallType
 import com.example.data.model.ChatType
@@ -61,14 +64,18 @@ import com.example.ui.screens.AdminAdvancedSettingsScreen
 import com.example.ui.screens.AdminDiagnosticsScreen
 import com.example.ui.screens.AdminPanelScreen
 import com.example.ui.screens.AppUpdatesScreen
+import com.example.ui.screens.AppearanceSettingsScreen
 import com.example.ui.screens.CallOverlayScreen
 import com.example.ui.screens.ChatRoomScreen
 import com.example.ui.screens.FamilySetupScreen
+import com.example.ui.screens.FontSizeSettingsScreen
 import com.example.ui.screens.IncomingCallOverlay
+import com.example.ui.screens.LicensesScreen
 import com.example.ui.screens.MainHomeScreen
 import com.example.ui.screens.NotificationSettingsScreen
 import com.example.ui.screens.ProfileSelectorScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.WhatsNewScreen
 import com.example.ui.theme.FamiChatTheme
 import com.example.ui.viewmodel.FamilyViewModel
 import com.example.ui.viewmodel.MainTab
@@ -85,6 +92,10 @@ object Routes {
     const val SELECTOR = "selector"
     const val HOME = "home"
     const val SETTINGS = "settings"
+    const val SETTINGS_APPEARANCE = "settings_appearance"
+    const val SETTINGS_FONT_SIZE = "settings_font_size"
+    const val SETTINGS_WHATS_NEW = "settings_whats_new"
+    const val SETTINGS_LICENSES = "settings_licenses"
     const val UPDATES = "updates"
     const val NOTIFICATIONS = "notifications"
     const val ADMIN_ADVANCED = "admin_advanced"
@@ -115,7 +126,14 @@ class MainActivity : ComponentActivity() {
             val appContext = context.applicationContext
             val prefs = remember { PreferencesManager(appContext) }
             val scope = rememberCoroutineScope()
-            val isDarkTheme by prefs.isDarkThemeFlow.collectAsStateWithLifecycle(initialValue = false)
+            val themeMode by prefs.themeModeFlow.collectAsStateWithLifecycle(initialValue = AppThemeMode.SYSTEM)
+            val fontScalePref by prefs.fontScaleFlow.collectAsStateWithLifecycle(initialValue = AppFontScale.NORMAL)
+            val systemDark = isSystemInDarkTheme()
+            val isDarkTheme = when (themeMode) {
+                AppThemeMode.LIGHT -> false
+                AppThemeMode.DARK -> true
+                AppThemeMode.SYSTEM -> systemDark
+            }
 
             val view = LocalView.current
             if (!view.isInEditMode) {
@@ -132,10 +150,10 @@ class MainActivity : ComponentActivity() {
 
             FamiChatTheme(
                 darkTheme = isDarkTheme,
+                fontScaleMultiplier = fontScalePref.multiplier,
                 onToggleTheme = {
                     scope.launch {
-                        val current = prefs.isDarkThemeFlow.first()
-                        prefs.setDarkTheme(!current)
+                        prefs.setThemeMode(if (isDarkTheme) AppThemeMode.LIGHT else AppThemeMode.DARK)
                     }
                 }
             ) {
@@ -327,6 +345,8 @@ fun FamiChatApp(
     val updateRepoSlug by vm.updateRepoSlug.collectAsStateWithLifecycle()
     val updateState by vm.updateState.collectAsStateWithLifecycle()
     val lastUpdateCheckAt by vm.lastUpdateCheckAt.collectAsStateWithLifecycle()
+    val themeMode by vm.themeMode.collectAsStateWithLifecycle()
+    val fontScale by vm.fontScale.collectAsStateWithLifecycle()
     val activeCall by vm.activeCall.collectAsStateWithLifecycle()
     val incomingCall by vm.incomingCall.collectAsStateWithLifecycle()
     val voiceRecording by vm.voiceRecording.collectAsStateWithLifecycle()
@@ -552,7 +572,8 @@ fun FamiChatApp(
                         onSaveNote = vm::saveFamilyNote,
                         onDeleteNote = vm::deleteFamilyNote,
                         onOpenSettings = { navigateSingleTop(Routes.SETTINGS) },
-                        onOpenNotifications = { navigateSingleTop(Routes.NOTIFICATIONS) }
+                        onOpenNotifications = { navigateSingleTop(Routes.NOTIFICATIONS) },
+                        isSwitchPinActive = switchPin.isNotBlank()
                     )
                 }
             }
@@ -580,9 +601,68 @@ fun FamiChatApp(
                                 navigateSingleTop(Routes.ADMIN_ADVANCED)
                             }
                         },
-                        onOpenUpdates = { navigateSingleTop(Routes.UPDATES) }
+                        onOpenUpdates = { navigateSingleTop(Routes.UPDATES) },
+                        themeMode = themeMode,
+                        fontScale = fontScale,
+                        onOpenAppearance = { navigateSingleTop(Routes.SETTINGS_APPEARANCE) },
+                        onOpenFontSize = { navigateSingleTop(Routes.SETTINGS_FONT_SIZE) },
+                        onOpenWhatsNew = { navigateSingleTop(Routes.SETTINGS_WHATS_NEW) },
+                        onOpenAdminPanel = {
+                            if (member.isAdmin) {
+                                navigateSingleTop(Routes.ADMIN)
+                            }
+                        },
+                        onOpenDiagnostics = {
+                            if (member.isAdmin) {
+                                navigateSingleTop(Routes.ADMIN_DIAGNOSTICS)
+                            }
+                        },
+                        onOpenLicenses = { navigateSingleTop(Routes.SETTINGS_LICENSES) }
                     )
                 }
+            }
+
+            composable(Routes.SETTINGS_APPEARANCE) {
+                AppearanceSettingsScreen(
+                    selectedMode = themeMode,
+                    isDarkTheme = isDarkTheme,
+                    onSelectMode = vm::setThemeMode,
+                    onBack = { safePopBack(Routes.SETTINGS_APPEARANCE) }
+                )
+            }
+
+            composable(Routes.SETTINGS_FONT_SIZE) {
+                FontSizeSettingsScreen(
+                    selectedScale = fontScale,
+                    isDarkTheme = isDarkTheme,
+                    onSelectScale = vm::setFontScale,
+                    onBack = { safePopBack(Routes.SETTINGS_FONT_SIZE) }
+                )
+            }
+
+            composable(Routes.SETTINGS_WHATS_NEW) {
+                val matchingNotes = when (val st = updateState) {
+                    is com.example.util.AppUpdateUiState.UpdateAvailable ->
+                        if (st.release.versionName == BuildConfig.VERSION_NAME) st.release.releaseNotes else ""
+                    is com.example.util.AppUpdateUiState.Downloading ->
+                        if (st.release.versionName == BuildConfig.VERSION_NAME) st.release.releaseNotes else ""
+                    is com.example.util.AppUpdateUiState.ReadyToInstall ->
+                        if (st.release.versionName == BuildConfig.VERSION_NAME) st.release.releaseNotes else ""
+                    else -> ""
+                }
+                WhatsNewScreen(
+                    installedVersionName = BuildConfig.VERSION_NAME,
+                    versionReleaseNotes = matchingNotes,
+                    isDarkTheme = isDarkTheme,
+                    onBack = { safePopBack(Routes.SETTINGS_WHATS_NEW) }
+                )
+            }
+
+            composable(Routes.SETTINGS_LICENSES) {
+                LicensesScreen(
+                    isDarkTheme = isDarkTheme,
+                    onBack = { safePopBack(Routes.SETTINGS_LICENSES) }
+                )
             }
 
             composable(Routes.UPDATES) {

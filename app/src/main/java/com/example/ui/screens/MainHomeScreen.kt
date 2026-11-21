@@ -138,6 +138,7 @@ import com.example.data.model.ShoppingItemEntity
 import androidx.compose.material.icons.filled.NotificationsActive
 import com.example.ui.components.CreateStatusDialog
 import com.example.ui.components.FamilyStatusStrip
+import com.example.ui.components.HomeOverflowMenuPopup
 import com.example.ui.components.MemberAvatar
 import com.example.ui.components.MemberStatusGroup
 import com.example.ui.components.MessageStatusIcon
@@ -207,7 +208,8 @@ fun MainHomeScreen(
     onSaveNote: (String?, String, String, String, Boolean) -> Unit,
     onDeleteNote: (String) -> Unit,
     onOpenSettings: () -> Unit = {},
-    onOpenNotifications: () -> Unit = {}
+    onOpenNotifications: () -> Unit = {},
+    isSwitchPinActive: Boolean = true
 ) {
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -662,252 +664,16 @@ fun MainHomeScreen(
                     }
 
                     if (showOverflowMenu) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.22f))
-                                .clickable { showOverflowMenu = false }
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(22.dp),
-                                color = MaterialTheme.colorScheme.surface,
-                                tonalElevation = 4.dp,
-                                shadowElevation = 12.dp,
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(top = 6.dp, end = 12.dp)
-                                    .width(304.dp)
-                                    .clickable(enabled = false) {}
-                                    .testTag("home_more_menu")
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(vertical = 8.dp)
-                                ) {
-                                    // Section: CUENTA
-                                    Text(
-                                        text = "CUENTA",
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 0.8.sp
-                                        ),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 6.dp)
-                                    )
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                showOverflowMenu = false
-                                                showProfileOptionsDialog = true
-                                            }
-                                            .padding(horizontal = 20.dp, vertical = 12.dp)
-                                            .testTag("menu_profile_options"),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Person,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(16.dp))
-                                        Text(
-                                            text = "Mi perfil",
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                showOverflowMenu = false
-                                                onSwitchProfile()
-                                            }
-                                            .padding(horizontal = 20.dp, vertical = 12.dp)
-                                            .testTag("menu_switch_profile"),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.SwapHoriz,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(16.dp))
-                                        Text(
-                                            text = "Cambiar de perfil",
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(vertical = 6.dp),
-                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                                    )
-
-                                    // Section: PREFERENCIAS
-                                    Text(
-                                        text = "PREFERENCIAS",
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 0.8.sp
-                                        ),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp)
-                                    )
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                showOverflowMenu = false
-                                                onOpenNotifications()
-                                            }
-                                            .padding(horizontal = 20.dp, vertical = 10.dp)
-                                            .testTag("menu_toggle_push_notifications"),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Notifications,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(16.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "Notificaciones",
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = if (hasNotifPermission && notificationsEnabled) "Activadas" else "Desactivadas",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = if (hasNotifPermission && notificationsEnabled) OnlineGreen else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { onToggleTheme() }
-                                            .padding(horizontal = 20.dp, vertical = 12.dp)
-                                            .testTag("menu_toggle_theme"),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.DarkMode,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(16.dp))
-                                        Text(
-                                            text = "Tema oscuro",
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        MenuPillSwitch(
-                                            checked = isDarkTheme,
-                                            onCheckedChange = { onToggleTheme() }
-                                        )
-                                    }
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                showOverflowMenu = false
-                                                onOpenSettings()
-                                            }
-                                            .padding(horizontal = 20.dp, vertical = 12.dp)
-                                            .testTag("menu_settings"),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Settings,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(16.dp))
-                                        Text(
-                                            text = "Ajustes",
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        if (hasUpdateAvailable) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(8.dp)
-                                                    .clip(CircleShape)
-                                                    .background(brandBlue)
-                                                    .testTag("menu_settings_update_dot")
-                                            )
-                                        }
-                                    }
-
-                                    if (activeMember.isAdmin) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(vertical = 6.dp),
-                                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                                        )
-                                        // Section: FAMILIA
-                                        Text(
-                                            text = "FAMILIA",
-                                            style = MaterialTheme.typography.labelMedium.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = 0.8.sp
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp)
-                                        )
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    showOverflowMenu = false
-                                                    onOpenAdminPanel()
-                                                }
-                                                .padding(horizontal = 20.dp, vertical = 10.dp)
-                                                .testTag("menu_admin_panel"),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Outlined.Shield,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.size(22.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(16.dp))
-                                            Text(
-                                                text = "Panel de\nadministración",
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            Surface(
-                                                shape = RoundedCornerShape(50),
-                                                color = if (isDarkTheme) MaterialTheme.colorScheme.primaryContainer
-                                                else Color(0xFFE8F0FE)
-                                            ) {
-                                                Text(
-                                                    text = "Admin",
-                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        HomeOverflowMenuPopup(
+                            isAdmin = activeMember.isAdmin,
+                            isDarkTheme = isDarkTheme,
+                            isSwitchPinActive = isSwitchPinActive,
+                            onDismiss = { showOverflowMenu = false },
+                            onOpenProfile = { showProfileOptionsDialog = true },
+                            onSwitchProfile = onSwitchProfile,
+                            onOpenSettings = onOpenSettings,
+                            onOpenAdminPanel = onOpenAdminPanel
+                        )
                     }
                 }
             }

@@ -6,6 +6,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.calls.WebRtcCallManager
+import com.example.data.local.AppFontScale
+import com.example.data.local.AppThemeMode
 import com.example.data.local.PreferencesManager
 import com.example.data.model.CallDirection
 import com.example.data.model.CallIceCandidateEntity
@@ -440,6 +442,12 @@ class FamilyViewModel(
 
     val isDarkTheme: StateFlow<Boolean> = prefs.isDarkThemeFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val themeMode: StateFlow<AppThemeMode> = prefs.themeModeFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AppThemeMode.SYSTEM)
+
+    val fontScale: StateFlow<AppFontScale> = prefs.fontScaleFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AppFontScale.NORMAL)
 
     val notificationsEnabled: StateFlow<Boolean> = prefs.notificationsEnabledFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
@@ -1328,8 +1336,29 @@ class FamilyViewModel(
 
     fun toggleTheme() {
         viewModelScope.launch {
-            val current = prefs.isDarkThemeFlow.first()
-            prefs.setDarkTheme(!current)
+            val currentMode = prefs.themeModeFlow.first()
+            val currentlyDark = when (currentMode) {
+                AppThemeMode.LIGHT -> false
+                AppThemeMode.DARK -> true
+                AppThemeMode.SYSTEM -> {
+                    val nightMask = appContext.resources.configuration.uiMode and
+                        android.content.res.Configuration.UI_MODE_NIGHT_MASK
+                    nightMask == android.content.res.Configuration.UI_MODE_NIGHT_YES
+                }
+            }
+            prefs.setThemeMode(if (currentlyDark) AppThemeMode.LIGHT else AppThemeMode.DARK)
+        }
+    }
+
+    fun setThemeMode(mode: AppThemeMode) {
+        viewModelScope.launch {
+            prefs.setThemeMode(mode)
+        }
+    }
+
+    fun setFontScale(scale: AppFontScale) {
+        viewModelScope.launch {
+            prefs.setFontScale(scale)
         }
     }
 

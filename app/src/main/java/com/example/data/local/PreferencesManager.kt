@@ -15,6 +15,38 @@ import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "nidofamiliar_prefs")
 
+enum class AppThemeMode(val key: String, val label: String) {
+    LIGHT("light", "Claro"),
+    DARK("dark", "Oscuro"),
+    SYSTEM("system", "Automático");
+
+    companion object {
+        fun fromKey(raw: String?): AppThemeMode? = entries.find { it.key == raw }
+    }
+}
+
+enum class AppFontScale(val key: String, val label: String, val multiplier: Float) {
+    SMALL("small", "Pequeño", 0.90f),
+    NORMAL("normal", "Normal", 1.00f),
+    LARGE("large", "Grande", 1.15f);
+
+    companion object {
+        fun fromKey(raw: String?): AppFontScale = entries.find { it.key == raw } ?: NORMAL
+        fun fromStep(step: Int): AppFontScale = when (step.coerceIn(0, 2)) {
+            0 -> SMALL
+            2 -> LARGE
+            else -> NORMAL
+        }
+    }
+
+    val stepIndex: Int
+        get() = when (this) {
+            SMALL -> 0
+            NORMAL -> 1
+            LARGE -> 2
+        }
+}
+
 data class InitialSessionSnapshot(
     val activeFamilyId: String?,
     val activeMemberId: String?,
@@ -46,6 +78,8 @@ class PreferencesManager(private val context: Context) {
         private val KEY_CACHED_MEMBERS_JSON = stringPreferencesKey("cached_members_json")
         private val KEY_SHOW_LAST_SEEN_MAP_JSON = stringPreferencesKey("show_last_seen_map_json")
         private val KEY_LAST_UPDATE_CHECK_AT = longPreferencesKey("last_update_check_at")
+        private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        private val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
         const val DEFAULT_PIN = "7525"
         const val DEFAULT_SWITCH_PIN = "2580"
         const val DEFAULT_TURN_URL = "turn:openrelay.metered.ca:80"
@@ -75,7 +109,24 @@ class PreferencesManager(private val context: Context) {
     }
 
     val isDarkThemeFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[KEY_IS_DARK_THEME] ?: false
+        when (AppThemeMode.fromKey(prefs[KEY_THEME_MODE])) {
+            AppThemeMode.DARK -> true
+            AppThemeMode.LIGHT -> false
+            else -> prefs[KEY_IS_DARK_THEME] ?: false
+        }
+    }
+
+    val themeModeFlow: Flow<AppThemeMode> = context.dataStore.data.map { prefs ->
+        AppThemeMode.fromKey(prefs[KEY_THEME_MODE])
+            ?: when (prefs[KEY_IS_DARK_THEME]) {
+                true -> AppThemeMode.DARK
+                false -> AppThemeMode.LIGHT
+                null -> AppThemeMode.SYSTEM
+            }
+    }
+
+    val fontScaleFlow: Flow<AppFontScale> = context.dataStore.data.map { prefs ->
+        AppFontScale.fromKey(prefs[KEY_FONT_SCALE])
     }
 
     val updateRepoSlugFlow: Flow<String> = context.dataStore.data.map { prefs ->
@@ -272,6 +323,24 @@ class PreferencesManager(private val context: Context) {
     suspend fun setDarkTheme(isDark: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_IS_DARK_THEME] = isDark
+            prefs[KEY_THEME_MODE] = if (isDark) AppThemeMode.DARK.key else AppThemeMode.LIGHT.key
+        }
+    }
+
+    suspend fun setThemeMode(mode: AppThemeMode) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_THEME_MODE] = mode.key
+            when (mode) {
+                AppThemeMode.DARK -> prefs[KEY_IS_DARK_THEME] = true
+                AppThemeMode.LIGHT -> prefs[KEY_IS_DARK_THEME] = false
+                AppThemeMode.SYSTEM -> prefs.remove(KEY_IS_DARK_THEME)
+            }
+        }
+    }
+
+    suspend fun setFontScale(scale: AppFontScale) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_FONT_SCALE] = scale.key
         }
     }
 

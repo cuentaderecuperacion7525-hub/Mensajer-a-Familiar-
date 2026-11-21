@@ -198,7 +198,7 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `settings hides Avanzado for non admin and shows it for admin`() {
+  fun `settings hides Administrador section for non admin and shows Administracion and Diagnostico for admin`() {
     val isAdminState = androidx.compose.runtime.mutableStateOf(false)
     composeTestRule.setContent {
       SettingsScreen(
@@ -219,11 +219,15 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("settings_notifications_row").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("settings_advanced_row").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("settings_admin_row").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("settings_diagnostics_row").assertDoesNotExist()
+    assertEquals(0, composeTestRule.onAllNodesWithText("ADMINISTRADOR").fetchSemanticsNodes().size)
 
     composeTestRule.runOnUiThread { isAdminState.value = true }
     composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithTag("settings_advanced_row").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("ADMINISTRADOR").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("settings_admin_row").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("settings_diagnostics_row").performScrollTo().assertIsDisplayed()
   }
 
   @Test
@@ -1513,32 +1517,46 @@ class ExampleRobolectricTest {
 
   @Test
   @Config(qualifiers = "w411dp-h891dp")
-  fun `settings screen shows Acerca de section with Google Noto Emoji credit for all members`() {
+  fun `settings screen shows Acerca de with Version and Licencias and LicensesScreen shows Noto Emoji credit`() {
+    val showLicenses = androidx.compose.runtime.mutableStateOf(false)
     composeTestRule.setContent {
-      SettingsScreen(
-        isAdmin = false,
-        isDarkTheme = false,
-        notificationsEnabled = true,
-        updateRepoSlug = "",
-        updateState = AppUpdateUiState.Idle,
-        onBack = {},
-        onOpenNotifications = {},
-        onToggleTheme = {},
-        onCheckForUpdate = {},
-        onSaveUpdateRepoSlug = {},
-        onDownloadUpdate = {},
-        onResetUpdateState = {},
-        onOpenAdvanced = {}
-      )
+      if (!showLicenses.value) {
+        SettingsScreen(
+          isAdmin = false,
+          isDarkTheme = false,
+          notificationsEnabled = true,
+          updateRepoSlug = "",
+          updateState = AppUpdateUiState.Idle,
+          onBack = {},
+          onOpenNotifications = {},
+          onToggleTheme = {},
+          onCheckForUpdate = {},
+          onSaveUpdateRepoSlug = {},
+          onDownloadUpdate = {},
+          onResetUpdateState = {},
+          onOpenAdvanced = {},
+          onOpenLicenses = { showLicenses.value = true }
+        )
+      } else {
+        com.example.ui.screens.LicensesScreen(
+          isDarkTheme = false,
+          onBack = { showLicenses.value = false }
+        )
+      }
     }
     composeTestRule.waitForIdle()
 
     composeTestRule.onNodeWithText("ACERCA DE").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithTag("settings_about_card").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("settings_version_row").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText(BuildConfig.VERSION_NAME, useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("settings_licenses_row").performScrollTo().assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+
     composeTestRule
       .onNodeWithText("Emojis animados: Noto Emoji Animation de Google, licencia CC BY 4.0")
       .performScrollTo()
       .assertIsDisplayed()
+    composeTestRule.onNodeWithTag("license_material_icons").performScrollTo().assertIsDisplayed()
   }
 
   @Test
@@ -2447,16 +2465,251 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("settings_update_row").performClick()
     assertTrue(openedUpdates)
 
-    // In MainHomeScreen: 3-dot icon shows subtle blue dot, overflow menu shows dot on Ajustes and NO Buscar actualización
+    // In MainHomeScreen: 3-dot icon shows subtle blue dot, overflow menu shows clean Ajustes row and NO Buscar actualización
     composeTestRule.runOnUiThread { showHome.value = true }
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("home_more_menu_update_dot", useUnmergedTree = true).assertIsDisplayed()
     composeTestRule.onNodeWithTag("home_more_menu_button").performClick()
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("menu_settings").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithTag("menu_settings_update_dot", useUnmergedTree = true).assertIsDisplayed()
     composeTestRule.onNodeWithTag("menu_check_update").assertDoesNotExist()
     assertEquals(0, composeTestRule.onAllNodesWithText("Buscar actualización", substring = true).fetchSemanticsNodes().size)
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `settings shows Al dia without red dot when up to date and supports Appearance, FontSize, and WhatsNew subscreens`() {
+    var selectedMode = com.example.data.local.AppThemeMode.SYSTEM
+    var selectedScale = com.example.data.local.AppFontScale.NORMAL
+    val screenState = androidx.compose.runtime.mutableStateOf("settings")
+    val notesState = androidx.compose.runtime.mutableStateOf("")
+
+    composeTestRule.setContent {
+      when (screenState.value) {
+        "settings" -> SettingsScreen(
+          isAdmin = false,
+          isDarkTheme = false,
+          notificationsEnabled = false,
+          updateRepoSlug = "",
+          updateState = AppUpdateUiState.UpToDate(
+            installedVersionName = BuildConfig.VERSION_NAME,
+            installedVersionCode = BuildConfig.VERSION_CODE
+          ),
+          themeMode = selectedMode,
+          fontScale = selectedScale,
+          onBack = {},
+          onOpenNotifications = {},
+          onToggleTheme = {},
+          onCheckForUpdate = {},
+          onSaveUpdateRepoSlug = {},
+          onDownloadUpdate = {},
+          onResetUpdateState = {},
+          onOpenAdvanced = {},
+          onOpenAppearance = { screenState.value = "appearance" },
+          onOpenFontSize = { screenState.value = "font_size" },
+          onOpenWhatsNew = { screenState.value = "whats_new" }
+        )
+        "appearance" -> com.example.ui.screens.AppearanceSettingsScreen(
+          selectedMode = selectedMode,
+          isDarkTheme = false,
+          onSelectMode = { selectedMode = it },
+          onBack = { screenState.value = "settings" }
+        )
+        "font_size" -> com.example.ui.screens.FontSizeSettingsScreen(
+          selectedScale = selectedScale,
+          isDarkTheme = false,
+          onSelectScale = { selectedScale = it },
+          onBack = { screenState.value = "settings" }
+        )
+        "whats_new" -> com.example.ui.screens.WhatsNewScreen(
+          installedVersionName = BuildConfig.VERSION_NAME,
+          versionReleaseNotes = notesState.value,
+          isDarkTheme = false,
+          onBack = { screenState.value = "settings" }
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Up to date shows "Al día" and NO red dot or "Nueva"
+    composeTestRule.onNodeWithText("PREFERENCIAS").assertIsDisplayed()
+    composeTestRule.onNodeWithText("APLICACIÓN").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Desactivadas", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Automático", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Normal", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Al día", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("settings_update_row_badge_dot", useUnmergedTree = true).assertDoesNotExist()
+    assertEquals(0, composeTestRule.onAllNodesWithText("Nueva", useUnmergedTree = true).fetchSemanticsNodes().size)
+
+    // Appearance sub-screen
+    composeTestRule.onNodeWithTag("settings_appearance_row").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Claro").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Oscuro").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Automático (igual que el teléfono)").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("appearance_option_dark").performClick()
+    assertEquals(com.example.data.local.AppThemeMode.DARK, selectedMode)
+    composeTestRule.onNodeWithTag("appearance_back_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Oscuro", useUnmergedTree = true).assertIsDisplayed()
+
+    // Font size sub-screen
+    composeTestRule.onNodeWithTag("settings_font_size_row").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Así se verá el texto de tus mensajes.").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("font_size_slider").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("font_size_option_large").performClick()
+    assertEquals(com.example.data.local.AppFontScale.LARGE, selectedScale)
+    composeTestRule.onNodeWithTag("font_size_back_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Grande", useUnmergedTree = true).assertIsDisplayed()
+
+    // Whats new sub-screen: empty fallback and populated list
+    composeTestRule.onNodeWithTag("settings_whats_new_row").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Versión ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
+    composeTestRule.onNodeWithText("No hay novedades para esta versión.").assertIsDisplayed()
+
+    composeTestRule.runOnUiThread {
+      notesState.value = "- Mejoras en Ajustes\n- Nuevo tamaño de letra"
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Mejoras en Ajustes").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Nuevo tamaño de letra").assertIsDisplayed()
+  }
+
+  @Test
+  fun `preferences manager persists themeMode and fontScale locally`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val prefs = com.example.data.local.PreferencesManager(context)
+
+    prefs.setThemeMode(com.example.data.local.AppThemeMode.DARK)
+    prefs.setFontScale(com.example.data.local.AppFontScale.LARGE)
+
+    assertEquals(com.example.data.local.AppThemeMode.DARK, prefs.themeModeFlow.first())
+    assertEquals(com.example.data.local.AppFontScale.LARGE, prefs.fontScaleFlow.first())
+
+    prefs.setThemeMode(com.example.data.local.AppThemeMode.SYSTEM)
+    prefs.setFontScale(com.example.data.local.AppFontScale.SMALL)
+
+    assertEquals(com.example.data.local.AppThemeMode.SYSTEM, prefs.themeModeFlow.first())
+    assertEquals(com.example.data.local.AppFontScale.SMALL, prefs.fontScaleFlow.first())
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `home overflow menu matches redesigned 4 row layout for admin, 3 rows for non admin, and conditional switch lock`() {
+    val isAdminState = androidx.compose.runtime.mutableStateOf(true)
+    val switchPinActiveState = androidx.compose.runtime.mutableStateOf(true)
+    var switched = false
+    var openedSettings = false
+    var openedAdmin = false
+
+    composeTestRule.setContent {
+      val member = sampleMember(
+        id = if (isAdminState.value) "m_admin" else "m_member",
+        name = if (isAdminState.value) "José Manuel" else "Tila del Carmen",
+        isAdmin = isAdminState.value
+      )
+      MainHomeScreen(
+        activeMember = member,
+        allMembers = listOf(member),
+        userGroupsCount = 1,
+        isDarkTheme = false,
+        notificationsEnabled = true,
+        updateRepoSlug = "",
+        updateState = AppUpdateUiState.Idle,
+        selectedTab = MainTab.CHATS,
+        searchQuery = "",
+        chatPreviews = emptyList(),
+        statuses = emptyList(),
+        calls = emptyList(),
+        shoppingItems = emptyList(),
+        events = emptyList(),
+        notes = emptyList(),
+        snackbarMessage = null,
+        onClearSnackbar = {},
+        onToggleTheme = {},
+        onToggleNotifications = {},
+        onUpdateOwnProfile = { _, _, _, _, _, _, _ -> },
+        onPublishTextStatus = { _, _ -> },
+        onPublishPhotoStatus = { _, _ -> },
+        onMarkStatusViewed = {},
+        onDeleteStatus = {},
+        onReplyToStatus = { _, _ -> },
+        onCheckForUpdate = {},
+        onSaveUpdateRepoSlug = {},
+        onDownloadUpdate = {},
+        onResetUpdateState = {},
+        onSelectTab = {},
+        onSearchChange = {},
+        onOpenChat = {},
+        onStartDirectChat = {},
+        onSwitchProfile = { switched = true },
+        onOpenAdminPanel = { openedAdmin = true },
+        onStartCall = { _, _, _, _, _ -> },
+        onAddShoppingItem = { _, _, _ -> },
+        onToggleShoppingItem = {},
+        onDeleteShoppingItem = {},
+        onClearCheckedShopping = {},
+        onAddEvent = { _, _, _, _, _, _ -> },
+        onDeleteEvent = {},
+        onSaveNote = { _, _, _, _, _ -> },
+        onDeleteNote = {},
+        onOpenSettings = { openedSettings = true },
+        isSwitchPinActive = switchPinActiveState.value
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    // Open menu as Admin with Switch PIN active -> 4 rows + lock icon
+    composeTestRule.onNodeWithTag("home_more_menu_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("home_more_menu").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Mi perfil", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Foto, estado y frase", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Cambiar de perfil", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Pide la clave de seguridad", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("menu_switch_profile_lock", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Ajustes", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Notificaciones, tema y más", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Administración", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Solo para el administrador", useUnmergedTree = true).assertIsDisplayed()
+
+    // No separate Notificaciones or Tema oscuro rows inside the 3-dot menu
+    composeTestRule.onNodeWithTag("menu_toggle_push_notifications").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("menu_toggle_theme").assertDoesNotExist()
+
+    // Tapping Administración fires callback and dismisses menu
+    composeTestRule.onNodeWithTag("menu_admin_panel").performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(openedAdmin)
+    composeTestRule.onNodeWithTag("home_more_menu").assertDoesNotExist()
+
+    // Switch to non-admin & inactive PIN -> only 3 rows, no Administración, no lock icon
+    composeTestRule.runOnUiThread {
+      isAdminState.value = false
+      switchPinActiveState.value = false
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("home_more_menu_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("menu_profile_options").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("menu_switch_profile").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("menu_settings").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("menu_admin_panel").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("menu_switch_profile_lock", useUnmergedTree = true).assertDoesNotExist()
+
+    // Tapping Cambiar de perfil and Ajustes trigger their callbacks
+    composeTestRule.onNodeWithTag("menu_switch_profile").performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(switched)
+
+    composeTestRule.onNodeWithTag("home_more_menu_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("menu_settings").performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(openedSettings)
   }
 }
 

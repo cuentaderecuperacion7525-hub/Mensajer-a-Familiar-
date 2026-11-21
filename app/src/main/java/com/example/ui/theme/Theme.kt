@@ -8,6 +8,8 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 
 data class ThemeController(
@@ -73,14 +75,21 @@ val AppShapes = Shapes(
 @Composable
 fun FamiChatTheme(
     darkTheme: Boolean = false,
+    fontScaleMultiplier: Float = 1f,
     onToggleTheme: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColors else LightColors
     val controller = ThemeController(isDarkTheme = darkTheme, onToggleTheme = onToggleTheme)
+    val baseDensity = LocalDensity.current
+    val scaledDensity = Density(
+        density = baseDensity.density,
+        fontScale = (baseDensity.fontScale * fontScaleMultiplier).coerceIn(0.75f, 2.0f)
+    )
     CompositionLocalProvider(
         LocalDarkTheme provides darkTheme,
-        LocalThemeController provides controller
+        LocalThemeController provides controller,
+        LocalDensity provides scaledDensity
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
