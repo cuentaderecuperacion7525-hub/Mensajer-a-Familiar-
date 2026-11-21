@@ -2868,6 +2868,38 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithText("Buscando...").assertIsDisplayed()
     composeTestRule.onNodeWithTag("updates_check_spinner", useUnmergedTree = true).assertIsDisplayed()
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `realtime background service defaults to false and notifications screen toggles it cleanly`() = kotlinx.coroutines.test.runTest {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val prefs = com.example.data.local.PreferencesManager(context)
+    assertFalse("Persistent FamiChat activo service should be OFF by default when server push is active", prefs.realtimeBackgroundServiceEnabledFlow.first())
+    prefs.setRealtimeBackgroundServiceEnabled(true)
+    assertTrue(prefs.realtimeBackgroundServiceEnabledFlow.first())
+    prefs.setRealtimeBackgroundServiceEnabled(false)
+    assertFalse(prefs.realtimeBackgroundServiceEnabledFlow.first())
+
+    val realtimeEnabled = androidx.compose.runtime.mutableStateOf(false)
+    composeTestRule.setContent {
+      NotificationSettingsScreen(
+        notificationsEnabled = true,
+        realtimeBackgroundEnabled = realtimeEnabled.value,
+        snackbarMessage = null,
+        onClearSnackbar = {},
+        onToggleNotifications = {},
+        onToggleRealtimeBackground = { realtimeEnabled.value = it },
+        onSendTestNotification = {},
+        onBack = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithText("Conexión permanente (sin Google)").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("notifications_realtime_bg_switch").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(realtimeEnabled.value)
+  }
 }
 
 

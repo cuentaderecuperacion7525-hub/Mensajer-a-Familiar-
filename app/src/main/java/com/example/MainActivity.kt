@@ -366,6 +366,7 @@ fun FamiChatApp(
     val activeUploadLabel by vm.activeUploadLabel.collectAsStateWithLifecycle()
     val activeUploadProgress by vm.activeUploadProgress.collectAsStateWithLifecycle()
     val fcmToken by vm.fcmToken.collectAsStateWithLifecycle()
+    val realtimeBackgroundEnabled by vm.realtimeBackgroundServiceEnabled.collectAsStateWithLifecycle()
     val turnUrl by vm.turnUrl.collectAsStateWithLifecycle()
     val turnUsername by vm.turnUsername.collectAsStateWithLifecycle()
     val turnCredential by vm.turnCredential.collectAsStateWithLifecycle()
@@ -715,9 +716,11 @@ fun FamiChatApp(
             composable(Routes.NOTIFICATIONS) {
                 NotificationSettingsScreen(
                     notificationsEnabled = notificationsEnabled,
+                    realtimeBackgroundEnabled = realtimeBackgroundEnabled,
                     snackbarMessage = null,
                     onClearSnackbar = {},
                     onToggleNotifications = vm::setNotificationsEnabled,
+                    onToggleRealtimeBackground = vm::setRealtimeBackgroundServiceEnabled,
                     onSendTestNotification = vm::sendTestPushNotification,
                     onBack = { safePopBack(Routes.NOTIFICATIONS) }
                 )

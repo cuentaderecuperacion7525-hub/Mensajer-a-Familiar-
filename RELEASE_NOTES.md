@@ -1,5 +1,10 @@
 # Novedades de FamiChat
 
+## 2.8.33
+- Notificaciones instantáneas desde el servidor sin el aviso fijo "FamiChat activo" para ahorrar batería como en las apps de mensajería comerciales.
+- Se evitaron avisos duplicados cuando ya tienes FamiChat abierto en pantalla.
+- Nueva opción en Ajustes → Notificaciones por si algún teléfono sin servicios de Google necesita activar la conexión permanente.
+
 ## 2.8.32
 - La barra de descarga de actualizaciones ahora llega suavemente al 100% y muestra "Descarga completa" antes de iniciar la instalación.
 

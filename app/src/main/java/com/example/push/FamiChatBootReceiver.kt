@@ -29,11 +29,18 @@ class FamiChatBootReceiver : BroadcastReceiver() {
                 if (uid.isNullOrBlank()) return@launch
                 val prefs = PreferencesManager(appContext)
                 val notifEnabled = prefs.notificationsEnabledFlow.first()
+                val keepRealtimeService = prefs.realtimeBackgroundServiceEnabledFlow.first()
                 val famId = prefs.activeFamilyIdFlow.first()
                 val memberId = prefs.activeMemberIdFlow.first()
                 if (notifEnabled && !famId.isNullOrBlank() && !memberId.isNullOrBlank()) {
                     PushRegistrationManager.schedulePeriodicBackgroundSync(appContext)
-                    FamiChatRealtimeService.start(appContext)
+                    if (keepRealtimeService) {
+                        FamiChatRealtimeService.start(appContext)
+                    } else {
+                        FamiChatRealtimeService.stop(appContext)
+                    }
+                } else {
+                    FamiChatRealtimeService.stop(appContext)
                 }
             } finally {
                 pendingResult.finish()

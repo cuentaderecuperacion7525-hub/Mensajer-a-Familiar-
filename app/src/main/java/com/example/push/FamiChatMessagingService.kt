@@ -64,6 +64,10 @@ class FamiChatMessagingService : FirebaseMessagingService() {
                 .ifBlank { message.notification?.title ?: "Familiar" }
             val isVideo = data["isVideo"] == "true"
 
+            if (FamiChatAppRuntimeState.isAppForeground) {
+                return
+            }
+
             FamiChatNotificationHelper.notifyIncomingCall(
                 context = appContext,
                 callId = callId,
@@ -109,6 +113,7 @@ class FamiChatMessagingService : FirebaseMessagingService() {
         }
 
         if (mutedChatIds.contains(chatId)) return
+        if (FamiChatAppRuntimeState.isAppForeground) return
 
         FamiChatNotificationHelper.notifyNewMessage(
             context = appContext,

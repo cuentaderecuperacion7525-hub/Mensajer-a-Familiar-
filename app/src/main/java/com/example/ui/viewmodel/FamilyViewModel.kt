@@ -452,6 +452,9 @@ class FamilyViewModel(
     val notificationsEnabled: StateFlow<Boolean> = prefs.notificationsEnabledFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    val realtimeBackgroundServiceEnabled: StateFlow<Boolean> = prefs.realtimeBackgroundServiceEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     val chatWallpapers: StateFlow<Map<String, String>> = prefs.chatWallpapersFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
@@ -1379,8 +1382,10 @@ class FamilyViewModel(
             if (memberId != null && isShowLastSeenEnabledFor(memberId)) {
                 startPresenceHeartbeat()
             }
-            if (_activeFamilyId.value != null && memberId != null && notificationsEnabled.value) {
+            if (_activeFamilyId.value != null && memberId != null && notificationsEnabled.value && realtimeBackgroundServiceEnabled.value) {
                 PushRegistrationManager.startRealtimeService(appContext)
+            } else {
+                PushRegistrationManager.stopRealtimeService(appContext)
             }
         } else {
             heartbeatJob?.cancel()
@@ -1388,9 +1393,13 @@ class FamilyViewModel(
             val famId = _activeFamilyId.value ?: return
             val memberId = _activeMemberId.value ?: return
             if (notificationsEnabled.value) {
-                PushRegistrationManager.startRealtimeService(appContext)
+                if (realtimeBackgroundServiceEnabled.value) {
+                    PushRegistrationManager.startRealtimeService(appContext)
+                    PushRegistrationManager.scheduleBackgroundCheckOnStop(appContext)
+                } else {
+                    PushRegistrationManager.stopRealtimeService(appContext)
+                }
                 PushRegistrationManager.schedulePeriodicBackgroundSync(appContext)
-                PushRegistrationManager.scheduleBackgroundCheckOnStop(appContext)
             }
             val raw = rawMembers.value.find { it.id == memberId }
             val awayLabel = offlineStatusLabelFor(raw?.lastSeenText.orEmpty())
@@ -1414,7 +1423,11 @@ class FamilyViewModel(
     private fun syncPushAndBackgroundWork(familyId: String, memberId: String) {
         viewModelScope.launch {
             if (notificationsEnabled.value) {
-                PushRegistrationManager.startRealtimeService(appContext)
+                if (realtimeBackgroundServiceEnabled.value) {
+                    PushRegistrationManager.startRealtimeService(appContext)
+                } else {
+                    PushRegistrationManager.stopRealtimeService(appContext)
+                }
                 PushRegistrationManager.syncFcmTokenAndTopic(appContext, cloudRepo, prefs, familyId, memberId)
                 PushRegistrationManager.schedulePeriodicBackgroundSync(appContext)
             }
@@ -1575,7 +1588,11 @@ class FamilyViewModel(
             prefs.setNotificationsEnabled(enabled)
             if (enabled) {
                 if (famId != null && memberId != null) {
-                    PushRegistrationManager.startRealtimeService(appContext)
+                    if (realtimeBackgroundServiceEnabled.value) {
+                        PushRegistrationManager.startRealtimeService(appContext)
+                    } else {
+                        PushRegistrationManager.stopRealtimeService(appContext)
+                    }
                     PushRegistrationManager.syncFcmTokenAndTopic(appContext, cloudRepo, prefs, famId, memberId)
                     PushRegistrationManager.schedulePeriodicBackgroundSync(appContext)
                 }
@@ -1584,6 +1601,21 @@ class FamilyViewModel(
                 if (famId != null && memberId != null) {
                     PushRegistrationManager.unregisterMemberToken(cloudRepo, prefs, famId, memberId)
                 }
+            }
+        }
+    }
+
+    fun setRealtimeBackgroundServiceEnabled(enabled: Boolean) {
+        val famId = _activeFamilyId.value
+        val memberId = _activeMemberId.value
+        viewModelScope.launch {
+            prefs.setRealtimeBackgroundServiceEnabled(enabled)
+            if (enabled && notificationsEnabled.value && famId != null && memberId != null) {
+                PushRegistrationManager.startRealtimeService(appContext)
+                _snackbarMessage.value = "Conexión permanente activada en este teléfono"
+            } else {
+                PushRegistrationManager.stopRealtimeService(appContext)
+                _snackbarMessage.value = "Ahorro de batería activado (alertas desde el servidor)"
             }
         }
     }

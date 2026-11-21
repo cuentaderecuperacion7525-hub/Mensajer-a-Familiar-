@@ -117,17 +117,18 @@ class FamiChatRealtimeService : Service() {
             combine(
                 prefs.activeFamilyIdFlow,
                 prefs.activeMemberIdFlow,
-                prefs.notificationsEnabledFlow
-            ) { famId, memberId, enabled ->
-                Triple(famId, memberId, enabled)
+                prefs.notificationsEnabledFlow,
+                prefs.realtimeBackgroundServiceEnabledFlow
+            ) { famId, memberId, enabled, realtimeEnabled ->
+                Quad(famId, memberId, enabled, realtimeEnabled)
             }
                 .distinctUntilChanged()
-                .collectLatest { (famId, meId, notifEnabled) ->
+                .collectLatest { (famId, meId, notifEnabled, realtimeEnabled) ->
                     messageListenerJob?.cancel()
                     callListenerJob?.cancel()
 
                     val uid = runCatching { Firebase.auth.currentUser?.uid }.getOrNull()
-                    if (!notifEnabled || famId.isNullOrBlank() || meId.isNullOrBlank() || uid.isNullOrBlank()) {
+                    if (!notifEnabled || !realtimeEnabled || famId.isNullOrBlank() || meId.isNullOrBlank() || uid.isNullOrBlank()) {
                         stopSelf()
                         return@collectLatest
                     }

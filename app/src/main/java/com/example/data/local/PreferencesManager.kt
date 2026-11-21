@@ -80,6 +80,7 @@ class PreferencesManager(private val context: Context) {
         private val KEY_LAST_UPDATE_CHECK_AT = longPreferencesKey("last_update_check_at")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         private val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
+        private val KEY_REALTIME_BACKGROUND_SERVICE = booleanPreferencesKey("realtime_background_service_enabled")
         const val DEFAULT_PIN = "7525"
         const val DEFAULT_SWITCH_PIN = "2580"
         const val DEFAULT_TURN_URL = "turn:openrelay.metered.ca:80"
@@ -139,6 +140,10 @@ class PreferencesManager(private val context: Context) {
 
     val notificationsEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[KEY_NOTIFICATIONS_ENABLED] ?: true
+    }
+
+    val realtimeBackgroundServiceEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_REALTIME_BACKGROUND_SERVICE] ?: false
     }
 
     val chatWallpapersFlow: Flow<Map<String, String>> = context.dataStore.data.map { prefs ->
@@ -360,6 +365,12 @@ class PreferencesManager(private val context: Context) {
     suspend fun setNotificationsEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_NOTIFICATIONS_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setRealtimeBackgroundServiceEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_REALTIME_BACKGROUND_SERVICE] = enabled
         }
     }
 

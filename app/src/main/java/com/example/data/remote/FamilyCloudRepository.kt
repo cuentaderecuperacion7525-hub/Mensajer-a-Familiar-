@@ -725,6 +725,9 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             val existingTokens = (snap.get("fcmTokens") as? List<*>)
                 ?.mapNotNull { it as? String }
                 .orEmpty()
+            if (existingTokens.contains(cleanToken)) {
+                return Result.success(Unit)
+            }
             val updatedTokens = (existingTokens.filter { it != cleanToken }.takeLast(9) + cleanToken)
             docRef.update(
                 mapOf(

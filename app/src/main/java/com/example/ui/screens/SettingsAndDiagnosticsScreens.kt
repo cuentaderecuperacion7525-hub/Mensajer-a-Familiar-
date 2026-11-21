@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Router
+import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.FileDownload
@@ -629,9 +630,11 @@ private fun FourPointSparkleOutlineIcon(
 @Composable
 fun NotificationSettingsScreen(
     notificationsEnabled: Boolean,
+    realtimeBackgroundEnabled: Boolean = false,
     snackbarMessage: String?,
     onClearSnackbar: () -> Unit,
     onToggleNotifications: (Boolean) -> Unit,
+    onToggleRealtimeBackground: (Boolean) -> Unit = {},
     onSendTestNotification: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -848,6 +851,55 @@ fun NotificationSettingsScreen(
                                 }
                             },
                             modifier = Modifier.testTag("notifications_enable_switch")
+                        )
+                    }
+                }
+
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = notificationsEnabled) {
+                                onToggleRealtimeBackground(!realtimeBackgroundEnabled)
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.BatteryChargingFull,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Conexión permanente (sin Google)",
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (realtimeBackgroundEnabled) {
+                                    "Mantiene el aviso \"FamiChat activo\" para teléfonos sin servicios de Google."
+                                } else {
+                                    "Desactivada para ahorrar batería. Las alertas llegan al instante desde el servidor."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = realtimeBackgroundEnabled && notificationsEnabled,
+                            enabled = notificationsEnabled,
+                            onCheckedChange = onToggleRealtimeBackground,
+                            modifier = Modifier.testTag("notifications_realtime_bg_switch")
                         )
                     }
                 }

@@ -21,6 +21,9 @@ object PushRegistrationManager {
     private const val UNIQUE_PERIODIC_WORK = "famichat_periodic_bg_sync"
     private const val UNIQUE_IMMEDIATE_WORK = "famichat_bg_check_once"
 
+    @Volatile
+    private var lastRegisteredSignature: String? = null
+
     fun topicForFamily(familyId: String): String {
         val sanitized = familyId.replace(Regex("[^a-zA-Z0-9_\\-%.~]"), "_")
         return "famichat_$sanitized"
@@ -40,10 +43,18 @@ object PushRegistrationManager {
             ?.takeIf { it.isNotBlank() }
             ?: cachedToken
 
-        if (!token.isNullOrBlank() && token != cachedToken) {
-            prefs.setFcmToken(token)
-            runCatching {
-                cloudRepo.registerMemberFcmToken(familyId, memberId, token)
+        if (!token.isNullOrBlank()) {
+            if (token != cachedToken) {
+                prefs.setFcmToken(token)
+            }
+            val signature = "$familyId::$memberId::$token"
+            if (lastRegisteredSignature != signature) {
+                val registered = runCatching {
+                    cloudRepo.registerMemberFcmToken(familyId, memberId, token).isSuccess
+                }.getOrDefault(false)
+                if (registered) {
+                    lastRegisteredSignature = signature
+                }
             }
         }
         runCatching {

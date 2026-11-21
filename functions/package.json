@@ -2,7 +2,7 @@
   "name": "famichat-push-functions",
   "description": "Firebase Cloud Functions v2 for FamiChat instant FCM push notifications when recipient apps are closed",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "dependencies": {
     "firebase-admin": "^13.0.0",
