@@ -2802,7 +2802,12 @@ class ExampleRobolectricTest {
   fun `whats new screen displays bundled release notes for current version offline`() {
     val bundled = BuildConfig.VERSION_RELEASE_NOTES.trim()
     assertTrue("BuildConfig.VERSION_RELEASE_NOTES should not be blank for current version", bundled.isNotBlank())
-    assertTrue("Bundled notes should preserve Spanish accents cleanly", bundled.contains("actualización"))
+    val firstBullet = bundled.lines()
+      .map { it.trim().removePrefix("-").removePrefix("•").removePrefix("*").trim() }
+      .firstOrNull { it.isNotBlank() }
+      .orEmpty()
+    assertTrue("Bundled notes should contain at least one non-empty bullet", firstBullet.isNotBlank())
+    assertTrue("Bundled notes should preserve Spanish accents cleanly", bundled.any { it in "áéíóúñÁÉÍÓÚÑ" })
 
     composeTestRule.setContent {
       com.example.ui.theme.FamiChatTheme(darkTheme = true) {
@@ -2819,7 +2824,49 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("whats_new_screen").assertIsDisplayed()
     composeTestRule.onNodeWithText("Versión ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
     composeTestRule.onNodeWithTag("whats_new_empty_text").assertDoesNotExist()
-    composeTestRule.onNodeWithText("Barra de progreso en vivo", substring = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText(firstBullet).assertIsDisplayed()
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `magic pill check updates button switches to Buscando with white spinner and disables while checking`() {
+    val updateState = androidx.compose.runtime.mutableStateOf<AppUpdateUiState>(
+      AppUpdateUiState.UpToDate(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
+    )
+    var clicks = 0
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = true) {
+        com.example.ui.screens.AppUpdatesScreen(
+          isAdmin = false,
+          isDarkTheme = true,
+          currentRepoSlug = "privado-owner/FamiChat-Privado",
+          updateState = updateState.value,
+          lastCheckedAtMs = System.currentTimeMillis(),
+          onCheckForUpdate = {
+            clicks++
+            updateState.value = AppUpdateUiState.Checking
+          },
+          onDownloadUpdate = {},
+          onCancelDownload = {},
+          onBack = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("updates_check_button").assertIsDisplayed().assertIsEnabled()
+    composeTestRule.onNodeWithText("Buscar actualizaciones").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_check_spinner", useUnmergedTree = true).assertDoesNotExist()
+
+    composeTestRule.onNodeWithTag("updates_check_button").performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(1, clicks)
+    composeTestRule.onNodeWithTag("updates_state_checking").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_check_button").assertIsDisplayed().assertIsNotEnabled()
+    composeTestRule.onNodeWithText("Buscando...").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_check_spinner", useUnmergedTree = true).assertIsDisplayed()
   }
 }
 

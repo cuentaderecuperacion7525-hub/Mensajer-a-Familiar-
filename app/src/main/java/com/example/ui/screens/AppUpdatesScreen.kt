@@ -1,19 +1,26 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -66,6 +73,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -225,39 +233,15 @@ fun AppUpdatesScreen(
 
                 // Main Status Content
                 when (updateState) {
-                    AppUpdateUiState.Checking -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 36.dp)
-                                .testTag("updates_state_checking"),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                color = brandBlue,
-                                strokeWidth = 3.dp,
-                                modifier = Modifier.size(44.dp)
-                            )
-                            Text(
-                                text = "Buscando actualizaciones...",
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontFamily = InterFontFamily,
-                                    fontWeight = FontWeight.Medium
-                                ),
-                                color = textSecondary,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
-
+                    AppUpdateUiState.Checking,
                     AppUpdateUiState.Idle,
                     is AppUpdateUiState.UpToDate -> {
+                        val isChecking = updateState is AppUpdateUiState.Checking
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 16.dp)
-                                .testTag("updates_state_up_to_date"),
+                                .testTag(if (isChecking) "updates_state_checking" else "updates_state_up_to_date"),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Box(
@@ -304,33 +288,10 @@ fun AppUpdatesScreen(
 
                             Spacer(modifier = Modifier.height(28.dp))
 
-                            Button(
-                                onClick = onCheckForUpdate,
-                                shape = RoundedCornerShape(50),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = brandBlue,
-                                    contentColor = Color.White
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp)
-                                    .testTag("updates_check_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Refresh,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Buscar actualizaciones",
-                                    style = MaterialTheme.typography.labelLarge.copy(
-                                        fontFamily = InterFontFamily,
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 14.sp
-                                    )
-                                )
-                            }
+                            MagicCheckUpdatesPillButton(
+                                isChecking = isChecking,
+                                onClick = onCheckForUpdate
+                            )
                         }
                     }
 
@@ -886,3 +847,81 @@ fun AppUpdatesScreen(
         }
     }
 }
+
+private val MagicPillBlue = Color(0xFF246BFD)
+private val MagicPillBluePressed = Color(0xFF1D58D8)
+
+@Composable
+private fun MagicCheckUpdatesPillButton(
+    isChecking: Boolean,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val isHovered by interactionSource.collectIsHoveredAsState()
+
+    val backgroundColor by animateColorAsState(
+        targetValue = when {
+            isChecking -> MagicPillBlue.copy(alpha = 0.85f)
+            isPressed || isHovered -> MagicPillBluePressed
+            else -> MagicPillBlue
+        },
+        animationSpec = tween(durationMillis = 120),
+        label = "magicUpdatePillBackground"
+    )
+
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        val targetWidth = maxOf(240.dp, maxWidth * 0.65f).coerceAtMost(maxWidth)
+        Button(
+            onClick = onClick,
+            enabled = !isChecking,
+            interactionSource = interactionSource,
+            shape = CircleShape,
+            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp),
+            elevation = ButtonDefaults.buttonElevation(
+                defaultElevation = 0.dp,
+                pressedElevation = 0.dp,
+                hoveredElevation = 0.dp,
+                disabledElevation = 0.dp
+            ),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = backgroundColor,
+                contentColor = Color.White,
+                disabledContainerColor = backgroundColor,
+                disabledContentColor = Color.White
+            ),
+            modifier = Modifier
+                .width(targetWidth)
+                .heightIn(min = 44.dp)
+                .testTag("updates_check_button")
+        ) {
+            if (isChecking) {
+                CircularProgressIndicator(
+                    color = Color.White,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .testTag("updates_check_spinner")
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Text(
+                text = if (isChecking) "Buscando..." else "Buscar actualizaciones",
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontFamily = InterFontFamily,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 15.sp,
+                    letterSpacing = 0.sp
+                ),
+                color = Color.White,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
