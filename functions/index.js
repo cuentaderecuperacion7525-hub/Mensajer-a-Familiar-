@@ -6,6 +6,7 @@ const { getMessaging } = require("firebase-admin/messaging");
 initializeApp();
 
 const DATABASE_ID = "ai-studio-android-nidofami-a8e12eb9-edf1-4ad5-a4f0-5cadecff7ae7";
+const REGION = "us-east1";
 const db = getFirestore(DATABASE_ID);
 
 function stripMarkdownPreview(raw) {
@@ -21,6 +22,10 @@ function buildMessageBody(msg) {
       return msg.text && String(msg.text).trim()
         ? `📷 ${stripMarkdownPreview(msg.text)}`
         : "📷 Foto";
+    case "VIDEO":
+      return msg.text && String(msg.text).trim()
+        ? `🎬 ${stripMarkdownPreview(msg.text)}`
+        : "🎬 Video";
     case "VOICE": {
       const sec = Number(msg.voiceDurationSec || 0);
       const mins = Math.floor(sec / 60);
@@ -30,6 +35,8 @@ function buildMessageBody(msg) {
     }
     case "LOCATION":
       return `📍 ${msg.locationName || "Ubicación"}`;
+    case "DOCUMENT":
+      return `📄 ${msg.fileName || "Documento"}`;
     case "POLL":
       return `📊 ${msg.pollQuestion || "Encuesta"}`;
     default:
@@ -75,6 +82,7 @@ exports.onNewFamilyMessage = onDocumentCreated(
   {
     document: "families/{familyId}/messages/{messageId}",
     database: DATABASE_ID,
+    region: REGION,
   },
   async (event) => {
     const snap = event.data;
@@ -82,7 +90,7 @@ exports.onNewFamilyMessage = onDocumentCreated(
     const msg = snap.data();
     if (!msg || msg.type === "DELETED") return;
 
-    const { familyId } = event.params;
+    const { familyId, messageId } = event.params;
     const familyRef = db.collection("families").doc(familyId);
 
     const [chatSnap, membersSnap] = await Promise.all([
@@ -127,6 +135,7 @@ exports.onNewFamilyMessage = onDocumentCreated(
       tokens: tokenPairs.map((p) => p.token),
       data: {
         type: "message",
+        messageId: String(messageId || ""),
         chatId: String(msg.chatId),
         chatTitle,
         senderId: String(msg.senderId || ""),
@@ -150,6 +159,7 @@ exports.onNewFamilyCall = onDocumentCreated(
   {
     document: "families/{familyId}/calls/{callId}",
     database: DATABASE_ID,
+    region: REGION,
   },
   async (event) => {
     const snap = event.data;
