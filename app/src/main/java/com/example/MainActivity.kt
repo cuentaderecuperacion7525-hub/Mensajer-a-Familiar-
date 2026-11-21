@@ -72,7 +72,6 @@ import com.example.ui.components.PinVerificationDialog
 import com.example.ui.screens.AdminAdvancedSettingsScreen
 import com.example.ui.screens.AdminDiagnosticsScreen
 import com.example.ui.screens.AdminPanelScreen
-import com.example.ui.screens.AppUpdatesHubScreen
 import com.example.ui.screens.AppUpdatesScreen
 import com.example.ui.screens.AppearanceSettingsScreen
 import com.example.ui.screens.CallOverlayScreen
@@ -107,7 +106,6 @@ object Routes {
     const val SETTINGS_WHATS_NEW = "settings_whats_new"
     const val SETTINGS_LICENSES = "settings_licenses"
     const val UPDATES = "updates"
-    const val UPDATES_CHECK = "updates_check"
     const val NOTIFICATIONS = "notifications"
     const val ADMIN_ADVANCED = "admin_advanced"
     const val ADMIN_DIAGNOSTICS = "admin_diagnostics"
@@ -702,21 +700,6 @@ fun FamiChatApp(
                 if (member == null) {
                     LaunchedEffect(Unit) { safePopBack(Routes.UPDATES) }
                 } else {
-                    AppUpdatesHubScreen(
-                        isDarkTheme = isDarkTheme,
-                        updateState = updateState,
-                        onOpenCheckUpdates = { navigateSingleTop(Routes.UPDATES_CHECK) },
-                        onOpenWhatsNew = { navigateSingleTop(Routes.SETTINGS_WHATS_NEW) },
-                        onBack = { safePopBack(Routes.UPDATES) }
-                    )
-                }
-            }
-
-            composable(Routes.UPDATES_CHECK) {
-                val member = activeMember
-                if (member == null) {
-                    LaunchedEffect(Unit) { safePopBack(Routes.UPDATES_CHECK) }
-                } else {
                     AppUpdatesScreen(
                         isAdmin = member.isAdmin,
                         isDarkTheme = isDarkTheme,
@@ -727,12 +710,13 @@ fun FamiChatApp(
                         onCheckForUpdate = { vm.checkForAppUpdate(isAutoCheck = false) },
                         onDownloadUpdate = vm::downloadAndInstallUpdate,
                         onCancelDownload = vm::cancelUpdateDownload,
+                        onOpenWhatsNew = { navigateSingleTop(Routes.SETTINGS_WHATS_NEW) },
                         onLoadVersionHistory = vm::loadVersionHistoryOnDemand,
                         onPostponeUpdate = {
                             vm.postponeUpdateFor24Hours()
-                            safePopBack(Routes.UPDATES_CHECK)
+                            safePopBack(Routes.UPDATES)
                         },
-                        onBack = { safePopBack(Routes.UPDATES_CHECK) }
+                        onBack = { safePopBack(Routes.UPDATES) }
                     )
                 }
             }

@@ -1,5 +1,8 @@
 # Novedades de FamiChat
 
+## 2.8.37
+- Se restauró la vista directa de Actualizaciones con la versión instalada, el estado y las opciones "Buscar actualizaciones" y "Novedades de esta versión" en una sola pantalla.
+
 ## 2.8.36
 - Actualizaciones ahora abre un menú limpio con solo "Buscar actualizaciones" y "Novedades de esta versión", sin leyendas adicionales afuera.
 - Al tocar "Buscar actualizaciones" se abre la pantalla dedicada con el estado de la versión, novedades de la nueva actualización y descarga.

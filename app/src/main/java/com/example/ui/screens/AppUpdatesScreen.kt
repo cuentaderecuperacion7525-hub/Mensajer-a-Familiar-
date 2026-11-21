@@ -35,7 +35,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
@@ -103,244 +102,7 @@ import java.io.File
 private val MagicPillBlue = Color(0xFF246BFD)
 private val MagicPillBluePressed = Color(0xFF1D58D8)
 private val WarningAmber = Color(0xFFF59E0B)
-private val UpdateBadgeRed = Color(0xFFD93025)
 
-/**
- * Nivel 1: Pantalla "Actualizaciones" limpia con exactamente la tarjeta agrupada de dos opciones:
- * 1) "Buscar actualizaciones" -> abre AppUpdatesScreen
- * 2) "Novedades de esta versión" -> abre WhatsNewScreen
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AppUpdatesHubScreen(
-    isDarkTheme: Boolean = false,
-    updateState: AppUpdateUiState = AppUpdateUiState.Idle,
-    onOpenCheckUpdates: () -> Unit,
-    onOpenWhatsNew: () -> Unit,
-    onBack: () -> Unit
-) {
-    val hasNewUpdate = updateState is AppUpdateUiState.UpdateAvailable ||
-        updateState is AppUpdateUiState.ReadyToInstall
-
-    val surfaceBg = if (isDarkTheme) MaterialTheme.colorScheme.background else Color(0xFFF5F6F8)
-    val groupCardBg = if (isDarkTheme) MaterialTheme.colorScheme.surface else Color.White
-    val groupCardBorder = if (isDarkTheme) {
-        MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
-    } else {
-        Color(0xFFE4E7EC)
-    }
-    val dividerColor = if (isDarkTheme) {
-        MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
-    } else {
-        Color(0xFFECEEF2)
-    }
-    val textPrimary = MaterialTheme.colorScheme.onSurface
-    val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
-    val accentColor = MaterialTheme.colorScheme.primary
-    val iconCircleBg = accentColor.copy(alpha = if (isDarkTheme) 0.16f else 0.12f)
-
-    Scaffold(
-        containerColor = surfaceBg,
-        contentWindowInsets = WindowInsets.safeDrawing,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "Actualizaciones",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontFamily = InterFontFamily,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 21.sp
-                        ),
-                        color = textPrimary
-                    )
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("updates_hub_back_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Volver",
-                            tint = textPrimary
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = surfaceBg,
-                    titleContentColor = textPrimary,
-                    navigationIconContentColor = textPrimary
-                )
-            )
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            contentAlignment = Alignment.TopCenter
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .widthIn(max = 560.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-                    .testTag("app_updates_hub_screen"),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = groupCardBg,
-                    border = BorderStroke(1.dp, groupCardBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        // Row 1: Buscar actualizaciones
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 76.dp)
-                                .clickable(role = Role.Button, onClick = onOpenCheckUpdates)
-                                .padding(horizontal = 18.dp, vertical = 16.dp)
-                                .testTag("updates_hub_check_row"),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape)
-                                    .background(iconCircleBg),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Sync,
-                                    contentDescription = null,
-                                    tint = accentColor,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(3.dp)
-                            ) {
-                                Text(
-                                    text = "Buscar actualizaciones",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontFamily = InterFontFamily,
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 16.sp
-                                    ),
-                                    color = textPrimary
-                                )
-                                Text(
-                                    text = "¡Comprueba si hay disponible una nueva versión de FamiChat!",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontFamily = InterFontFamily,
-                                        fontSize = 13.sp,
-                                        lineHeight = 18.sp
-                                    ),
-                                    color = textSecondary
-                                )
-                            }
-                            if (hasNewUpdate) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(UpdateBadgeRed)
-                                        .testTag("updates_hub_new_badge_dot")
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = accentColor,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 20.dp),
-                            thickness = 0.8.dp,
-                            color = dividerColor
-                        )
-
-                        // Row 2: Novedades de esta versión
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 76.dp)
-                                .clickable(role = Role.Button, onClick = onOpenWhatsNew)
-                                .padding(horizontal = 18.dp, vertical = 16.dp)
-                                .testTag("updates_hub_whats_new_row"),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape)
-                                    .background(iconCircleBg),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Description,
-                                    contentDescription = null,
-                                    tint = accentColor,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(3.dp)
-                            ) {
-                                Text(
-                                    text = "Novedades de esta versión",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontFamily = InterFontFamily,
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 16.sp
-                                    ),
-                                    color = textPrimary,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "¡Mira lo nuevo que trae esta versión!",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontFamily = InterFontFamily,
-                                        fontSize = 13.sp,
-                                        lineHeight = 18.sp
-                                    ),
-                                    color = textSecondary
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = accentColor,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Nivel 2A: Pantalla dedicada "Buscar actualizaciones" con el diseño completo para todos los estados
- * (Buscando, Al día, Hay una versión nueva, Descargando, Lista para instalar, Error y Detalles técnicos).
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppUpdatesScreen(
@@ -352,6 +114,7 @@ fun AppUpdatesScreen(
     onCheckForUpdate: () -> Unit,
     onDownloadUpdate: (AppReleaseInfo) -> Unit,
     onCancelDownload: () -> Unit = {},
+    onOpenWhatsNew: (() -> Unit)? = null,
     onBack: () -> Unit,
     versionHistoryState: VersionHistoryUiState = VersionHistoryUiState.Idle,
     onLoadVersionHistory: () -> Unit = {},
@@ -538,12 +301,21 @@ fun AppUpdatesScreen(
                                 textAlign = TextAlign.Center
                             )
 
-                            Spacer(modifier = Modifier.height(28.dp))
+                            Spacer(modifier = Modifier.height(24.dp))
 
-                            MagicCheckUpdatesPillButton(
-                                isChecking = true,
-                                onClick = onCheckForUpdate
-                            )
+                            if (onOpenWhatsNew != null) {
+                                UpdatesGroupedOptionsCard(
+                                    isDarkTheme = isDarkTheme,
+                                    isChecking = true,
+                                    onCheckForUpdate = onCheckForUpdate,
+                                    onOpenWhatsNew = onOpenWhatsNew
+                                )
+                            } else {
+                                MagicCheckUpdatesPillButton(
+                                    isChecking = true,
+                                    onClick = onCheckForUpdate
+                                )
+                            }
                         }
                     }
 
@@ -598,12 +370,21 @@ fun AppUpdatesScreen(
                                 )
                             }
 
-                            Spacer(modifier = Modifier.height(28.dp))
+                            Spacer(modifier = Modifier.height(24.dp))
 
-                            MagicCheckUpdatesPillButton(
-                                isChecking = false,
-                                onClick = onCheckForUpdate
-                            )
+                            if (onOpenWhatsNew != null) {
+                                UpdatesGroupedOptionsCard(
+                                    isDarkTheme = isDarkTheme,
+                                    isChecking = false,
+                                    onCheckForUpdate = onCheckForUpdate,
+                                    onOpenWhatsNew = onOpenWhatsNew
+                                )
+                            } else {
+                                MagicCheckUpdatesPillButton(
+                                    isChecking = false,
+                                    onClick = onCheckForUpdate
+                                )
+                            }
                         }
                     }
 
@@ -1563,3 +1344,175 @@ private fun MagicCheckUpdatesPillButton(
         }
     }
 }
+
+@Composable
+private fun UpdatesGroupedOptionsCard(
+    isDarkTheme: Boolean,
+    isChecking: Boolean,
+    onCheckForUpdate: () -> Unit,
+    onOpenWhatsNew: () -> Unit
+) {
+    val groupCardBg = if (isDarkTheme) MaterialTheme.colorScheme.surface else Color.White
+    val groupCardBorder = if (isDarkTheme) {
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
+    } else {
+        Color(0xFFE4E7EC)
+    }
+    val dividerColor = if (isDarkTheme) {
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+    } else {
+        Color(0xFFECEEF2)
+    }
+    val textPrimary = MaterialTheme.colorScheme.onSurface
+    val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
+    val accentColor = MaterialTheme.colorScheme.primary
+    val iconCircleBg = accentColor.copy(alpha = if (isDarkTheme) 0.16f else 0.12f)
+
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = groupCardBg,
+        border = BorderStroke(1.dp, groupCardBorder),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("updates_grouped_options_card")
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Row 1: Buscar actualizaciones
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 76.dp)
+                    .clickable(
+                        enabled = !isChecking,
+                        role = Role.Button,
+                        onClick = onCheckForUpdate
+                    )
+                    .padding(horizontal = 18.dp, vertical = 16.dp)
+                    .testTag("updates_check_button"),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(iconCircleBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isChecking) {
+                        CircularProgressIndicator(
+                            color = accentColor,
+                            strokeWidth = 2.4.dp,
+                            modifier = Modifier
+                                .size(22.dp)
+                                .testTag("updates_check_spinner")
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.Sync,
+                            contentDescription = null,
+                            tint = accentColor,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = if (isChecking) "Buscando..." else "Buscar actualizaciones",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 16.sp
+                        ),
+                        color = textPrimary
+                    )
+                    Text(
+                        text = "¡Comprueba si hay disponible una nueva versión de FamiChat!",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = InterFontFamily,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        ),
+                        color = textSecondary
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = accentColor.copy(alpha = if (isChecking) 0.45f else 1f),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 20.dp),
+                thickness = 0.8.dp,
+                color = dividerColor
+            )
+
+            // Row 2: Novedades de esta versión
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 76.dp)
+                    .clickable(role = Role.Button, onClick = onOpenWhatsNew)
+                    .padding(horizontal = 18.dp, vertical = 16.dp)
+                    .testTag("updates_whats_new_row"),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(iconCircleBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Description,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = "Novedades de esta versión",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontFamily = InterFontFamily,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 16.sp
+                        ),
+                        color = textPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "¡Mira lo nuevo que trae esta versión!",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = InterFontFamily,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        ),
+                        color = textSecondary
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = accentColor,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+    }
+}
+
