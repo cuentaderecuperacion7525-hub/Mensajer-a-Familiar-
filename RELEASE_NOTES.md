@@ -1,0 +1,7 @@
+# Novedades de FamiChat
+
+## 2.8.30
+- Novedades de esta versión ahora muestra los cambios reales de cada actualización al instante y sin internet.
+- Barra de progreso en vivo al descargar nuevas versiones desde Actualizaciones.
+- Tema oscuro completo en Mi perfil y avisos de confirmación inmediatos en la misma pantalla donde guardas tus cambios.
+- Menú superior de tres puntos y pantalla de Ajustes renovados con apariencia adaptable y tamaño de letra.

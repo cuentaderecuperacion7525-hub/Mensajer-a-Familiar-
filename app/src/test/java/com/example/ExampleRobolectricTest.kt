@@ -2796,6 +2796,31 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithText("Panel de Administración").assertIsDisplayed()
     composeTestRule.onNodeWithText("Contraseña actualizada en este dispositivo").assertIsDisplayed()
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `whats new screen displays bundled release notes for current version offline`() {
+    val bundled = BuildConfig.VERSION_RELEASE_NOTES.trim()
+    assertTrue("BuildConfig.VERSION_RELEASE_NOTES should not be blank for current version", bundled.isNotBlank())
+    assertTrue("Bundled notes should preserve Spanish accents cleanly", bundled.contains("actualización"))
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = true) {
+        com.example.ui.screens.WhatsNewScreen(
+          installedVersionName = BuildConfig.VERSION_NAME,
+          versionReleaseNotes = bundled,
+          isDarkTheme = true,
+          onBack = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("whats_new_screen").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Versión ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("whats_new_empty_text").assertDoesNotExist()
+    composeTestRule.onNodeWithText("Barra de progreso en vivo", substring = true).assertIsDisplayed()
+  }
 }
 
 

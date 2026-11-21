@@ -666,14 +666,17 @@ fun FamiChatApp(
             }
 
             composable(Routes.SETTINGS_WHATS_NEW) {
-                val matchingNotes = when (val st = updateState) {
-                    is com.example.util.AppUpdateUiState.UpdateAvailable ->
-                        if (st.release.versionName == BuildConfig.VERSION_NAME) st.release.releaseNotes else ""
-                    is com.example.util.AppUpdateUiState.Downloading ->
-                        if (st.release.versionName == BuildConfig.VERSION_NAME) st.release.releaseNotes else ""
-                    is com.example.util.AppUpdateUiState.ReadyToInstall ->
-                        if (st.release.versionName == BuildConfig.VERSION_NAME) st.release.releaseNotes else ""
-                    else -> ""
+                val bundledNotes = BuildConfig.VERSION_RELEASE_NOTES.trim()
+                val matchingNotes = bundledNotes.ifBlank {
+                    when (val st = updateState) {
+                        is com.example.util.AppUpdateUiState.UpdateAvailable ->
+                            if (st.release.versionName == BuildConfig.VERSION_NAME) st.release.releaseNotes else ""
+                        is com.example.util.AppUpdateUiState.Downloading ->
+                            if (st.release.versionName == BuildConfig.VERSION_NAME) st.release.releaseNotes else ""
+                        is com.example.util.AppUpdateUiState.ReadyToInstall ->
+                            if (st.release.versionName == BuildConfig.VERSION_NAME) st.release.releaseNotes else ""
+                        else -> ""
+                    }
                 }
                 WhatsNewScreen(
                     installedVersionName = BuildConfig.VERSION_NAME,

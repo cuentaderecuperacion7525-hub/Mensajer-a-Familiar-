@@ -19,11 +19,52 @@ android {
     applicationId = "com.aistudio.nidofamiliar.mrxqkp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 71
-    versionName = "2.8.29"
+    versionCode = 72
+    versionName = "2.8.30"
 
     val githubRepo = (System.getenv("GITHUB_REPOSITORY") ?: "").trim().replace("\"", "")
     buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
+
+    val currentVersionName = versionName.orEmpty()
+    val versionReleaseNotes = run {
+      val notesFile = File(rootDir, "RELEASE_NOTES.md")
+      if (!notesFile.isFile || currentVersionName.isBlank()) {
+        ""
+      } else {
+        val header = "## $currentVersionName"
+        var collecting = false
+        val collected = mutableListOf<String>()
+        for (rawLine in notesFile.readLines(Charsets.UTF_8)) {
+          val trimmed = rawLine.trim()
+          if (trimmed.startsWith("## ")) {
+            if (collecting) break
+            if (trimmed == header || trimmed.startsWith("$header ")) {
+              collecting = true
+            }
+            continue
+          }
+          if (collecting && trimmed.isNotEmpty()) {
+            collected += trimmed
+          }
+        }
+        collected.joinToString("\n")
+      }
+    }
+    val escapedReleaseNotes = buildString {
+      append('"')
+      for (ch in versionReleaseNotes) {
+        when {
+          ch == '\\' -> append("\\\\")
+          ch == '"' -> append("\\\"")
+          ch == '\n' -> append("\\n")
+          ch == '\r' -> {}
+          ch.code < 0x20 || ch.code > 0x7E -> append(String.format("\\u%04x", ch.code))
+          else -> append(ch)
+        }
+      }
+      append('"')
+    }
+    buildConfigField("String", "VERSION_RELEASE_NOTES", escapedReleaseNotes)
 
     if (System.getenv("GITHUB_ACTIONS") == "true") {
       ndk {

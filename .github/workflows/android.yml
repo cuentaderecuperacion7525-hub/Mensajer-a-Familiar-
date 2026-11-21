@@ -139,12 +139,36 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${VERSION_NAME}-c${VERSION_CODE}"
+          NOTES_FILE="$(mktemp)"
+          if [ -f RELEASE_NOTES.md ]; then
+            awk -v header="## ${VERSION_NAME}" '
+              {
+                line = $0
+                sub(/\r$/, "", line)
+                if (line ~ /^## /) {
+                  if (found) exit
+                  if (line == header || index(line, header " ") == 1) {
+                    found = 1
+                  }
+                  next
+                }
+                if (found && line ~ /[^[:space:]]/) {
+                  print line
+                }
+              }
+            ' RELEASE_NOTES.md > "$NOTES_FILE"
+          fi
+          if [ ! -s "$NOTES_FILE" ]; then
+            printf '%s\n' "Versión ${VERSION_NAME} (compilación ${VERSION_CODE}) firmada de forma consistente para actualizar encima sin desinstalar." > "$NOTES_FILE"
+          fi
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
             if gh release view "$TAG" >/dev/null 2>&1; then
               gh release upload "$TAG" "$APK_PATH" --clobber
+              gh release edit "$TAG" --notes-file "$NOTES_FILE" || true
             else
               gh release create "$TAG" "$APK_PATH" \
                 --title "FamiChat v${VERSION_NAME} (Build ${VERSION_CODE})" \
-                --notes "Versión ${VERSION_NAME} (compilación ${VERSION_CODE}) firmada de forma consistente para actualizar encima sin desinstalar."
+                --notes-file "$NOTES_FILE"
             fi
           fi
+          rm -f "$NOTES_FILE"
