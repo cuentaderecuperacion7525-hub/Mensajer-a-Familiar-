@@ -1,5 +1,10 @@
 # Novedades de FamiChat
 
+## 2.8.34
+- Pantalla de Actualizaciones renovada con resumen claro en "Qué incluye" y enlace al historial de versiones bajo demanda.
+- Nuevo botón de píldora "Actualizar ahora" y opción "Más tarde" que pospone el aviso por 24 horas manteniendo el indicador en Ajustes.
+- Mejor presentación de los estados de búsqueda, descarga, instalación y errores en modo claro, oscuro y letra grande.
+
 ## 2.8.33
 - Notificaciones instantáneas desde el servidor sin el aviso fijo "FamiChat activo" para ahorrar batería como en las apps de mensajería comerciales.
 - Se evitaron avisos duplicados cuando ya tienes FamiChat abierto en pantalla.

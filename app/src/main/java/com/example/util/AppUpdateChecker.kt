@@ -57,6 +57,18 @@ data class ApkInspectionResult(
     val signatureWarning: String? = null
 )
 
+data class VersionHistoryEntry(
+    val versionName: String,
+    val bullets: List<String>
+)
+
+sealed interface VersionHistoryUiState {
+    data object Idle : VersionHistoryUiState
+    data object Loading : VersionHistoryUiState
+    data class Loaded(val entries: List<VersionHistoryEntry>) : VersionHistoryUiState
+    data object Unavailable : VersionHistoryUiState
+}
+
 sealed interface AppUpdateUiState {
     data object Idle : AppUpdateUiState
     data object Checking : AppUpdateUiState
@@ -115,6 +127,165 @@ object AppUpdateChecker {
     ): Boolean {
         if (lastCheckedAtMs <= 0L) return true
         return (nowMs - lastCheckedAtMs) >= DAILY_CHECK_INTERVAL_MS
+    }
+
+    fun isUpdatePromptSnoozed(
+        snoozedUntilMs: Long,
+        nowMs: Long = System.currentTimeMillis()
+    ): Boolean = snoozedUntilMs > nowMs
+
+    private val FENCED_CODE_REGEX = Regex("""```[\s\S]*?```""")
+    private val INLINE_CODE_REGEX = Regex("""`[^`]*`""")
+    private val MARKDOWN_IMAGE_REGEX = Regex("""!\[[^\]]*]\([^)]*\)""")
+    private val MARKDOWN_LINK_REGEX = Regex("""\[[^\]]*]\([^)]*\)""")
+    private val HTML_TAG_REGEX = Regex("""<[^>]+>""")
+    private val BARE_URL_REGEX = Regex("""(?:https?://|www\.)\S+""", RegexOption.IGNORE_CASE)
+    private val HORIZONTAL_RULE_REGEX = Regex("""^[-*_]{3,}$""")
+    private val BULLET_PREFIX_REGEX = Regex("""^[-*•]\s*(.*)$""")
+    private val MARKDOWN_EMPHASIS_REGEX = Regex("""(\*\*|__|~~)""")
+
+    internal fun sanitizeReleaseNoteLine(rawLine: String): String {
+        var cleaned = rawLine.trim()
+        if (cleaned.isEmpty()) return ""
+        if (HORIZONTAL_RULE_REGEX.matches(cleaned)) return ""
+        cleaned = MARKDOWN_IMAGE_REGEX.replace(cleaned, "")
+        cleaned = INLINE_CODE_REGEX.replace(cleaned, "")
+        cleaned = HTML_TAG_REGEX.replace(cleaned, "")
+        cleaned = MARKDOWN_LINK_REGEX.replace(cleaned, "")
+        cleaned = BARE_URL_REGEX.replace(cleaned, "")
+        cleaned = MARKDOWN_EMPHASIS_REGEX.replace(cleaned, "")
+        cleaned = cleaned.replace(Regex("""^\s*#+\s*"""), "")
+        cleaned = cleaned.replace(Regex("""\s{2,}"""), " ").trim()
+        cleaned = cleaned.trimEnd(':', '-', '–', '—').trim()
+        if (cleaned.equals("Full Changelog", ignoreCase = true) ||
+            cleaned.equals("What's Changed", ignoreCase = true)
+        ) {
+            return ""
+        }
+        return cleaned
+    }
+
+    fun parseReleaseNotesBullets(rawNotes: String, maxItems: Int = 5): List<String> {
+        if (rawNotes.isBlank() || maxItems <= 0) return emptyList()
+        val withoutFencedCode = FENCED_CODE_REGEX.replace(rawNotes, "")
+        val lines = withoutFencedCode.lines()
+
+        val bulletLines = mutableListOf<String>()
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty() || HORIZONTAL_RULE_REGEX.matches(trimmed)) continue
+            val match = BULLET_PREFIX_REGEX.matchEntire(trimmed) ?: continue
+            val cleaned = sanitizeReleaseNoteLine(match.groupValues[1])
+            if (cleaned.isNotBlank()) {
+                bulletLines += cleaned
+                if (bulletLines.size >= maxItems) return bulletLines
+            }
+        }
+        if (bulletLines.isNotEmpty()) {
+            return bulletLines.take(maxItems)
+        }
+
+        val plainLines = mutableListOf<String>()
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty() || HORIZONTAL_RULE_REGEX.matches(trimmed)) continue
+            if (trimmed.startsWith("#")) continue
+            val cleaned = sanitizeReleaseNoteLine(trimmed)
+            if (cleaned.isNotBlank()) {
+                plainLines += cleaned
+                if (plainLines.size >= maxItems) return plainLines
+            }
+        }
+        return plainLines.take(maxItems)
+    }
+
+    fun simplifyUpdateErrorMessage(rawMessage: String, isDownloadError: Boolean): String {
+        val lower = rawMessage.lowercase()
+        return when {
+            lower.contains("sin conexión") ||
+                lower.contains("internet") ||
+                lower.contains("unknownhost") ||
+                lower.contains("connect") ||
+                lower.contains("red") -> "Sin conexión"
+            lower.contains("tardó") || lower.contains("timeout") -> "La conexión tardó demasiado"
+            lower.contains("espacio insuficiente") -> "Sin espacio suficiente"
+            lower.contains("preparando") || lower.contains("adjunto") -> "La actualización aún se está preparando"
+            lower.contains("verificado") || lower.contains("firma") -> "No se pudo verificar la descarga"
+            isDownloadError -> "No se pudo descargar"
+            else -> "No se pudo comprobar ahora"
+        }
+    }
+
+    fun encodeVersionHistoryJson(entries: List<VersionHistoryEntry>): String {
+        val arr = JSONArray()
+        for (entry in entries) {
+            val obj = JSONObject()
+            obj.put("v", entry.versionName)
+            val bArr = JSONArray()
+            for (b in entry.bullets) bArr.put(b)
+            obj.put("b", bArr)
+            arr.put(obj)
+        }
+        return arr.toString()
+    }
+
+    fun decodeVersionHistoryJson(rawJson: String): List<VersionHistoryEntry> {
+        if (rawJson.isBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(rawJson)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val version = obj.optString("v", "").trim()
+                    if (version.isEmpty()) continue
+                    val bArr = obj.optJSONArray("b")
+                    val bullets = buildList {
+                        if (bArr != null) {
+                            for (j in 0 until bArr.length()) {
+                                val text = bArr.optString(j, "").trim()
+                                if (text.isNotEmpty()) add(text)
+                            }
+                        }
+                    }
+                    add(VersionHistoryEntry(versionName = version, bullets = bullets))
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun fetchVersionHistory(rawRepoSlug: String): Result<List<VersionHistoryEntry>> = withContext(Dispatchers.IO) {
+        val slug = normalizeRepoSlug(rawRepoSlug)
+        if (slug.isEmpty()) {
+            return@withContext Result.failure(IllegalStateException("Canal no configurado"))
+        }
+        runCatching {
+            val request = Request.Builder()
+                .url("https://api.github.com/repos/$slug/releases?per_page=15")
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "FamiChat-Android")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (response.code !in 200..299) {
+                    error("No disponible")
+                }
+                val arr = JSONArray(response.body?.string().orEmpty())
+                val entries = buildList {
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        if (obj.optBoolean("draft", false)) continue
+                        val tag = obj.optString("tag_name", "").trim()
+                        if (tag.isEmpty()) continue
+                        val title = obj.optString("name", tag)
+                        val (verName, _) = parseReleaseVersion(tag, title)
+                        val body = obj.optString("body", "")
+                        val bullets = parseReleaseNotesBullets(body, maxItems = 5)
+                        add(VersionHistoryEntry(versionName = verName, bullets = bullets))
+                    }
+                }
+                if (entries.isEmpty()) error("Sin historial")
+                entries
+            }
+        }
     }
 
     fun formatLastCheckedLabel(
@@ -361,8 +532,7 @@ object AppUpdateChecker {
         val tagName = json.optString("tag_name", "").trim()
         if (tagName.isEmpty()) return null
         val title = json.optString("name", tagName)
-        val notes = json.optString("body", "")
-            .ifBlank { "Mejoras y correcciones de FamiChat." }
+        val notes = json.optString("body", "").trim()
         val htmlUrl = json.optString("html_url", repoWebUrl)
 
         var apkUrl = ""
@@ -604,7 +774,7 @@ object AppUpdateChecker {
                         tagName = tagName,
                         versionName = remoteVerName,
                         versionCode = remoteVerCode,
-                        releaseNotes = "Mejoras de estabilidad y rendimiento.",
+                        releaseNotes = "",
                         downloadUrl = resolvedApkUrl,
                         releasePageUrl = releasePage
                     )
@@ -634,7 +804,7 @@ object AppUpdateChecker {
                                 tagName = tagFromUrl.ifBlank { "latest" },
                                 versionName = rName,
                                 versionCode = rCode,
-                                releaseNotes = "Mejoras de estabilidad y rendimiento.",
+                                releaseNotes = "",
                                 downloadUrl = htmlApk,
                                 releasePageUrl = repoWebUrl
                             )

@@ -2306,7 +2306,7 @@ class ExampleRobolectricTest {
 
     // Core clean layout
     composeTestRule.onNodeWithText("Actualizaciones").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Versión ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Instalada: ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
     composeTestRule.onNodeWithText("Tienes la última versión").assertIsDisplayed()
     composeTestRule.onNodeWithTag("updates_last_checked_text").assertIsDisplayed()
     composeTestRule.onNodeWithText("Buscar actualizaciones").performScrollTo().assertIsDisplayed()
@@ -2320,7 +2320,7 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("updates_check_button").performScrollTo().performClick()
     assertEquals(1, checkClicks)
 
-    // Switch to admin: "Detalles técnicos" appears collapsed; expanding reveals read-only origin & build without repo editor
+    // Switch to admin: "Detalles técnicos" appears collapsed; expanding reveals build & secure channel status WITHOUT exposing repo slug
     composeTestRule.runOnUiThread { isAdminState.value = true }
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("updates_technical_details_toggle").performScrollTo().assertIsDisplayed()
@@ -2329,15 +2329,16 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("updates_technical_details_toggle").performScrollTo().performClick()
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithText("Compilación: ${BuildConfig.VERSION_CODE}").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithText("Origen: $repoSlug").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Canal de actualización: Configurado").performScrollTo().assertIsDisplayed()
+    assertEquals(0, composeTestRule.onAllNodesWithText(repoSlug, substring = true).fetchSemanticsNodes().size)
     assertEquals(0, composeTestRule.onAllNodesWithText("Cambiar repositorio", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
 
-    // Switch to UpdateAvailable state -> shows Novedades, Actualizar ahora, Más tarde
+    // Switch to UpdateAvailable state -> shows Qué incluye, Actualizar ahora, Más tarde
     val release = com.example.util.AppReleaseInfo(
       tagName = "v2.9.0",
       versionName = "2.9.0",
       versionCode = BuildConfig.VERSION_CODE + 1,
-      releaseNotes = "Mejoras de llamadas y seguridad.",
+      releaseNotes = "- Mejoras de llamadas y seguridad.\n- Ahorro de batería.",
       downloadUrl = "https://github.com/privado-owner/FamiChat-Privado/releases/download/v2.9.0/FamiChat.apk",
       releasePageUrl = "https://github.com/privado-owner/FamiChat-Privado/releases/tag/v2.9.0"
     )
@@ -2349,11 +2350,14 @@ class ExampleRobolectricTest {
       )
     }
     composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithText("Novedades de esta versión").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Hay una versión nueva").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Versión 2.9.0").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Qué incluye").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Mejoras de llamadas y seguridad.").performScrollTo().assertIsDisplayed()
     composeTestRule.onNodeWithText("Actualizar ahora").performScrollTo().assertIsDisplayed()
     composeTestRule.onNodeWithText("Más tarde").performScrollTo().assertIsDisplayed()
 
-    // Switch to Downloading state -> shows progress percentage and cancel button
+    // Switch to Downloading state -> shows progress percentage and Cancelar button
     composeTestRule.runOnUiThread {
       updateState.value = AppUpdateUiState.Downloading(
         release = release,
@@ -2363,15 +2367,19 @@ class ExampleRobolectricTest {
       )
     }
     composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Descargando versión 2.9.0…").performScrollTo().assertIsDisplayed()
     composeTestRule.onNodeWithTag("updates_progress_percent").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithTag("updates_cancel_download_button").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Cancelar").performScrollTo().assertIsDisplayed()
 
-    // Switch to Error state -> shows Reintentar
+    // Switch to Error state -> shows Reintentar and Cerrar with brief plain reason
     composeTestRule.runOnUiThread {
       updateState.value = AppUpdateUiState.Error("Sin conexión a internet. Verifica tu red e inténtalo de nuevo.")
     }
     composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("No se pudo completar").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Sin conexión").performScrollTo().assertIsDisplayed()
     composeTestRule.onNodeWithText("Reintentar").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Cerrar").performScrollTo().assertIsDisplayed()
   }
 
   @Test
@@ -2899,6 +2907,93 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("notifications_realtime_bg_switch").performScrollTo().performClick()
     composeTestRule.waitForIdle()
     assertTrue(realtimeEnabled.value)
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `app updates screen hides whats included card when release notes are empty handles version history and postpones for 24h`() = kotlinx.coroutines.test.runTest {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val prefs = com.example.data.local.PreferencesManager(context)
+
+    val emptyRelease = com.example.util.AppReleaseInfo(
+      tagName = "v2.9.1",
+      versionName = "2.9.1",
+      versionCode = BuildConfig.VERSION_CODE + 1,
+      releaseNotes = "",
+      downloadUrl = "https://github.com/owner/repo/releases/download/v2.9.1/FamiChat.apk",
+      releasePageUrl = "https://github.com/owner/repo/releases/tag/v2.9.1"
+    )
+    val updateState = androidx.compose.runtime.mutableStateOf<AppUpdateUiState>(
+      AppUpdateUiState.UpdateAvailable(
+        installedVersionName = BuildConfig.VERSION_NAME,
+        installedVersionCode = BuildConfig.VERSION_CODE,
+        release = emptyRelease
+      )
+    )
+    val historyState = androidx.compose.runtime.mutableStateOf<com.example.util.VersionHistoryUiState>(
+      com.example.util.VersionHistoryUiState.Idle
+    )
+    var historyRequested = 0
+    var postponeClicks = 0
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(
+        darkTheme = true,
+        fontScaleMultiplier = com.example.data.local.AppFontScale.LARGE.multiplier
+      ) {
+        com.example.ui.screens.AppUpdatesScreen(
+          isAdmin = false,
+          isDarkTheme = true,
+          currentRepoSlug = "owner/repo",
+          updateState = updateState.value,
+          lastCheckedAtMs = System.currentTimeMillis(),
+          versionHistoryState = historyState.value,
+          onCheckForUpdate = {},
+          onDownloadUpdate = {},
+          onCancelDownload = {},
+          onLoadVersionHistory = { historyRequested++ },
+          onPostponeUpdate = { postponeClicks++ },
+          onBack = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Empty release notes -> NO "Qué incluye" card shown
+    composeTestRule.onNodeWithText("Hay una versión nueva").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Versión 2.9.1").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_whats_included_card").assertDoesNotExist()
+    assertEquals(0, composeTestRule.onAllNodesWithText("Qué incluye").fetchSemanticsNodes().size)
+
+    // Tap "Ver historial de versiones" -> triggers on-demand load only on tap
+    assertEquals(0, historyRequested)
+    composeTestRule.onNodeWithTag("updates_version_history_link").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(1, historyRequested)
+
+    // When Unavailable -> link hides cleanly
+    composeTestRule.runOnUiThread {
+      historyState.value = com.example.util.VersionHistoryUiState.Unavailable
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("updates_version_history_link").assertDoesNotExist()
+
+    // Tap "Más tarde" -> invokes postpone callback and 24h snooze persists locally
+    composeTestRule.onNodeWithTag("updates_later_button").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(1, postponeClicks)
+
+    val snoozedUntil = System.currentTimeMillis() + com.example.util.AppUpdateChecker.DAILY_CHECK_INTERVAL_MS
+    prefs.setUpdateSnoozedUntil(snoozedUntil)
+    assertTrue(com.example.util.AppUpdateChecker.isUpdatePromptSnoozed(prefs.updateSnoozedUntilFlow.first()))
+
+    val history = listOf(
+      com.example.util.VersionHistoryEntry("2.8.33", listOf("Ahorro de batería", "Sin duplicados")),
+      com.example.util.VersionHistoryEntry("2.8.32", emptyList())
+    )
+    val encoded = com.example.util.AppUpdateChecker.encodeVersionHistoryJson(history)
+    prefs.setCachedVersionHistoryJson(encoded)
+    assertEquals(history, com.example.util.AppUpdateChecker.decodeVersionHistoryJson(prefs.getCachedVersionHistoryJson()))
   }
 }
 

@@ -354,6 +354,7 @@ fun FamiChatApp(
     val updateRepoSlug by vm.updateRepoSlug.collectAsStateWithLifecycle()
     val updateState by vm.updateState.collectAsStateWithLifecycle()
     val lastUpdateCheckAt by vm.lastUpdateCheckAt.collectAsStateWithLifecycle()
+    val versionHistoryState by vm.versionHistoryState.collectAsStateWithLifecycle()
     val themeMode by vm.themeMode.collectAsStateWithLifecycle()
     val fontScale by vm.fontScale.collectAsStateWithLifecycle()
     val activeCall by vm.activeCall.collectAsStateWithLifecycle()
@@ -705,9 +706,15 @@ fun FamiChatApp(
                         currentRepoSlug = updateRepoSlug,
                         updateState = updateState,
                         lastCheckedAtMs = lastUpdateCheckAt,
+                        versionHistoryState = versionHistoryState,
                         onCheckForUpdate = { vm.checkForAppUpdate(isAutoCheck = false) },
                         onDownloadUpdate = vm::downloadAndInstallUpdate,
                         onCancelDownload = vm::cancelUpdateDownload,
+                        onLoadVersionHistory = vm::loadVersionHistoryOnDemand,
+                        onPostponeUpdate = {
+                            vm.postponeUpdateFor24Hours()
+                            safePopBack(Routes.UPDATES)
+                        },
                         onBack = { safePopBack(Routes.UPDATES) }
                     )
                 }

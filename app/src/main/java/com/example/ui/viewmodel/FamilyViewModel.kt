@@ -498,8 +498,15 @@ class FamilyViewModel(
     val updateState: StateFlow<AppUpdateUiState> = _updateState.asStateFlow()
     val lastUpdateCheckAt: StateFlow<Long> = prefs.lastUpdateCheckAtFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    val updateSnoozedUntil: StateFlow<Long> = prefs.updateSnoozedUntilFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    private val _versionHistoryState =
+        MutableStateFlow<com.example.util.VersionHistoryUiState>(com.example.util.VersionHistoryUiState.Idle)
+    val versionHistoryState: StateFlow<com.example.util.VersionHistoryUiState> =
+        _versionHistoryState.asStateFlow()
     private var updateCheckJob: Job? = null
     private var updateDownloadJob: Job? = null
+    private var versionHistoryJob: Job? = null
 
     val activeMember: StateFlow<FamilyMemberEntity?> = combine(members, _activeMemberId) { list, id ->
         list.find { it.id == id }
@@ -2016,6 +2023,44 @@ class FamilyViewModel(
         updateDownloadJob?.cancel()
         updateDownloadJob = null
         _updateState.value = AppUpdateUiState.Idle
+    }
+
+    fun postponeUpdateFor24Hours() {
+        val untilMs = System.currentTimeMillis() + AppUpdateChecker.DAILY_CHECK_INTERVAL_MS
+        viewModelScope.launch {
+            prefs.setUpdateSnoozedUntil(untilMs)
+        }
+    }
+
+    fun loadVersionHistoryOnDemand() {
+        val current = _versionHistoryState.value
+        if (current is com.example.util.VersionHistoryUiState.Loaded && current.entries.isNotEmpty()) {
+            return
+        }
+        if (versionHistoryJob?.isActive == true) return
+        versionHistoryJob = viewModelScope.launch {
+            val cachedJson = prefs.getCachedVersionHistoryJson()
+            val cachedEntries = AppUpdateChecker.decodeVersionHistoryJson(cachedJson)
+            if (cachedEntries.isNotEmpty()) {
+                _versionHistoryState.value = com.example.util.VersionHistoryUiState.Loaded(cachedEntries)
+                return@launch
+            }
+            _versionHistoryState.value = com.example.util.VersionHistoryUiState.Loading
+            val savedSlug = prefs.updateRepoSlugFlow.first()
+            val effectiveSlug = savedSlug
+                .ifBlank { activeFamily.value?.updateRepoSlug.orEmpty() }
+                .ifBlank { BuildConfig.GITHUB_REPO }
+            val result = AppUpdateChecker.fetchVersionHistory(effectiveSlug)
+            result.fold(
+                onSuccess = { entries ->
+                    prefs.setCachedVersionHistoryJson(AppUpdateChecker.encodeVersionHistoryJson(entries))
+                    _versionHistoryState.value = com.example.util.VersionHistoryUiState.Loaded(entries)
+                },
+                onFailure = {
+                    _versionHistoryState.value = com.example.util.VersionHistoryUiState.Unavailable
+                }
+            )
+        }
     }
 
     // --- Admin Member & Group Management ---

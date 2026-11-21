@@ -78,6 +78,8 @@ class PreferencesManager(private val context: Context) {
         private val KEY_CACHED_MEMBERS_JSON = stringPreferencesKey("cached_members_json")
         private val KEY_SHOW_LAST_SEEN_MAP_JSON = stringPreferencesKey("show_last_seen_map_json")
         private val KEY_LAST_UPDATE_CHECK_AT = longPreferencesKey("last_update_check_at")
+        private val KEY_UPDATE_SNOOZED_UNTIL = longPreferencesKey("update_snoozed_until")
+        private val KEY_VERSION_HISTORY_CACHE_JSON = stringPreferencesKey("version_history_cache_json")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         private val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
         private val KEY_REALTIME_BACKGROUND_SERVICE = booleanPreferencesKey("realtime_background_service_enabled")
@@ -136,6 +138,10 @@ class PreferencesManager(private val context: Context) {
 
     val lastUpdateCheckAtFlow: Flow<Long> = context.dataStore.data.map { prefs ->
         prefs[KEY_LAST_UPDATE_CHECK_AT] ?: 0L
+    }
+
+    val updateSnoozedUntilFlow: Flow<Long> = context.dataStore.data.map { prefs ->
+        prefs[KEY_UPDATE_SNOOZED_UNTIL] ?: 0L
     }
 
     val notificationsEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
@@ -359,6 +365,22 @@ class PreferencesManager(private val context: Context) {
         if (timestampMs <= 0L) return
         context.dataStore.edit { prefs ->
             prefs[KEY_LAST_UPDATE_CHECK_AT] = timestampMs
+        }
+    }
+
+    suspend fun setUpdateSnoozedUntil(untilMs: Long) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_UPDATE_SNOOZED_UNTIL] = untilMs.coerceAtLeast(0L)
+        }
+    }
+
+    suspend fun getCachedVersionHistoryJson(): String {
+        return context.dataStore.data.first()[KEY_VERSION_HISTORY_CACHE_JSON] ?: ""
+    }
+
+    suspend fun setCachedVersionHistoryJson(json: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_VERSION_HISTORY_CACHE_JSON] = json
         }
     }
 

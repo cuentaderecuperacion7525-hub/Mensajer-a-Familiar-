@@ -507,4 +507,52 @@ class ExampleUnitTest {
       AppUpdateChecker.formatLastCheckedLabel(calYesterday1805.timeInMillis, calNow.timeInMillis)
     )
   }
+
+  @Test
+  fun `release notes bullet parser extracts up to 5 plain text items strips links images code and preserves empty notes`() {
+    val markdownNotes = """
+      ## Novedades
+      - Audio más claro en llamadas ![foto](https://example.com/a.png)
+      * Menor uso de batería [detalles](https://github.com/owner/repo)
+      • Corrección en el envío de fotos `sendPhoto()`
+      - Mejora de inicio https://example.com/info
+      - Punto cinco limpio
+      - Punto seis que no debe salir
+      ```kotlin
+      val secret = "ignore me"
+      ```
+    """.trimIndent()
+
+    val bullets = AppUpdateChecker.parseReleaseNotesBullets(markdownNotes)
+    assertEquals(5, bullets.size)
+    assertEquals("Audio más claro en llamadas", bullets[0])
+    assertEquals("Menor uso de batería", bullets[1])
+    assertEquals("Corrección en el envío de fotos", bullets[2])
+    assertEquals("Mejora de inicio", bullets[3])
+    assertEquals("Punto cinco limpio", bullets[4])
+    assertTrue(bullets.none { it.contains("https://") || it.contains("sendPhoto") || it.contains("secret") })
+
+    val plainFallback = """
+      Primera línea de mejora
+      Segunda línea útil
+      https://solo-enlace.example.com
+      ![solo imagen](https://example.com/x.png)
+      Tercera línea útil
+    """.trimIndent()
+    assertEquals(
+      listOf("Primera línea de mejora", "Segunda línea útil", "Tercera línea útil"),
+      AppUpdateChecker.parseReleaseNotesBullets(plainFallback)
+    )
+
+    assertTrue(AppUpdateChecker.parseReleaseNotesBullets("").isEmpty())
+    assertTrue(AppUpdateChecker.parseReleaseNotesBullets("   \n![img](https://a.com/b.png)\n```code```").isEmpty())
+
+    assertEquals("Sin conexión", AppUpdateChecker.simplifyUpdateErrorMessage("Sin conexión a internet.", false))
+    assertEquals("No se pudo descargar", AppUpdateChecker.simplifyUpdateErrorMessage("HTTP 502 error", true))
+
+    val now = 1_700_000_000_000L
+    assertTrue(AppUpdateChecker.isUpdatePromptSnoozed(now + AppUpdateChecker.DAILY_CHECK_INTERVAL_MS, now))
+    assertFalse(AppUpdateChecker.isUpdatePromptSnoozed(now - 1_000L, now))
+  }
 }
+
