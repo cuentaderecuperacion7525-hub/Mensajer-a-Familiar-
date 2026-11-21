@@ -1,5 +1,8 @@
 # Novedades de FamiChat
 
+## 2.8.35
+- "Novedades de esta versión" ahora vive dentro de Actualizaciones junto a "Buscar actualizaciones" en una tarjeta agrupada limpia, dejando Ajustes más ordenado.
+
 ## 2.8.34
 - Pantalla de Actualizaciones renovada con resumen claro en "Qué incluye" y enlace al historial de versiones bajo demanda.
 - Nuevo botón de píldora "Actualizar ahora" y opción "Más tarde" que pospone el aviso por 24 horas manteniendo el indicador en Ajustes.

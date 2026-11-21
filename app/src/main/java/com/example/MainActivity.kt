@@ -711,6 +711,7 @@ fun FamiChatApp(
                         onDownloadUpdate = vm::downloadAndInstallUpdate,
                         onCancelDownload = vm::cancelUpdateDownload,
                         onLoadVersionHistory = vm::loadVersionHistoryOnDemand,
+                        onOpenWhatsNew = { navigateSingleTop(Routes.SETTINGS_WHATS_NEW) },
                         onPostponeUpdate = {
                             vm.postponeUpdateFor24Hours()
                             safePopBack(Routes.UPDATES)

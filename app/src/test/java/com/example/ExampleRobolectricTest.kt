@@ -2517,9 +2517,24 @@ class ExampleRobolectricTest {
           onDownloadUpdate = {},
           onResetUpdateState = {},
           onOpenAdvanced = {},
+          onOpenUpdates = { screenState.value = "updates" },
           onOpenAppearance = { screenState.value = "appearance" },
-          onOpenFontSize = { screenState.value = "font_size" },
-          onOpenWhatsNew = { screenState.value = "whats_new" }
+          onOpenFontSize = { screenState.value = "font_size" }
+        )
+        "updates" -> com.example.ui.screens.AppUpdatesScreen(
+          isAdmin = false,
+          isDarkTheme = false,
+          currentRepoSlug = "",
+          updateState = AppUpdateUiState.UpToDate(
+            installedVersionName = BuildConfig.VERSION_NAME,
+            installedVersionCode = BuildConfig.VERSION_CODE
+          ),
+          lastCheckedAtMs = System.currentTimeMillis(),
+          onCheckForUpdate = {},
+          onDownloadUpdate = {},
+          onCancelDownload = {},
+          onOpenWhatsNew = { screenState.value = "whats_new" },
+          onBack = { screenState.value = "settings" }
         )
         "appearance" -> com.example.ui.screens.AppearanceSettingsScreen(
           selectedMode = selectedMode,
@@ -2537,13 +2552,13 @@ class ExampleRobolectricTest {
           installedVersionName = BuildConfig.VERSION_NAME,
           versionReleaseNotes = notesState.value,
           isDarkTheme = false,
-          onBack = { screenState.value = "settings" }
+          onBack = { screenState.value = "updates" }
         )
       }
     }
     composeTestRule.waitForIdle()
 
-    // Up to date shows "Al día" and NO red dot or "Nueva"
+    // Up to date shows "Al día" and NO red dot or "Nueva", and Novedades lives inside Actualizaciones
     composeTestRule.onNodeWithText("PREFERENCIAS").assertIsDisplayed()
     composeTestRule.onNodeWithText("APLICACIÓN").assertIsDisplayed()
     composeTestRule.onNodeWithText("Desactivadas", useUnmergedTree = true).assertIsDisplayed()
@@ -2551,6 +2566,7 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithText("Normal", useUnmergedTree = true).assertIsDisplayed()
     composeTestRule.onNodeWithText("Al día", useUnmergedTree = true).assertIsDisplayed()
     composeTestRule.onNodeWithTag("settings_update_row_badge_dot", useUnmergedTree = true).assertDoesNotExist()
+    composeTestRule.onNodeWithTag("settings_whats_new_row").assertDoesNotExist()
     assertEquals(0, composeTestRule.onAllNodesWithText("Nueva", useUnmergedTree = true).fetchSemanticsNodes().size)
 
     // Appearance sub-screen
@@ -2576,8 +2592,12 @@ class ExampleRobolectricTest {
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithText("Grande", useUnmergedTree = true).assertIsDisplayed()
 
-    // Whats new sub-screen: empty fallback and populated list
-    composeTestRule.onNodeWithTag("settings_whats_new_row").performScrollTo().performClick()
+    // Actualizaciones -> Novedades de esta versión sub-screen: empty fallback and populated list
+    composeTestRule.onNodeWithTag("settings_update_row").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Buscar actualizaciones").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Novedades de esta versión").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_whats_new_row").performScrollTo().performClick()
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithText("Versión ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
     composeTestRule.onNodeWithText("No hay novedades para esta versión.").assertIsDisplayed()
