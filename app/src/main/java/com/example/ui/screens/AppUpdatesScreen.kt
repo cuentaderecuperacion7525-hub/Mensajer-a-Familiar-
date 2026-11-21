@@ -410,7 +410,7 @@ fun AppUpdatesScreen(
                         val hasDeterminateProgress = pct >= 0 && (updateState.downloadedBytes > 0L || pct > 0)
                         val animatedProgress by animateFloatAsState(
                             targetValue = (pct / 100f).coerceIn(0f, 1f),
-                            animationSpec = tween(durationMillis = 180),
+                            animationSpec = tween(durationMillis = if (pct >= 100) 120 else 150),
                             label = "updateDownloadProgress"
                         )
                         val trackColor = brandBlue.copy(alpha = 0.16f)
@@ -432,7 +432,11 @@ fun AppUpdatesScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Descargando versión ${rel.versionName}...",
+                                        text = if (pct >= 100) {
+                                            "Descarga completa"
+                                        } else {
+                                            "Descargando versión ${rel.versionName}..."
+                                        },
                                         style = MaterialTheme.typography.titleSmall.copy(
                                             fontFamily = InterFontFamily,
                                             fontWeight = FontWeight.SemiBold
@@ -476,6 +480,8 @@ fun AppUpdatesScreen(
                                 }
 
                                 val sizeLabel = when {
+                                    pct >= 100 && updateState.totalBytes > 0L ->
+                                        String.format("%.1f MB de %.1f MB · Preparando instalación...", downloadedMb, totalMb)
                                     updateState.totalBytes > 0L && updateState.downloadedBytes > 0L ->
                                         String.format("%.1f MB de %.1f MB", downloadedMb, totalMb)
                                     updateState.downloadedBytes > 0L ->
@@ -497,6 +503,7 @@ fun AppUpdatesScreen(
 
                         OutlinedButton(
                             onClick = onCancelDownload,
+                            enabled = pct < 100,
                             shape = RoundedCornerShape(50),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -506,7 +513,7 @@ fun AppUpdatesScreen(
                             Text(
                                 text = "Cancelar descarga",
                                 style = MaterialTheme.typography.labelLarge.copy(fontFamily = InterFontFamily),
-                                color = textPrimary
+                                color = if (pct < 100) textPrimary else textSecondary
                             )
                         }
                     }

@@ -1,5 +1,8 @@
 # Novedades de FamiChat
 
+## 2.8.32
+- La barra de descarga de actualizaciones ahora llega suavemente al 100% y muestra "Descarga completa" antes de iniciar la instalación.
+
 ## 2.8.31
 - Nuevo botón estilo píldora en Actualizaciones con azul vibrante, respuesta táctil suave y estado integrado "Buscando..." con indicador de carga.
 

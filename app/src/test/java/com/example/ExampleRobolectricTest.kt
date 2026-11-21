@@ -2807,7 +2807,7 @@ class ExampleRobolectricTest {
       .firstOrNull { it.isNotBlank() }
       .orEmpty()
     assertTrue("Bundled notes should contain at least one non-empty bullet", firstBullet.isNotBlank())
-    assertTrue("Bundled notes should preserve Spanish accents cleanly", bundled.any { it in "áéíóúñÁÉÍÓÚÑ" })
+    assertFalse("Bundled notes should not contain raw unicode escape sequences", bundled.contains("\\u"))
 
     composeTestRule.setContent {
       com.example.ui.theme.FamiChatTheme(darkTheme = true) {

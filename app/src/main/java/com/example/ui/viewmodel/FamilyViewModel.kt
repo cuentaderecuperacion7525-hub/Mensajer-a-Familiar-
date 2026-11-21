@@ -1938,6 +1938,15 @@ class FamilyViewModel(
             }
             result.fold(
                 onSuccess = { apkFile ->
+                    val finalSize = apkFile.length().takeIf { it > 0L } ?: release.apkSizeBytes
+                    _updateState.value = AppUpdateUiState.Downloading(
+                        release = release,
+                        progressPercent = 100,
+                        downloadedBytes = finalSize.coerceAtLeast(0L),
+                        totalBytes = finalSize,
+                        statusLabel = "Descarga completa"
+                    )
+                    delay(400L)
                     _updateState.value = AppUpdateUiState.ReadyToInstall(
                         release = release,
                         apkFilePath = apkFile.absolutePath
