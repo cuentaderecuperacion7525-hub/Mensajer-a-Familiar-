@@ -1,5 +1,9 @@
 # Novedades de FamiChat
 
+## 2.8.36
+- Actualizaciones ahora abre un menú limpio con solo "Buscar actualizaciones" y "Novedades de esta versión", sin leyendas adicionales afuera.
+- Al tocar "Buscar actualizaciones" se abre la pantalla dedicada con el estado de la versión, novedades de la nueva actualización y descarga.
+
 ## 2.8.35
 - "Novedades de esta versión" ahora vive dentro de Actualizaciones junto a "Buscar actualizaciones" en una tarjeta agrupada limpia, dejando Ajustes más ordenado.
 
