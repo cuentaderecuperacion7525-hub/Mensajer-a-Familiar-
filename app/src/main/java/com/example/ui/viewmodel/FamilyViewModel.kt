@@ -1921,8 +1921,8 @@ class FamilyViewModel(
                 release = release,
                 progressPercent = 0,
                 downloadedBytes = 0L,
-                totalBytes = -1L,
-                statusLabel = "Iniciando gestor de descargas Android..."
+                totalBytes = release.apkSizeBytes,
+                statusLabel = "Conectando con el servidor..."
             )
             val result = AppUpdateChecker.downloadApkToCache(
                 context = appContext,

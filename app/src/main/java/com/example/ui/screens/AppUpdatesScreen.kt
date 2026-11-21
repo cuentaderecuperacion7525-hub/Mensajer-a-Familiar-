@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -444,6 +446,13 @@ fun AppUpdatesScreen(
                         val pct = updateState.progressPercent
                         val downloadedMb = updateState.downloadedBytes / (1024f * 1024f)
                         val totalMb = updateState.totalBytes / (1024f * 1024f)
+                        val hasDeterminateProgress = pct >= 0 && (updateState.downloadedBytes > 0L || pct > 0)
+                        val animatedProgress by animateFloatAsState(
+                            targetValue = (pct / 100f).coerceIn(0f, 1f),
+                            animationSpec = tween(durationMillis = 180),
+                            label = "updateDownloadProgress"
+                        )
+                        val trackColor = brandBlue.copy(alpha = 0.16f)
 
                         Surface(
                             shape = RoundedCornerShape(16.dp),
@@ -467,8 +476,10 @@ fun AppUpdatesScreen(
                                             fontFamily = InterFontFamily,
                                             fontWeight = FontWeight.SemiBold
                                         ),
-                                        color = textPrimary
+                                        color = textPrimary,
+                                        modifier = Modifier.weight(1f)
                                     )
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = if (pct >= 0) "$pct%" else String.format("%.1f MB", downloadedMb),
                                         style = MaterialTheme.typography.titleSmall.copy(
@@ -480,10 +491,11 @@ fun AppUpdatesScreen(
                                     )
                                 }
 
-                                if (pct >= 0) {
+                                if (hasDeterminateProgress) {
                                     LinearProgressIndicator(
-                                        progress = { (pct / 100f).coerceIn(0f, 1f) },
+                                        progress = { animatedProgress },
                                         color = brandBlue,
+                                        trackColor = trackColor,
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(8.dp)
@@ -493,6 +505,7 @@ fun AppUpdatesScreen(
                                 } else {
                                     LinearProgressIndicator(
                                         color = brandBlue,
+                                        trackColor = trackColor,
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(8.dp)
@@ -501,12 +514,15 @@ fun AppUpdatesScreen(
                                     )
                                 }
 
-                                val sizeLabel = if (updateState.totalBytes > 0L) {
-                                    String.format("%.1f MB de %.1f MB", downloadedMb, totalMb)
-                                } else if (updateState.downloadedBytes > 0L) {
-                                    String.format("%.1f MB descargados", downloadedMb)
-                                } else {
-                                    "Preparando descarga segura..."
+                                val sizeLabel = when {
+                                    updateState.totalBytes > 0L && updateState.downloadedBytes > 0L ->
+                                        String.format("%.1f MB de %.1f MB", downloadedMb, totalMb)
+                                    updateState.downloadedBytes > 0L ->
+                                        String.format("%.1f MB descargados", downloadedMb)
+                                    updateState.statusLabel.isNotBlank() ->
+                                        updateState.statusLabel
+                                    else ->
+                                        "Conectando con el servidor..."
                                 }
                                 Text(
                                     text = sizeLabel,

@@ -82,6 +82,7 @@ class ExampleRobolectricTest {
           "assets": [
             {
               "name": "FamiChat-v2.1.1-c12-debug.apk",
+              "size": 24576000,
               "browser_download_url": "https://github.com/u/r/releases/download/v2.1.1-c12/FamiChat-v2.1.1-c12-debug.apk"
             }
           ]
@@ -92,6 +93,7 @@ class ExampleRobolectricTest {
     val selected = AppUpdateChecker.selectBestReleaseFromApiJsonArray(json, "https://github.com/u/r/releases")
     assertEquals("v2.1.1-c12", selected?.tagName)
     assertEquals(12, selected?.versionCode)
+    assertEquals(24_576_000L, selected?.apkSizeBytes)
     assertTrue(selected?.downloadUrl?.endsWith(".apk") == true)
   }
 

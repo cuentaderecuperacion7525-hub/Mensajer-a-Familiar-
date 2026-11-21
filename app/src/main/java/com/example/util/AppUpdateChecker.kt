@@ -40,7 +40,8 @@ data class AppReleaseInfo(
     val versionCode: Int?,
     val releaseNotes: String,
     val downloadUrl: String,
-    val releasePageUrl: String
+    val releasePageUrl: String,
+    val apkSizeBytes: Long = -1L
 )
 
 data class ApkInspectionResult(
@@ -284,10 +285,10 @@ object AppUpdateChecker {
     private val downloadClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .protocols(listOf(Protocol.HTTP_1_1))
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(12, TimeUnit.SECONDS)
-            .writeTimeout(12, TimeUnit.SECONDS)
-            .callTimeout(60, TimeUnit.SECONDS)
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(25, TimeUnit.SECONDS)
+            .writeTimeout(20, TimeUnit.SECONDS)
+            .callTimeout(5, TimeUnit.MINUTES)
             .followRedirects(true)
             .followSslRedirects(true)
             .retryOnConnectionFailure(true)
@@ -365,6 +366,7 @@ object AppUpdateChecker {
         val htmlUrl = json.optString("html_url", repoWebUrl)
 
         var apkUrl = ""
+        var apkSizeBytes = -1L
         val assets = json.optJSONArray("assets")
         if (assets != null) {
             for (i in 0 until assets.length()) {
@@ -373,6 +375,7 @@ object AppUpdateChecker {
                 val download = asset.optString("browser_download_url", "")
                 if (assetName.endsWith(".apk", ignoreCase = true) && download.startsWith("http")) {
                     apkUrl = download
+                    apkSizeBytes = asset.optLong("size", -1L).takeIf { it > 0L } ?: -1L
                     break
                 }
             }
@@ -385,7 +388,8 @@ object AppUpdateChecker {
             versionCode = remoteVerCode,
             releaseNotes = notes,
             downloadUrl = apkUrl,
-            releasePageUrl = htmlUrl
+            releasePageUrl = htmlUrl,
+            apkSizeBytes = apkSizeBytes
         )
     }
 
@@ -733,27 +737,30 @@ object AppUpdateChecker {
         val updatesDir = File(context.filesDir, "updates").apply { mkdirs() }
         val targetFile = File(updatesDir, "FamiChat-update.apk")
 
-        // 1) Primary engine: Android native DownloadManager (handles redirects, mobile/Wi-Fi handoff & background OEM throttling)
-        val dmResult = downloadApkWithSystemManager(
-            context = context,
-            release = release,
-            url = url,
-            targetFile = targetFile,
-            onProgress = onProgress
-        )
-        if (dmResult.isSuccess) {
-            return@withContext dmResult
-        }
-        val dmErr = dmResult.exceptionOrNull()
-        if (dmErr is CancellationException) throw dmErr
-
-        // 2) Fallback engine: Hardened HTTP/1.1 OkHttp stream with strict zero-byte stall guard
-        return@withContext downloadApkWithHttpFallback(
+        // 1) Primary engine: Direct HTTPS streaming with real-time byte-by-byte progress updates
+        val httpResult = downloadApkWithHttpFallback(
             release = release,
             url = url,
             updatesDir = updatesDir,
             targetFile = targetFile,
-            priorReason = dmErr?.localizedMessage,
+            priorReason = null,
+            onProgress = onProgress
+        )
+        if (httpResult.isSuccess) {
+            return@withContext httpResult
+        }
+        val httpErr = httpResult.exceptionOrNull()
+        if (httpErr is CancellationException || httpErr is SecurityException) {
+            if (httpErr is CancellationException) throw httpErr
+            return@withContext httpResult
+        }
+
+        // 2) Fallback engine: Android native DownloadManager (handles OEM network quirks)
+        return@withContext downloadApkWithSystemManager(
+            context = context,
+            release = release,
+            url = url,
+            targetFile = targetFile,
             onProgress = onProgress
         )
     }
@@ -831,15 +838,19 @@ object AppUpdateChecker {
                     error("La descarga fue cancelada por el sistema.")
                 }
 
-                if (downloaded > maxBytesSeen) {
-                    maxBytesSeen = downloaded
+                val diskBytes = if (stagedFile.exists()) stagedFile.length().coerceAtLeast(0L) else 0L
+                val effectiveDownloaded = maxOf(downloaded, diskBytes)
+                val effectiveTotal = if (total > 0L) total else release.apkSizeBytes
+
+                if (effectiveDownloaded > maxBytesSeen) {
+                    maxBytesSeen = effectiveDownloaded
                     lastAdvanceAt = now
                 }
 
-                val pct = if (total > 0L) {
-                    ((downloaded * 100L) / total).toInt().coerceIn(0, 100)
+                val pct = if (effectiveTotal > 0L) {
+                    ((effectiveDownloaded * 100L) / effectiveTotal).toInt().coerceIn(0, 100)
                 } else {
-                    if (downloaded > 0L) -1 else 0
+                    if (effectiveDownloaded > 0L) -1 else 0
                 }
 
                 when (status) {
@@ -851,7 +862,7 @@ object AppUpdateChecker {
                         finishedCleanly = true
                         runCatching { dm.remove(downloadId) }
                         runCatching { if (stagedFile.exists()) stagedFile.delete() }
-                        val finalTotal = if (total > 0L) total else targetFile.length()
+                        val finalTotal = if (effectiveTotal > 0L) effectiveTotal else targetFile.length()
                         onProgress(100, targetFile.length(), finalTotal, "Descarga completa")
                         return Result.success(targetFile)
                     }
@@ -867,7 +878,7 @@ object AppUpdateChecker {
                             DownloadManager.PAUSED_QUEUED_FOR_WIFI -> "Esperando red Wi-Fi o datos..."
                             else -> "Descarga en pausa por el sistema..."
                         }
-                        onProgress(pct, downloaded, total, pauseLabel)
+                        onProgress(pct, effectiveDownloaded, effectiveTotal, pauseLabel)
                         if (maxBytesSeen == 0L && (now - startedAt) > 16_000L) {
                             error("El gestor del sistema quedó esperando red en 0%.")
                         }
@@ -877,19 +888,19 @@ object AppUpdateChecker {
                     }
 
                     DownloadManager.STATUS_PENDING -> {
-                        onProgress(pct, downloaded, total, "Conectando con gestor Android...")
+                        onProgress(pct, effectiveDownloaded, effectiveTotal, "Conectando con el servidor...")
                         if ((now - startedAt) > 15_000L) {
                             error("El gestor del sistema tardó demasiado en iniciar.")
                         }
                     }
 
                     DownloadManager.STATUS_RUNNING -> {
-                        val runningLabel = if (downloaded <= 0L) {
+                        val runningLabel = if (effectiveDownloaded <= 0L) {
                             "Conectando con el servidor..."
                         } else {
-                            "Descargando con gestor Android..."
+                            "Descargando actualización..."
                         }
-                        onProgress(pct, downloaded, total, runningLabel)
+                        onProgress(pct, effectiveDownloaded, effectiveTotal, runningLabel)
                         if (maxBytesSeen == 0L && (now - startedAt) > 18_000L) {
                             error("No se recibieron datos después de 18 s.")
                         }
@@ -899,7 +910,7 @@ object AppUpdateChecker {
                     }
                 }
 
-                delay(350L)
+                delay(200L)
             }
             @Suppress("UNREACHABLE_CODE")
             Result.failure(IllegalStateException("Descarga interrumpida"))
@@ -977,7 +988,7 @@ object AppUpdateChecker {
 
         return runCatching {
             val maxAttempts = 2
-            var expectedTotalBytes = -1L
+            var expectedTotalBytes = release.apkSizeBytes.takeIf { it > 0L } ?: -1L
             var lastError: Throwable? = null
 
             for (attempt in 1..maxAttempts) {
@@ -993,7 +1004,7 @@ object AppUpdateChecker {
                         if (expectedTotalBytes > 0L) ((resumeOffset * 100L) / expectedTotalBytes).toInt().coerceIn(0, 100) else 0,
                         resumeOffset,
                         expectedTotalBytes,
-                        "Probando conexión directa (intento $attempt/$maxAttempts)..."
+                        "Conectando con el servidor..."
                     )
 
                     val reqBuilder = Request.Builder()
@@ -1008,6 +1019,11 @@ object AppUpdateChecker {
                     }
 
                     downloadClient.newCall(reqBuilder.build()).execute().use { response ->
+                        val finalUrl = response.request.url.toString()
+                        if (!isTrustedDownloadUrl(finalUrl)) {
+                            throw SecurityException("La descarga fue bloqueada porque la redirección no es un origen HTTPS verificado.")
+                        }
+
                         val code = response.code
                         if (code == 416) {
                             if (expectedTotalBytes > 0L && resumeOffset >= expectedTotalBytes && hasValidZipMagic(partFile)) {
@@ -1030,6 +1046,7 @@ object AppUpdateChecker {
                             isPartial && bodyLen > 0L -> resumeOffset + bodyLen
                             !isPartial && bodyLen > 0L -> bodyLen
                             expectedTotalBytes > 0L -> expectedTotalBytes
+                            release.apkSizeBytes > 0L -> release.apkSizeBytes
                             else -> -1L
                         }
                         if (totalBytes > 0L) {
@@ -1044,11 +1061,11 @@ object AppUpdateChecker {
                         val initialPct = if (totalBytes > 0L) {
                             ((downloaded * 100L) / totalBytes).toInt().coerceIn(0, 100)
                         } else -1
-                        onProgress(initialPct, downloaded, totalBytes, "Descarga directa en curso...")
+                        onProgress(initialPct, downloaded, totalBytes, "Descargando actualización...")
 
                         body.byteStream().use { input ->
-                            BufferedOutputStream(FileOutputStream(partFile, isPartial), 64 * 1024).use { output ->
-                                val buffer = ByteArray(64 * 1024)
+                            BufferedOutputStream(FileOutputStream(partFile, isPartial), 32 * 1024).use { output ->
+                                val buffer = ByteArray(32 * 1024)
                                 while (true) {
                                     currentCoroutineContext().ensureActive()
                                     val read = input.read(buffer)
@@ -1071,10 +1088,10 @@ object AppUpdateChecker {
                                     } else {
                                         -1
                                     }
-                                    if ((pct != lastPercent && pct >= 0) || now - lastEmitTime >= 150L) {
+                                    if ((pct != lastPercent && pct >= 0) || now - lastEmitTime >= 120L) {
                                         lastPercent = pct
                                         lastEmitTime = now
-                                        onProgress(pct, downloaded, totalBytes, "Descarga directa en curso...")
+                                        onProgress(pct, downloaded, totalBytes, "Descargando actualización...")
                                     }
                                 }
                                 output.flush()
@@ -1096,6 +1113,7 @@ object AppUpdateChecker {
                     }
                 } catch (e: Throwable) {
                     currentCoroutineContext().ensureActive()
+                    if (e is SecurityException) throw e
                     lastError = e
                     if (attempt < maxAttempts) {
                         delay(500L)
@@ -1108,9 +1126,9 @@ object AppUpdateChecker {
                 val hint = lastError?.localizedMessage ?: priorReason
                 throw IllegalStateException(
                     if (!hint.isNullOrBlank()) {
-                        "No se pudo completar la descarga ($hint). Usa 'Descargar en navegador' para instalarla de inmediato."
+                        "No se pudo completar la descarga ($hint). Revisa tu conexión e intenta de nuevo."
                     } else {
-                        "La descarga se detuvo en 0%. Usa 'Descargar en navegador' para instalarla de inmediato."
+                        "No se pudo iniciar la descarga. Revisa tu conexión e intenta de nuevo."
                     }
                 )
             }
@@ -1118,7 +1136,7 @@ object AppUpdateChecker {
                 val mbDown = String.format("%.1f", completedSize / (1024f * 1024f))
                 val mbTot = String.format("%.1f", expectedTotalBytes / (1024f * 1024f))
                 throw IllegalStateException(
-                    "Conexión interrumpida ($mbDown MB de $mbTot MB). Reintenta o usa 'Descargar en navegador'."
+                    "Conexión interrumpida ($mbDown MB de $mbTot MB). Reintenta nuevamente."
                 )
             }
 
