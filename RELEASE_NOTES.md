@@ -1,5 +1,10 @@
 # Novedades de FamiChat
 
+## 2.8.41
+- Rediseño completo de Ajustes → Actualizaciones con la tarjeta limpia de «Buscar actualizaciones» y «Novedades de esta versión», y «Detalles técnicos» con etiqueta Admin solo para el administrador.
+- Nuevos cuadros emergentes limpios para «Estás al día», «Hay una versión nueva» con sección «Qué incluye», «Buscando…», «Descargando», «Lista para instalar», permiso de instalación y errores.
+- Caché de 10 minutos al buscar actualizaciones manualmente para evitar consultas repetidas innecesarias y límite de espera de 10 segundos.
+
 ## 2.8.40
 - Nueva opción "Compartir FamiChat" en Ajustes para enviar el archivo de la app con un nombre limpio (FamiChat-2.8.40.apk) sin texto técnico del paquete.
 

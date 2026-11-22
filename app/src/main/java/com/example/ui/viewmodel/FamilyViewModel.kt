@@ -1888,35 +1888,45 @@ class FamilyViewModel(
         }
     }
 
-    fun checkForAppUpdate(isAutoCheck: Boolean = false) {
+    fun checkForAppUpdate(isAutoCheck: Boolean = false, forceRefresh: Boolean = false) {
         val currentState = _updateState.value
-        if (isAutoCheck && (
-                currentState is AppUpdateUiState.Checking ||
-                currentState is AppUpdateUiState.Downloading ||
-                currentState is AppUpdateUiState.ReadyToInstall
-            )
+        if (currentState is AppUpdateUiState.Downloading ||
+            currentState is AppUpdateUiState.ReadyToInstall
         ) {
+            return
+        }
+        if (isAutoCheck && currentState is AppUpdateUiState.Checking) {
             return
         }
         updateCheckJob?.cancel()
         updateCheckJob = viewModelScope.launch {
+            val lastChecked = prefs.lastUpdateCheckAtFlow.first()
             if (isAutoCheck) {
-                val lastChecked = prefs.lastUpdateCheckAtFlow.first()
                 if (!AppUpdateChecker.shouldAutoCheckForUpdate(lastChecked)) {
                     return@launch
                 }
             } else {
+                if (!forceRefresh &&
+                    AppUpdateChecker.shouldReuseRecentManualCheck(
+                        lastCheckedAtMs = lastChecked,
+                        currentState = currentState
+                    )
+                ) {
+                    return@launch
+                }
                 _updateState.value = AppUpdateUiState.Checking
             }
             val savedSlug = prefs.updateRepoSlugFlow.first()
             val effectiveSlug = savedSlug
                 .ifBlank { activeFamily.value?.updateRepoSlug.orEmpty() }
                 .ifBlank { BuildConfig.GITHUB_REPO }
-            val result = AppUpdateChecker.checkLatestRelease(
-                rawRepoSlug = effectiveSlug,
-                installedVersionName = BuildConfig.VERSION_NAME,
-                installedVersionCode = BuildConfig.VERSION_CODE
-            )
+            val result = withTimeoutOrNull(AppUpdateChecker.UPDATE_CHECK_TIMEOUT_MS) {
+                AppUpdateChecker.checkLatestRelease(
+                    rawRepoSlug = effectiveSlug,
+                    installedVersionName = BuildConfig.VERSION_NAME,
+                    installedVersionCode = BuildConfig.VERSION_CODE
+                )
+            } ?: AppUpdateUiState.Error("La conexión tardó demasiado")
             when (result) {
                 is AppUpdateUiState.UpToDate,
                 is AppUpdateUiState.UpdateAvailable -> {

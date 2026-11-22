@@ -707,14 +707,13 @@ fun FamiChatApp(
                         updateState = updateState,
                         lastCheckedAtMs = lastUpdateCheckAt,
                         versionHistoryState = versionHistoryState,
-                        onCheckForUpdate = { vm.checkForAppUpdate(isAutoCheck = false) },
+                        onCheckForUpdate = { vm.checkForAppUpdate(isAutoCheck = false, forceRefresh = false) },
+                        onRetryCheckForUpdate = { vm.checkForAppUpdate(isAutoCheck = false, forceRefresh = true) },
                         onDownloadUpdate = vm::downloadAndInstallUpdate,
                         onCancelDownload = vm::cancelUpdateDownload,
+                        onOpenWhatsNew = { navigateSingleTop(Routes.SETTINGS_WHATS_NEW) },
                         onLoadVersionHistory = vm::loadVersionHistoryOnDemand,
-                        onPostponeUpdate = {
-                            vm.postponeUpdateFor24Hours()
-                            safePopBack(Routes.UPDATES)
-                        },
+                        onPostponeUpdate = { vm.postponeUpdateFor24Hours() },
                         onBack = { safePopBack(Routes.UPDATES) }
                     )
                 }

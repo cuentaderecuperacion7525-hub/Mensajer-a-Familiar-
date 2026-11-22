@@ -553,6 +553,13 @@ class ExampleUnitTest {
     val now = 1_700_000_000_000L
     assertTrue(AppUpdateChecker.isUpdatePromptSnoozed(now + AppUpdateChecker.DAILY_CHECK_INTERVAL_MS, now))
     assertFalse(AppUpdateChecker.isUpdatePromptSnoozed(now - 1_000L, now))
+
+    // 10-minute manual check cache reuse
+    val upToDate = com.example.util.AppUpdateUiState.UpToDate("2.8.41", 83)
+    assertTrue(AppUpdateChecker.shouldReuseRecentManualCheck(now - 5 * 60_000L, upToDate, now))
+    assertFalse(AppUpdateChecker.shouldReuseRecentManualCheck(now - 10 * 60_000L, upToDate, now))
+    assertFalse(AppUpdateChecker.shouldReuseRecentManualCheck(now - 1_000L, com.example.util.AppUpdateUiState.Idle, now))
+    assertFalse(AppUpdateChecker.shouldReuseRecentManualCheck(now - 1_000L, com.example.util.AppUpdateUiState.Error("Sin conexión"), now))
   }
 
   @Test

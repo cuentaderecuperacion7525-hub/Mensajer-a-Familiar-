@@ -2287,6 +2287,7 @@ class ExampleRobolectricTest {
       AppUpdateUiState.UpToDate(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
     )
     var checkClicks = 0
+    var cancelClicks = 0
     val repoSlug = "privado-owner/FamiChat-Privado"
 
     composeTestRule.setContent {
@@ -2298,32 +2299,32 @@ class ExampleRobolectricTest {
         lastCheckedAtMs = System.currentTimeMillis(),
         onCheckForUpdate = { checkClicks++ },
         onDownloadUpdate = {},
-        onCancelDownload = {},
+        onCancelDownload = { cancelClicks++ },
+        onOpenWhatsNew = {},
         onBack = {}
       )
     }
     composeTestRule.waitForIdle()
 
-    // Core clean layout
+    // Pantalla 1: Clean layout matching Image 1 (NO big status circle or "Estás al día" outside)
     composeTestRule.onNodeWithText("Actualizaciones").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Instalada: ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Tienes la última versión").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("updates_last_checked_text").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Buscar actualizaciones").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Buscar actualizaciones").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Comprueba si hay una versión nueva de FamiChat").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Novedades de esta versión").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Mira lo nuevo que trae").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_dialog_card").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("updates_row_new_badge_dot", useUnmergedTree = true).assertDoesNotExist()
 
-    // "Cambiar repositorio" and repo/build info must NOT appear for non-admin
+    // "Cambiar repositorio", "Detalles técnicos", and repo slug must NOT appear for non-admin
     assertEquals(0, composeTestRule.onAllNodesWithText("Cambiar repositorio", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
     assertEquals(0, composeTestRule.onAllNodesWithText("Detalles técnicos", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
     assertEquals(0, composeTestRule.onAllNodesWithText(repoSlug, substring = true).fetchSemanticsNodes().size)
 
-    // Tap "Buscar actualizaciones"
-    composeTestRule.onNodeWithTag("updates_check_button").performScrollTo().performClick()
-    assertEquals(1, checkClicks)
-
-    // Switch to admin: "Detalles técnicos" appears collapsed; expanding reveals build & secure channel status WITHOUT exposing repo slug
+    // Switch to admin: "Detalles técnicos" with "Admin" pill appears collapsed; expanding reveals build & secure channel WITHOUT repo slug
     composeTestRule.runOnUiThread { isAdminState.value = true }
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("updates_technical_details_toggle").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Admin").assertIsDisplayed()
     assertEquals(0, composeTestRule.onAllNodesWithText(repoSlug, substring = true).fetchSemanticsNodes().size)
 
     composeTestRule.onNodeWithTag("updates_technical_details_toggle").performScrollTo().performClick()
@@ -2333,7 +2334,19 @@ class ExampleRobolectricTest {
     assertEquals(0, composeTestRule.onAllNodesWithText(repoSlug, substring = true).fetchSemanticsNodes().size)
     assertEquals(0, composeTestRule.onAllNodesWithText("Cambiar repositorio", substring = true, ignoreCase = true).fetchSemanticsNodes().size)
 
-    // Switch to UpdateAvailable state -> shows Qué incluye, Actualizar ahora, Más tarde
+    // Cuadro 2: Tap "Buscar actualizaciones" when UpToDate -> opens "Estás al día" dialog
+    composeTestRule.onNodeWithTag("updates_check_button").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(1, checkClicks)
+    composeTestRule.onNodeWithTag("updates_state_up_to_date").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Estás al día").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Tienes la última versión: ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_last_checked_text").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_accept_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("updates_dialog_card").assertDoesNotExist()
+
+    // Cuadro 3: UpdateAvailable -> red dot appears next to title; tapping opens dialog with Qué incluye, Actualizar ahora, Más tarde
     val release = com.example.util.AppReleaseInfo(
       tagName = "v2.9.0",
       versionName = "2.9.0",
@@ -2350,14 +2363,17 @@ class ExampleRobolectricTest {
       )
     }
     composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithText("Hay una versión nueva").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithText("Versión 2.9.0").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithText("Qué incluye").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithText("Mejoras de llamadas y seguridad.").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithText("Actualizar ahora").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithText("Más tarde").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_row_new_badge_dot", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_check_button").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Hay una versión nueva").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Versión 2.9.0").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Qué incluye").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Mejoras de llamadas y seguridad.").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Actualizar ahora").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Más tarde").assertIsDisplayed()
 
-    // Switch to Downloading state -> shows progress percentage and Cancelar button
+    // Cuadro 4B: Downloading -> shows "Descargando versión 2.9.0", "42 %", "No cierres la app", and red "Cancelar"
     composeTestRule.runOnUiThread {
       updateState.value = AppUpdateUiState.Downloading(
         release = release,
@@ -2367,19 +2383,25 @@ class ExampleRobolectricTest {
       )
     }
     composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithText("Descargando versión 2.9.0…").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithTag("updates_progress_percent").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithText("Cancelar").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Descargando versión 2.9.0").assertIsDisplayed()
+    composeTestRule.onNodeWithText("42 %").assertIsDisplayed()
+    composeTestRule.onNodeWithText("No cierres la app").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_cancel_download_button").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(1, cancelClicks)
+    composeTestRule.onNodeWithTag("updates_dialog_card").assertDoesNotExist()
 
-    // Switch to Error state -> shows Reintentar and Cerrar with brief plain reason
+    // Cuadro 4E: Error -> shows "No se pudo completar", "Sin conexión", "Reintentar", "Cerrar"
     composeTestRule.runOnUiThread {
       updateState.value = AppUpdateUiState.Error("Sin conexión a internet. Verifica tu red e inténtalo de nuevo.")
     }
     composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithText("No se pudo completar").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithText("Sin conexión").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithText("Reintentar").performScrollTo().assertIsDisplayed()
-    composeTestRule.onNodeWithText("Cerrar").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_check_button").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("No se pudo completar").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Sin conexión").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Reintentar").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Cerrar").assertIsDisplayed()
   }
 
   @Test
@@ -2594,12 +2616,17 @@ class ExampleRobolectricTest {
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithText("Grande", useUnmergedTree = true).assertIsDisplayed()
 
-    // Ajustes -> Actualizaciones opens AppUpdatesScreen directly
+    // Ajustes -> Actualizaciones opens clean Pantalla 1, and tapping Buscar actualizaciones shows Estás al día dialog
     composeTestRule.onNodeWithTag("settings_update_row").performScrollTo().performClick()
     composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithText("Instalada: ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Tienes la última versión").assertIsDisplayed()
     composeTestRule.onNodeWithTag("updates_check_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_whats_new_row").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_check_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Estás al día").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Tienes la última versión: ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_accept_button").performClick()
+    composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("updates_back_button").performClick()
     composeTestRule.waitForIdle()
 
@@ -2892,16 +2919,16 @@ class ExampleRobolectricTest {
 
     composeTestRule.onNodeWithTag("updates_check_button").assertIsDisplayed().assertIsEnabled()
     composeTestRule.onNodeWithText("Buscar actualizaciones").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("updates_check_spinner", useUnmergedTree = true).assertDoesNotExist()
+    composeTestRule.onNodeWithTag("updates_checking_indicator").assertDoesNotExist()
 
     composeTestRule.onNodeWithTag("updates_check_button").performClick()
     composeTestRule.waitForIdle()
 
     assertEquals(1, clicks)
     composeTestRule.onNodeWithTag("updates_state_checking").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("updates_check_button").assertIsDisplayed().assertIsNotEnabled()
-    composeTestRule.onNodeWithText("Buscando...").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("updates_check_spinner", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Buscando…").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Un momento, por favor").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_checking_indicator").assertIsDisplayed()
   }
 
   @Test
@@ -2986,29 +3013,23 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
 
-    // Empty release notes -> NO "Qué incluye" card shown
+    // Red dot is visible next to Buscar actualizaciones; tap to open UpdateAvailable dialog
+    composeTestRule.onNodeWithTag("updates_row_new_badge_dot", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_check_button").performClick()
+    composeTestRule.waitForIdle()
+
+    // Empty release notes -> NO "Qué incluye" section shown (works cleanly with LARGE font scale)
     composeTestRule.onNodeWithText("Hay una versión nueva").assertIsDisplayed()
     composeTestRule.onNodeWithText("Versión 2.9.1").assertIsDisplayed()
     composeTestRule.onNodeWithTag("updates_whats_included_card").assertDoesNotExist()
     assertEquals(0, composeTestRule.onAllNodesWithText("Qué incluye").fetchSemanticsNodes().size)
 
-    // Tap "Ver historial de versiones" -> triggers on-demand load only on tap
-    assertEquals(0, historyRequested)
-    composeTestRule.onNodeWithTag("updates_version_history_link").performScrollTo().performClick()
-    composeTestRule.waitForIdle()
-    assertEquals(1, historyRequested)
-
-    // When Unavailable -> link hides cleanly
-    composeTestRule.runOnUiThread {
-      historyState.value = com.example.util.VersionHistoryUiState.Unavailable
-    }
-    composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithTag("updates_version_history_link").assertDoesNotExist()
-
-    // Tap "Más tarde" -> invokes postpone callback and 24h snooze persists locally
+    // Tap "Más tarde" -> invokes postpone callback, closes dialog, and keeps red dot on Pantalla 1
     composeTestRule.onNodeWithTag("updates_later_button").performScrollTo().performClick()
     composeTestRule.waitForIdle()
     assertEquals(1, postponeClicks)
+    composeTestRule.onNodeWithTag("updates_dialog_card").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("updates_row_new_badge_dot", useUnmergedTree = true).assertIsDisplayed()
 
     val snoozedUntil = System.currentTimeMillis() + com.example.util.AppUpdateChecker.DAILY_CHECK_INTERVAL_MS
     prefs.setUpdateSnoozedUntil(snoozedUntil)

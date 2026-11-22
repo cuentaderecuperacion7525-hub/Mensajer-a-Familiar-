@@ -102,6 +102,8 @@ sealed interface AppUpdateUiState {
 object AppUpdateChecker {
 
     const val DAILY_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L
+    const val MANUAL_CHECK_CACHE_WINDOW_MS = 10L * 60L * 1000L
+    const val UPDATE_CHECK_TIMEOUT_MS = 10_000L
 
     private const val EXPECTED_DEBUG_SHA256 =
         "33D2C0F213FED29E496863488A303962B27C80F5C8C17F10C59B47DFFA15385C"
@@ -127,6 +129,23 @@ object AppUpdateChecker {
     ): Boolean {
         if (lastCheckedAtMs <= 0L) return true
         return (nowMs - lastCheckedAtMs) >= DAILY_CHECK_INTERVAL_MS
+    }
+
+    /**
+     * Reuses the cached result from the last check if it happened less than 10 minutes ago
+     * and we already hold a valid result in memory (UpToDate or UpdateAvailable).
+     */
+    fun shouldReuseRecentManualCheck(
+        lastCheckedAtMs: Long,
+        currentState: AppUpdateUiState,
+        nowMs: Long = System.currentTimeMillis()
+    ): Boolean {
+        if (lastCheckedAtMs <= 0L) return false
+        val hasReusableState = currentState is AppUpdateUiState.UpToDate ||
+            currentState is AppUpdateUiState.UpdateAvailable
+        if (!hasReusableState) return false
+        val elapsed = nowMs - lastCheckedAtMs
+        return elapsed in 0 until MANUAL_CHECK_CACHE_WINDOW_MS
     }
 
     fun isUpdatePromptSnoozed(
