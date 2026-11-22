@@ -1,5 +1,9 @@
 # Novedades de FamiChat
 
+## 2.8.44
+- Transición única y limpia al abrir FamiChat: se eliminó el doble destello del logo entre la pantalla de inicio de Android y los Chats.
+- Restauración inmediata de sesión también en la primera apertura tras actualizar, sin mostrar una segunda pantalla de carga.
+
 ## 2.8.43
 - Arranque en frío mucho más rápido: optimización del tamaño de la app (R8) para acelerar la apertura inicial desde el icono.
 - Restauración inmediata de la sesión y el perfil guardado al abrir, entrando a Chats desde el primer cuadro sin esperar lecturas secundarias.

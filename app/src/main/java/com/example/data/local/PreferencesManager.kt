@@ -170,21 +170,28 @@ class PreferencesManager(private val context: Context) {
     /**
      * Reads activeFamilyId, activeMemberId, and cached family members synchronously from a
      * lightweight SharedPreferences mirror so FamilyViewModel can open Chats on Frame 1 without
-     * waiting for DataStore disk parsing. Returns null on upgrading devices until the mirror
-     * has been populated once.
+     * waiting for DataStore disk parsing. On the very first launch after upgrading from an older
+     * version, falls back once to DataStore (bounded to 450 ms) and backfills the mirror so even
+     * the first open avoids flashing a second loading screen.
      */
     fun readInitialSessionSnapshotSync(): InitialSessionSnapshot? {
         val sp = bootSessionPrefs()
-        if (!sp.getBoolean(BOOT_SESSION_KEY_INITIALIZED, false)) {
-            return null
+        if (sp.getBoolean(BOOT_SESSION_KEY_INITIALIZED, false)) {
+            val cachedPair = decodeCachedMembers(sp.getString(BOOT_SESSION_KEY_CACHED_MEMBERS_JSON, null))
+            return InitialSessionSnapshot(
+                activeFamilyId = sp.getString(BOOT_SESSION_KEY_FAMILY_ID, null),
+                activeMemberId = sp.getString(BOOT_SESSION_KEY_MEMBER_ID, null),
+                cachedFamilyId = cachedPair?.first,
+                cachedMembers = cachedPair?.second.orEmpty()
+            )
         }
-        val cachedPair = decodeCachedMembers(sp.getString(BOOT_SESSION_KEY_CACHED_MEMBERS_JSON, null))
-        return InitialSessionSnapshot(
-            activeFamilyId = sp.getString(BOOT_SESSION_KEY_FAMILY_ID, null),
-            activeMemberId = sp.getString(BOOT_SESSION_KEY_MEMBER_ID, null),
-            cachedFamilyId = cachedPair?.first,
-            cachedMembers = cachedPair?.second.orEmpty()
-        )
+        return runCatching {
+            runBlocking(Dispatchers.IO) {
+                withTimeoutOrNull(450L) {
+                    readInitialSessionSnapshot()
+                }
+            }
+        }.getOrNull()
     }
 
     fun mirrorSessionSnapshot(snapshot: InitialSessionSnapshot) {

@@ -3144,12 +3144,19 @@ class ExampleRobolectricTest {
       )
     )
 
-    // 1. Fresh/upgrading device with empty mirror returns null so ViewModel falls back once to DataStore
+    // 1. Fresh device with empty DataStore & empty mirror returns empty snapshot and marks mirror initialized
+    kotlinx.coroutines.runBlocking {
+      prefs.setActiveFamilyId(null)
+      prefs.setActiveMemberId(null)
+      prefs.clearCachedFamilyMembers()
+    }
     context.getSharedPreferences("famichat_boot_session_prefs", Context.MODE_PRIVATE)
       .edit()
       .clear()
       .commit()
-    assertEquals(null, prefs.readInitialSessionSnapshotSync())
+    val emptySnap = prefs.readInitialSessionSnapshotSync()
+    assertTrue(emptySnap != null)
+    assertEquals(null, emptySnap?.activeMemberId)
 
     // 2. Saving selected session populates the synchronous mirror immediately
     kotlinx.coroutines.runBlocking {
@@ -3162,20 +3169,21 @@ class ExampleRobolectricTest {
     assertEquals("fam_fast_01", fastSnap.cachedFamilyId)
     assertEquals(2, fastSnap.cachedMembers.size)
 
-    // 3. Clearing mirror and reading from DataStore transparently backfills the mirror
+    // 3. Clearing mirror (simulating first open after update) falls back once to DataStore synchronously
+    // and backfills the mirror immediately so no second loading screen flashes
     context.getSharedPreferences("famichat_boot_session_prefs", Context.MODE_PRIVATE)
       .edit()
       .clear()
       .commit()
-    assertEquals(null, prefs.readInitialSessionSnapshotSync())
-    kotlinx.coroutines.runBlocking {
-      val dsSnap = prefs.readInitialSessionSnapshot()
-      assertEquals("m_admin", dsSnap.activeMemberId)
-    }
-    val backfilled = prefs.readInitialSessionSnapshotSync()
-    assertEquals("fam_fast_01", backfilled?.activeFamilyId)
-    assertEquals("m_admin", backfilled?.activeMemberId)
-    assertEquals(2, backfilled?.cachedMembers?.size)
+    val upgradedSnap = prefs.readInitialSessionSnapshotSync()
+    assertEquals("fam_fast_01", upgradedSnap?.activeFamilyId)
+    assertEquals("m_admin", upgradedSnap?.activeMemberId)
+    assertEquals(2, upgradedSnap?.cachedMembers?.size)
+    // Mirror is now initialized for instant subsequent reads
+    assertTrue(
+      context.getSharedPreferences("famichat_boot_session_prefs", Context.MODE_PRIVATE)
+        .getBoolean("initialized", false)
+    )
 
     // 4. Logging out to selector clears activeMemberId in mirror while keeping family & cached members
     kotlinx.coroutines.runBlocking {

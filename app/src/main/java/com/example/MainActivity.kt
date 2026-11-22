@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color as AndroidColor
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
@@ -148,6 +149,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
         val splashStartElapsedMs = SystemClock.elapsedRealtime()
+        // Dismiss cleanly in a single step so Android 12+ / OEM launchers never replay or flash the icon twice
+        splashScreen.setOnExitAnimationListener { splashScreenView ->
+            splashScreenView.remove()
+        }
         super.onCreate(savedInstanceState)
 
         val appCtx = applicationContext
@@ -162,6 +167,9 @@ class MainActivity : ComponentActivity() {
             AppThemeMode.DARK -> true
             AppThemeMode.SYSTEM -> systemDarkNow
         }
+        window.setBackgroundDrawable(
+            ColorDrawable(if (initialIsDark) 0xFF0D1117.toInt() else AndroidColor.WHITE)
+        )
         val initialBarStyle = if (initialIsDark) {
             SystemBarStyle.dark(AndroidColor.TRANSPARENT)
         } else {
@@ -314,6 +322,9 @@ class MainActivity : ComponentActivity() {
                         isDarkTheme = isDarkTheme,
                         externalOpenChatId = pendingNotifChatId,
                         onConsumeExternalOpenChatId = { pendingNotifChatId = null },
+                        onStartupFirstFrameReady = {
+                            isStartupReadyForSplash = true
+                        },
                         onStartupVisualReady = { screenName ->
                             StartupTimelineTracker.recordFirstScreenVisible(appContext, screenName)
                             isStartupReadyForSplash = true
@@ -383,6 +394,7 @@ fun FamiChatApp(
     externalOpenChatId: String?,
     onConsumeExternalOpenChatId: () -> Unit,
     onSignOutGoogle: () -> Unit,
+    onStartupFirstFrameReady: () -> Unit = {},
     onStartupVisualReady: (String) -> Unit = {}
 ) {
     val appContext = LocalContext.current.applicationContext
@@ -434,6 +446,9 @@ fun FamiChatApp(
     }
 
     if (showFamilySpacesSetup) {
+        SideEffect {
+            onStartupFirstFrameReady()
+        }
         LaunchedEffect(Unit) {
             onStartupVisualReady("Configurar familia")
         }
@@ -592,6 +607,9 @@ fun FamiChatApp(
             startDestination = initialRoute
         ) {
             composable(Routes.SELECTOR) {
+                SideEffect {
+                    onStartupFirstFrameReady()
+                }
                 LaunchedEffect(Unit) {
                     onStartupVisualReady("Selector de perfiles")
                 }
@@ -639,6 +657,9 @@ fun FamiChatApp(
                         FamiChatLogoLoadingScreen()
                     }
                 } else {
+                    SideEffect {
+                        onStartupFirstFrameReady()
+                    }
                     LaunchedEffect(Unit) {
                         onStartupVisualReady("Chats")
                     }
