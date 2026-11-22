@@ -55,10 +55,12 @@ import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -81,6 +83,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -113,8 +116,10 @@ import com.example.data.local.PreferencesManager
 import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.OnlineGreen
 import com.example.util.AppReleaseInfo
+import com.example.util.AppShareHelper
 import com.example.util.AppUpdateUiState
 import com.example.util.FamiChatNotificationHelper
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -144,6 +149,9 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var isPreparingShareApk by remember { mutableStateOf(false) }
     var systemNotifGranted by remember {
         mutableStateOf(FamiChatNotificationHelper.canPostNotifications(context))
     }
@@ -176,6 +184,7 @@ fun SettingsScreen(
 
     Scaffold(
         containerColor = surfaceBg,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             TopAppBar(
@@ -408,6 +417,62 @@ fun SettingsScreen(
                     chevronTint = chevronTint,
                     testTag = "settings_whats_new_row",
                     onClick = onOpenWhatsNew
+                )
+                SettingsInsetDivider(color = dividerColor)
+                SettingsFlatRow(
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Share,
+                            contentDescription = null,
+                            tint = iconTint,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    },
+                    title = "Compartir FamiChat",
+                    titleColor = inkPrimary,
+                    trailingContent = if (isPreparingShareApk) {
+                        {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    strokeWidth = 2.dp,
+                                    color = sectionBlue,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Preparando…",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 12.sp
+                                    ),
+                                    color = inkSecondary,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    } else {
+                        null
+                    },
+                    showChevron = !isPreparingShareApk,
+                    chevronTint = chevronTint,
+                    testTag = "settings_share_app_row",
+                    onClick = {
+                        if (!isPreparingShareApk) {
+                            isPreparingShareApk = true
+                            scope.launch {
+                                val result = AppShareHelper.prepareInstalledApkForSharing(context)
+                                    .mapCatching { file ->
+                                        AppShareHelper.launchShareApkChooser(context, file).getOrThrow()
+                                    }
+                                isPreparingShareApk = false
+                                result.onFailure {
+                                    snackbarHostState.showSnackbar("No se pudo preparar el archivo para compartir.")
+                                }
+                            }
+                        }
+                    }
                 )
 
                 // Section: ADMINISTRADOR (admin only)

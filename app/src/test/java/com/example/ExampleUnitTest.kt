@@ -554,5 +554,15 @@ class ExampleUnitTest {
     assertTrue(AppUpdateChecker.isUpdatePromptSnoozed(now + AppUpdateChecker.DAILY_CHECK_INTERVAL_MS, now))
     assertFalse(AppUpdateChecker.isUpdatePromptSnoozed(now - 1_000L, now))
   }
+
+  @Test
+  fun `app share helper builds clean FamiChat apk filename without package id`() {
+    assertEquals("FamiChat-2.8.40.apk", com.example.util.AppShareHelper.buildShareApkFileName("2.8.40"))
+    assertEquals("FamiChat-2.8.40.apk", com.example.util.AppShareHelper.buildShareApkFileName("v2.8.40"))
+    assertEquals("FamiChat.apk", com.example.util.AppShareHelper.buildShareApkFileName("   "))
+    val generated = com.example.util.AppShareHelper.buildShareApkFileName("2.8.40")
+    assertFalse(generated.contains("aistudio", ignoreCase = true))
+    assertFalse(generated.contains("nidofamiliar", ignoreCase = true))
+  }
 }
 

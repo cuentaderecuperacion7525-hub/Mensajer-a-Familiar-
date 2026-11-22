@@ -2567,6 +2567,8 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithText("Al día", useUnmergedTree = true).assertIsDisplayed()
     composeTestRule.onNodeWithTag("settings_update_row_badge_dot", useUnmergedTree = true).assertDoesNotExist()
     composeTestRule.onNodeWithTag("settings_whats_new_row").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("settings_share_app_row").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Compartir FamiChat").performScrollTo().assertIsDisplayed()
     assertEquals(0, composeTestRule.onAllNodesWithText("Nueva", useUnmergedTree = true).fetchSemanticsNodes().size)
 
     // Appearance sub-screen

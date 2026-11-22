@@ -1,5 +1,8 @@
 # Novedades de FamiChat
 
+## 2.8.40
+- Nueva opción "Compartir FamiChat" en Ajustes para enviar el archivo de la app con un nombre limpio (FamiChat-2.8.40.apk) sin texto técnico del paquete.
+
 ## 2.8.39
 - Ajustes → Actualizaciones abre directamente la pantalla renovada con el estado de la versión, tarjeta "Qué incluye", historial bajo demanda, botón "Actualizar ahora" y opción "Más tarde" por 24 horas.
 - "Novedades de esta versión" vuelve a estar disponible directamente en Ajustes.
