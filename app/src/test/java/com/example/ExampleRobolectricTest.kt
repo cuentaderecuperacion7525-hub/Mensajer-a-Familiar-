@@ -2519,19 +2519,10 @@ class ExampleRobolectricTest {
           onOpenAdvanced = {},
           onOpenUpdates = { screenState.value = "updates" },
           onOpenAppearance = { screenState.value = "appearance" },
-          onOpenFontSize = { screenState.value = "font_size" }
+          onOpenFontSize = { screenState.value = "font_size" },
+          onOpenWhatsNew = { screenState.value = "whats_new" }
         )
-        "updates" -> com.example.ui.screens.AppUpdatesHubScreen(
-          isDarkTheme = false,
-          updateState = AppUpdateUiState.UpToDate(
-            installedVersionName = BuildConfig.VERSION_NAME,
-            installedVersionCode = BuildConfig.VERSION_CODE
-          ),
-          onOpenCheckUpdates = { screenState.value = "updates_check" },
-          onOpenWhatsNew = { screenState.value = "whats_new" },
-          onBack = { screenState.value = "settings" }
-        )
-        "updates_check" -> com.example.ui.screens.AppUpdatesScreen(
+        "updates" -> com.example.ui.screens.AppUpdatesScreen(
           isAdmin = false,
           isDarkTheme = false,
           currentRepoSlug = "",
@@ -2543,7 +2534,7 @@ class ExampleRobolectricTest {
           onCheckForUpdate = {},
           onDownloadUpdate = {},
           onCancelDownload = {},
-          onBack = { screenState.value = "updates" }
+          onBack = { screenState.value = "settings" }
         )
         "appearance" -> com.example.ui.screens.AppearanceSettingsScreen(
           selectedMode = selectedMode,
@@ -2561,7 +2552,7 @@ class ExampleRobolectricTest {
           installedVersionName = BuildConfig.VERSION_NAME,
           versionReleaseNotes = notesState.value,
           isDarkTheme = false,
-          onBack = { screenState.value = "updates" }
+          onBack = { screenState.value = "settings" }
         )
       }
     }
@@ -2575,7 +2566,7 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithText("Normal", useUnmergedTree = true).assertIsDisplayed()
     composeTestRule.onNodeWithText("Al día", useUnmergedTree = true).assertIsDisplayed()
     composeTestRule.onNodeWithTag("settings_update_row_badge_dot", useUnmergedTree = true).assertDoesNotExist()
-    composeTestRule.onNodeWithTag("settings_whats_new_row").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("settings_whats_new_row").performScrollTo().assertIsDisplayed()
     assertEquals(0, composeTestRule.onAllNodesWithText("Nueva", useUnmergedTree = true).fetchSemanticsNodes().size)
 
     // Appearance sub-screen
@@ -2601,29 +2592,17 @@ class ExampleRobolectricTest {
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithText("Grande", useUnmergedTree = true).assertIsDisplayed()
 
-    // Actualizaciones (Nivel 1: tarjeta limpia con solo las 2 opciones)
+    // Ajustes -> Actualizaciones opens AppUpdatesScreen directly
     composeTestRule.onNodeWithTag("settings_update_row").performScrollTo().performClick()
-    composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithTag("app_updates_hub_screen").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Buscar actualizaciones").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Novedades de esta versión").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("updates_hub_new_badge_dot", useUnmergedTree = true).assertDoesNotExist()
-    composeTestRule.onNodeWithText("Tienes la última versión").assertDoesNotExist()
-    composeTestRule.onNodeWithText("Instalada: ${BuildConfig.VERSION_NAME}").assertDoesNotExist()
-    composeTestRule.onNodeWithText("Detalles técnicos").assertDoesNotExist()
-
-    // Nivel 2A: Buscar actualizaciones -> abre AppUpdatesScreen completa
-    composeTestRule.onNodeWithTag("updates_hub_check_row").performClick()
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithText("Instalada: ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
     composeTestRule.onNodeWithText("Tienes la última versión").assertIsDisplayed()
     composeTestRule.onNodeWithTag("updates_check_button").assertIsDisplayed()
     composeTestRule.onNodeWithTag("updates_back_button").performClick()
     composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithTag("app_updates_hub_screen").assertIsDisplayed()
 
-    // Nivel 2B: Novedades de esta versión
-    composeTestRule.onNodeWithTag("updates_hub_whats_new_row").performClick()
+    // Ajustes -> Novedades de esta versión sub-screen: empty fallback and populated list
+    composeTestRule.onNodeWithTag("settings_whats_new_row").performScrollTo().performClick()
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithText("Versión ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
     composeTestRule.onNodeWithText("No hay novedades para esta versión.").assertIsDisplayed()

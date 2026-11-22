@@ -392,6 +392,23 @@ fun SettingsScreen(
                     testTag = "settings_update_row",
                     onClick = onOpenUpdates
                 )
+                SettingsInsetDivider(color = dividerColor)
+                SettingsFlatRow(
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Description,
+                            contentDescription = null,
+                            tint = iconTint,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    },
+                    title = "Novedades de esta versión",
+                    titleColor = inkPrimary,
+                    showChevron = true,
+                    chevronTint = chevronTint,
+                    testTag = "settings_whats_new_row",
+                    onClick = onOpenWhatsNew
+                )
 
                 // Section: ADMINISTRADOR (admin only)
                 if (isAdmin) {

@@ -1,5 +1,9 @@
 # Novedades de FamiChat
 
+## 2.8.39
+- Ajustes → Actualizaciones abre directamente la pantalla renovada con el estado de la versión, tarjeta "Qué incluye", historial bajo demanda, botón "Actualizar ahora" y opción "Más tarde" por 24 horas.
+- "Novedades de esta versión" vuelve a estar disponible directamente en Ajustes.
+
 ## 2.8.38
 - Pantalla Actualizaciones ajustada exactamente con la tarjeta limpia de dos opciones: "Buscar actualizaciones" y "Novedades de esta versión", sin textos adicionales afuera.
 - Al tocar "Buscar actualizaciones" se abre la pantalla completa de verificación, novedades de la nueva versión y descarga.
