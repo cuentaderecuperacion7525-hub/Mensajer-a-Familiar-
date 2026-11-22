@@ -15,9 +15,8 @@
 -keep class com.example.push.** { *; }
 -keep class com.example.MainActivity { *; }
 
-# --- Firebase / Firestore / Auth / FCM ---
--keep class com.google.firebase.** { *; }
--keep class com.google.android.gms.** { *; }
+# --- Firebase / Google Play Services (rely on official AAR consumer rules + registrars) ---
+-keep class * implements com.google.firebase.components.ComponentRegistrar
 -dontwarn com.google.firebase.**
 -dontwarn com.google.android.gms.**
 
