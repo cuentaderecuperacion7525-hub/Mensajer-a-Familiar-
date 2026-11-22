@@ -1,5 +1,10 @@
 # Novedades de FamiChat
 
+## 2.8.43
+- Arranque en frío mucho más rápido: optimización del tamaño de la app (R8) para acelerar la apertura inicial desde el icono.
+- Restauración inmediata de la sesión y el perfil guardado al abrir, entrando a Chats desde el primer cuadro sin esperar lecturas secundarias.
+- Procesamiento de la lista de chats fuera del hilo principal y carga diferida de secciones secundarias para que el inicio se sienta instantáneo.
+
 ## 2.8.42
 - Pantalla de inicio oficial de Android con el logo de FamiChat al abrir la app para evitar parpadeos o pantallas vacías en el arranque.
 - Carga inmediata del tema y tamaño de letra guardados antes de dibujar el primer cuadro.

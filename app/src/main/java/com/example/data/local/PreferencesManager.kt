@@ -69,6 +69,12 @@ class PreferencesManager(private val context: Context) {
         private const val BOOT_KEY_THEME_MODE = "theme_mode"
         private const val BOOT_KEY_FONT_SCALE = "font_scale"
 
+        private const val BOOT_SESSION_PREFS_NAME = "famichat_boot_session_prefs"
+        private const val BOOT_SESSION_KEY_INITIALIZED = "initialized"
+        private const val BOOT_SESSION_KEY_FAMILY_ID = "active_family_id"
+        private const val BOOT_SESSION_KEY_MEMBER_ID = "active_member_id"
+        private const val BOOT_SESSION_KEY_CACHED_MEMBERS_JSON = "cached_members_json"
+
         private val KEY_MASTER_PIN = stringPreferencesKey("master_pin")
         private val KEY_SWITCH_PIN = stringPreferencesKey("switch_pin")
         private val KEY_ACTIVE_MEMBER_ID = stringPreferencesKey("active_member_id")
@@ -148,6 +154,9 @@ class PreferencesManager(private val context: Context) {
     private fun bootDisplayPrefs() =
         context.applicationContext.getSharedPreferences(BOOT_DISPLAY_PREFS_NAME, Context.MODE_PRIVATE)
 
+    private fun bootSessionPrefs() =
+        context.applicationContext.getSharedPreferences(BOOT_SESSION_PREFS_NAME, Context.MODE_PRIVATE)
+
     private fun mirrorBootDisplayPrefs(
         themeMode: AppThemeMode? = null,
         fontScale: AppFontScale? = null
@@ -155,6 +164,51 @@ class PreferencesManager(private val context: Context) {
         val editor = bootDisplayPrefs().edit()
         if (themeMode != null) editor.putString(BOOT_KEY_THEME_MODE, themeMode.key)
         if (fontScale != null) editor.putString(BOOT_KEY_FONT_SCALE, fontScale.key)
+        editor.apply()
+    }
+
+    /**
+     * Reads activeFamilyId, activeMemberId, and cached family members synchronously from a
+     * lightweight SharedPreferences mirror so FamilyViewModel can open Chats on Frame 1 without
+     * waiting for DataStore disk parsing. Returns null on upgrading devices until the mirror
+     * has been populated once.
+     */
+    fun readInitialSessionSnapshotSync(): InitialSessionSnapshot? {
+        val sp = bootSessionPrefs()
+        if (!sp.getBoolean(BOOT_SESSION_KEY_INITIALIZED, false)) {
+            return null
+        }
+        val cachedPair = decodeCachedMembers(sp.getString(BOOT_SESSION_KEY_CACHED_MEMBERS_JSON, null))
+        return InitialSessionSnapshot(
+            activeFamilyId = sp.getString(BOOT_SESSION_KEY_FAMILY_ID, null),
+            activeMemberId = sp.getString(BOOT_SESSION_KEY_MEMBER_ID, null),
+            cachedFamilyId = cachedPair?.first,
+            cachedMembers = cachedPair?.second.orEmpty()
+        )
+    }
+
+    fun mirrorSessionSnapshot(snapshot: InitialSessionSnapshot) {
+        val editor = bootSessionPrefs().edit()
+            .putBoolean(BOOT_SESSION_KEY_INITIALIZED, true)
+        if (snapshot.activeFamilyId.isNullOrBlank()) {
+            editor.remove(BOOT_SESSION_KEY_FAMILY_ID)
+        } else {
+            editor.putString(BOOT_SESSION_KEY_FAMILY_ID, snapshot.activeFamilyId)
+        }
+        if (snapshot.activeMemberId.isNullOrBlank()) {
+            editor.remove(BOOT_SESSION_KEY_MEMBER_ID)
+        } else {
+            editor.putString(BOOT_SESSION_KEY_MEMBER_ID, snapshot.activeMemberId)
+        }
+        val famId = snapshot.cachedFamilyId
+        if (!famId.isNullOrBlank() && snapshot.cachedMembers.isNotEmpty()) {
+            editor.putString(
+                BOOT_SESSION_KEY_CACHED_MEMBERS_JSON,
+                encodeCachedMembers(famId, snapshot.cachedMembers)
+            )
+        } else {
+            editor.remove(BOOT_SESSION_KEY_CACHED_MEMBERS_JSON)
+        }
         editor.apply()
     }
 
@@ -302,6 +356,10 @@ class PreferencesManager(private val context: Context) {
     }
 
     suspend fun setActiveMemberId(memberId: String?) {
+        bootSessionPrefs().edit().apply {
+            putBoolean(BOOT_SESSION_KEY_INITIALIZED, true)
+            if (memberId == null) remove(BOOT_SESSION_KEY_MEMBER_ID) else putString(BOOT_SESSION_KEY_MEMBER_ID, memberId)
+        }.apply()
         context.dataStore.edit { prefs ->
             if (memberId == null) {
                 prefs.remove(KEY_ACTIVE_MEMBER_ID)
@@ -312,6 +370,10 @@ class PreferencesManager(private val context: Context) {
     }
 
     suspend fun setActiveFamilyId(familyId: String?) {
+        bootSessionPrefs().edit().apply {
+            putBoolean(BOOT_SESSION_KEY_INITIALIZED, true)
+            if (familyId == null) remove(BOOT_SESSION_KEY_FAMILY_ID) else putString(BOOT_SESSION_KEY_FAMILY_ID, familyId)
+        }.apply()
         context.dataStore.edit { prefs ->
             if (familyId == null) {
                 prefs.remove(KEY_ACTIVE_FAMILY_ID)
@@ -324,12 +386,14 @@ class PreferencesManager(private val context: Context) {
     suspend fun readInitialSessionSnapshot(): InitialSessionSnapshot {
         val prefs = context.dataStore.data.first()
         val cachedPair = decodeCachedMembers(prefs[KEY_CACHED_MEMBERS_JSON])
-        return InitialSessionSnapshot(
+        val snapshot = InitialSessionSnapshot(
             activeFamilyId = prefs[KEY_ACTIVE_FAMILY_ID],
             activeMemberId = prefs[KEY_ACTIVE_MEMBER_ID],
             cachedFamilyId = cachedPair?.first,
             cachedMembers = cachedPair?.second.orEmpty()
         )
+        mirrorSessionSnapshot(snapshot)
+        return snapshot
     }
 
     suspend fun saveSelectedSession(
@@ -338,6 +402,7 @@ class PreferencesManager(private val context: Context) {
         members: List<FamilyMemberEntity>
     ) {
         if (memberId.isBlank()) return
+        var mirroredEncodedMembers: String? = null
         context.dataStore.edit { prefs ->
             if (familyId.isNotBlank()) {
                 prefs[KEY_ACTIVE_FAMILY_ID] = familyId
@@ -351,11 +416,22 @@ class PreferencesManager(private val context: Context) {
                     preserveMemberId = memberId
                 )
                 val encoded = encodeCachedMembers(familyId, merged)
+                mirroredEncodedMembers = encoded
                 if (prefs[KEY_CACHED_MEMBERS_JSON] != encoded) {
                     prefs[KEY_CACHED_MEMBERS_JSON] = encoded
                 }
             }
         }
+        bootSessionPrefs().edit().apply {
+            putBoolean(BOOT_SESSION_KEY_INITIALIZED, true)
+            if (familyId.isNotBlank()) {
+                putString(BOOT_SESSION_KEY_FAMILY_ID, familyId)
+            }
+            putString(BOOT_SESSION_KEY_MEMBER_ID, memberId)
+            if (mirroredEncodedMembers != null) {
+                putString(BOOT_SESSION_KEY_CACHED_MEMBERS_JSON, mirroredEncodedMembers)
+            }
+        }.apply()
     }
 
     suspend fun saveCachedFamilyMembers(
@@ -364,6 +440,7 @@ class PreferencesManager(private val context: Context) {
         preserveMemberId: String? = null
     ) {
         if (familyId.isBlank() || members.isEmpty()) return
+        var mirroredEncodedMembers: String? = null
         context.dataStore.edit { prefs ->
             val merged = mergePreservingMember(
                 existingJson = prefs[KEY_CACHED_MEMBERS_JSON],
@@ -372,9 +449,16 @@ class PreferencesManager(private val context: Context) {
                 preserveMemberId = preserveMemberId
             )
             val encoded = encodeCachedMembers(familyId, merged)
+            mirroredEncodedMembers = encoded
             if (prefs[KEY_CACHED_MEMBERS_JSON] != encoded) {
                 prefs[KEY_CACHED_MEMBERS_JSON] = encoded
             }
+        }
+        if (mirroredEncodedMembers != null) {
+            bootSessionPrefs().edit()
+                .putBoolean(BOOT_SESSION_KEY_INITIALIZED, true)
+                .putString(BOOT_SESSION_KEY_CACHED_MEMBERS_JSON, mirroredEncodedMembers)
+                .apply()
         }
     }
 
@@ -397,6 +481,9 @@ class PreferencesManager(private val context: Context) {
     }
 
     suspend fun clearCachedFamilyMembers() {
+        bootSessionPrefs().edit()
+            .remove(BOOT_SESSION_KEY_CACHED_MEMBERS_JSON)
+            .apply()
         context.dataStore.edit { prefs ->
             prefs.remove(KEY_CACHED_MEMBERS_JSON)
         }

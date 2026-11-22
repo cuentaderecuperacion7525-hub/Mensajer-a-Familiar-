@@ -8,6 +8,7 @@ import com.example.BuildConfig
 import com.example.calls.WebRtcCallManager
 import com.example.data.local.AppFontScale
 import com.example.data.local.AppThemeMode
+import com.example.data.local.InitialSessionSnapshot
 import com.example.data.local.PreferencesManager
 import com.example.data.model.CallDirection
 import com.example.data.model.CallIceCandidateEntity
@@ -47,6 +48,7 @@ import com.example.util.VoiceAudioHelper
 import java.io.File
 import java.text.Normalizer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -63,6 +65,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -185,11 +188,38 @@ class FamilyViewModel(
         emit(fallback)
     }
 
-    val myFamilies: StateFlow<List<FamilySpace>> = cloudRepo.observeMyFamilies(currentUserId)
-        .safeFirestoreFlow(emptyList())
+    private val bootSessionSnapshot: InitialSessionSnapshot? = prefs.readInitialSessionSnapshotSync()
+    private val bootActiveFamilyId: String? = bootSessionSnapshot?.activeFamilyId?.takeIf { it.isNotBlank() }
+    private val bootActiveMemberId: String? = bootSessionSnapshot?.activeMemberId?.takeIf { it.isNotBlank() }
+    private val bootInstantMembers: List<FamilyMemberEntity> = run {
+        val snap = bootSessionSnapshot ?: return@run emptyList()
+        val fid = bootActiveFamilyId ?: return@run emptyList()
+        if (snap.cachedFamilyId == fid) snap.cachedMembers else emptyList()
+    }
+    private val hasBootFastActiveProfile: Boolean =
+        bootActiveFamilyId != null &&
+            bootActiveMemberId != null &&
+            bootInstantMembers.any { it.id == bootActiveMemberId }
+    private val hasBootFastSelector: Boolean =
+        bootActiveFamilyId != null &&
+            bootActiveMemberId == null &&
+            bootInstantMembers.isNotEmpty()
+    private val bootActiveMember: FamilyMemberEntity? =
+        if (hasBootFastActiveProfile) bootInstantMembers.find { it.id == bootActiveMemberId } else null
+
+    // Defer non-Chats Firestore listeners briefly during fast boot so Frame 1 renders unblocked.
+    private val _secondaryStreamsReady = MutableStateFlow(!hasBootFastActiveProfile)
+
+    val myFamilies: StateFlow<List<FamilySpace>> = _secondaryStreamsReady
+        .flatMapLatest { ready ->
+            if (!ready) flowOf(emptyList())
+            else cloudRepo.observeMyFamilies(currentUserId).safeFirestoreFlow(emptyList())
+        }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val _activeFamilyId = MutableStateFlow<String?>(null)
+    private val _activeFamilyId = MutableStateFlow<String?>(
+        if (hasBootFastActiveProfile || hasBootFastSelector) bootActiveFamilyId else null
+    )
     val activeFamilyId: StateFlow<String?> = _activeFamilyId.asStateFlow()
 
     val activeFamily: StateFlow<FamilySpace?> = _activeFamilyId
@@ -198,7 +228,9 @@ class FamilyViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    private val _activeMemberId = MutableStateFlow<String?>(null)
+    private val _activeMemberId = MutableStateFlow<String?>(
+        if (hasBootFastActiveProfile) bootActiveMemberId else null
+    )
     val activeMemberId: StateFlow<String?> = _activeMemberId.asStateFlow()
     private val _isAppForeground = MutableStateFlow(false)
     private val _pendingShowLastSeenOverride = MutableStateFlow<Pair<String, Boolean>?>(null)
@@ -210,13 +242,19 @@ class FamilyViewModel(
         }
     }
 
-    private val _isMembersLoading = MutableStateFlow(true)
+    private val _isMembersLoading = MutableStateFlow(!(hasBootFastActiveProfile || hasBootFastSelector))
     val isMembersLoading: StateFlow<Boolean> = _isMembersLoading.asStateFlow()
 
-    private val _isResolvingFamilySpace = MutableStateFlow(true)
+    private val _isResolvingFamilySpace = MutableStateFlow(!(hasBootFastActiveProfile || hasBootFastSelector))
     private val _membersRetryTick = MutableStateFlow(0)
     private val _optimisticRegisteredMember = MutableStateFlow<Pair<String, FamilyMemberEntity>?>(null)
-    private val _bootstrapFallbackMembers = MutableStateFlow<Pair<String, List<FamilyMemberEntity>>?>(null)
+    private val _bootstrapFallbackMembers = MutableStateFlow<Pair<String, List<FamilyMemberEntity>>?>(
+        if ((hasBootFastActiveProfile || hasBootFastSelector) && bootActiveFamilyId != null) {
+            bootActiveFamilyId to bootInstantMembers
+        } else {
+            null
+        }
+    )
     private var membersLoadingTimeoutJob: Job? = null
 
     private val rawMembers: StateFlow<List<FamilyMemberEntity>> = combine(
@@ -374,7 +412,11 @@ class FamilyViewModel(
                 lastSeenText = resolved.statusText
             )
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        if (hasBootFastActiveProfile || hasBootFastSelector) bootInstantMembers else emptyList()
+    )
 
     val rawChats: StateFlow<List<ChatThreadEntity>> = _activeFamilyId
         .flatMapLatest { fid ->
@@ -390,14 +432,21 @@ class FamilyViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val calls: StateFlow<List<CallRecordEntity>> = _activeFamilyId
+    private val secondaryFamilyIdFlow: Flow<String?> = combine(
+        _activeFamilyId,
+        _secondaryStreamsReady
+    ) { fid, ready ->
+        if (ready) fid else null
+    }.distinctUntilChanged()
+
+    val calls: StateFlow<List<CallRecordEntity>> = secondaryFamilyIdFlow
         .flatMapLatest { fid ->
             if (fid.isNullOrBlank()) flowOf(emptyList())
             else cloudRepo.observeCalls(fid, currentUserId).safeFirestoreFlow(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val rawStatuses: StateFlow<List<FamilyStatusEntity>> = _activeFamilyId
+    private val rawStatuses: StateFlow<List<FamilyStatusEntity>> = secondaryFamilyIdFlow
         .flatMapLatest { fid ->
             if (fid.isNullOrBlank()) flowOf(emptyList())
             else cloudRepo.observeStatuses(fid, currentUserId).safeFirestoreFlow(emptyList())
@@ -411,21 +460,21 @@ class FamilyViewModel(
         list.filter { it.expiresAt > now }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val shoppingItems: StateFlow<List<ShoppingItemEntity>> = _activeFamilyId
+    val shoppingItems: StateFlow<List<ShoppingItemEntity>> = secondaryFamilyIdFlow
         .flatMapLatest { fid ->
             if (fid.isNullOrBlank()) flowOf(emptyList())
             else cloudRepo.observeShoppingItems(fid, currentUserId).safeFirestoreFlow(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val events: StateFlow<List<FamilyEventEntity>> = _activeFamilyId
+    val events: StateFlow<List<FamilyEventEntity>> = secondaryFamilyIdFlow
         .flatMapLatest { fid ->
             if (fid.isNullOrBlank()) flowOf(emptyList())
             else cloudRepo.observeEvents(fid, currentUserId).safeFirestoreFlow(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val notes: StateFlow<List<FamilyNoteEntity>> = _activeFamilyId
+    val notes: StateFlow<List<FamilyNoteEntity>> = secondaryFamilyIdFlow
         .flatMapLatest { fid ->
             if (fid.isNullOrBlank()) flowOf(emptyList())
             else cloudRepo.observeNotes(fid, currentUserId).safeFirestoreFlow(emptyList())
@@ -510,9 +559,9 @@ class FamilyViewModel(
 
     val activeMember: StateFlow<FamilyMemberEntity?> = combine(members, _activeMemberId) { list, id ->
         list.find { it.id == id }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, bootActiveMember)
 
-    private val _isSessionReady = MutableStateFlow(false)
+    private val _isSessionReady = MutableStateFlow(hasBootFastActiveProfile || hasBootFastSelector)
     val isSessionReady: StateFlow<Boolean> = _isSessionReady.asStateFlow()
 
     private val _showFamilySpacesSetup = MutableStateFlow(false)
@@ -742,7 +791,7 @@ class FamilyViewModel(
             }
 
         existingItems + virtualDirectItems
-    }
+    }.flowOn(Dispatchers.Default)
 
     val chatPreviews: StateFlow<List<ChatThreadUi>> = combine(
         baseChatPreviews,
@@ -761,12 +810,19 @@ class FamilyViewModel(
                 .thenByDescending { it.isOnline }
                 .thenByDescending { it.chat.updatedAt }
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        FamiChatNotificationHelper.ensureChannels(appContext)
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO) {
+            FamiChatNotificationHelper.ensureChannels(appContext)
             VideoMediaHelper.cleanupExpiredStatusVideos(appContext)
+        }
+        if (!_secondaryStreamsReady.value) {
+            viewModelScope.launch {
+                delay(400L)
+                _secondaryStreamsReady.value = true
+            }
         }
         // Silent automatic update check at most once every 24 hours after session is ready
         viewModelScope.launch {
@@ -794,6 +850,64 @@ class FamilyViewModel(
         }
         viewModelScope.launch {
             try {
+                // Ultra-Fast Path 0: Already hydrated synchronously from SharedPreferences session mirror
+                // on Frame 1 -> skip blocking startup and run background sync right after Chats is visible.
+                if (hasBootFastActiveProfile && bootActiveFamilyId != null && bootActiveMemberId != null) {
+                    val savedFamilyId = bootActiveFamilyId
+                    val savedMemberId = bootActiveMemberId
+                    delay(350L)
+                    syncPushAndBackgroundWork(savedFamilyId, savedMemberId)
+                    cloudRepo.syncJoiningMembers(savedFamilyId, currentUserId)
+                    cloudRepo.syncSingleMemberUid(savedFamilyId, savedMemberId, currentUserId)
+                    cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
+                    if (_isAppForeground.value && isShowLastSeenEnabledFor(savedMemberId)) {
+                        startPresenceHeartbeat()
+                    }
+                    val serverMembers = cloudRepo.fetchMembersOnceFromServer(savedFamilyId, currentUserId)
+                    if (serverMembers.isNotEmpty()) {
+                        if (serverMembers.any { it.id == savedMemberId }) {
+                            prefs.saveCachedFamilyMembers(
+                                savedFamilyId,
+                                serverMembers,
+                                preserveMemberId = savedMemberId
+                            )
+                        } else {
+                            val confirmedDeleted = cloudRepo.isMemberConfirmedDeletedOnServer(
+                                familyId = savedFamilyId,
+                                memberId = savedMemberId,
+                                uid = currentUserId
+                            )
+                            if (confirmedDeleted) {
+                                _bootstrapFallbackMembers.value = null
+                                _activeMemberId.value = null
+                                prefs.setActiveMemberId(null)
+                                prefs.saveCachedFamilyMembers(savedFamilyId, serverMembers)
+                            } else {
+                                prefs.saveCachedFamilyMembers(
+                                    savedFamilyId,
+                                    serverMembers,
+                                    preserveMemberId = savedMemberId
+                                )
+                            }
+                        }
+                    } else {
+                        val rejoined = resolveInitialFamilySpace(savedFamilyId)
+                        if (!rejoined.isNullOrBlank() && rejoined != savedFamilyId) {
+                            _activeFamilyId.value = rejoined
+                            prefs.setActiveFamilyId(rejoined)
+                        }
+                    }
+                    return@launch
+                }
+
+                if (hasBootFastSelector && bootActiveFamilyId != null) {
+                    val savedFamilyId = bootActiveFamilyId
+                    delay(350L)
+                    cloudRepo.syncJoiningMembers(savedFamilyId, currentUserId)
+                    cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
+                    return@launch
+                }
+
                 val snapshot = prefs.readInitialSessionSnapshot()
                 val savedFamilyId = snapshot.activeFamilyId
                 val savedMemberId = snapshot.activeMemberId
