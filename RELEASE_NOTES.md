@@ -1,5 +1,9 @@
 # Novedades de FamiChat
 
+## 2.8.46
+- Corrección urgente del cierre al abrir detectado en la 2.8.45 (se desactivó el recorte agresivo de R8 que eliminaba clases internas de DataStore/Firestore).
+- Se conserva la compilación Release optimizada (`debuggable=false` con ART AOT y perfiles de arranque) y la misma firma para actualizar encima sin desinstalar.
+
 ## 2.8.45
 - Compilación optimizada de lanzamiento (Release con R8 y optimización nativa de Android) manteniendo la misma firma para actualizar encima sin desinstalar.
 - Reducción importante del tamaño de la app y del tiempo de arranque en frío al abrir desde el icono.
