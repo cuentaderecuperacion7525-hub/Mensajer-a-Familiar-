@@ -427,6 +427,7 @@ fun FamiChatApp(
     val activeFamilyId by vm.activeFamilyId.collectAsStateWithLifecycle()
     val isFamilyActionBusy by vm.isFamilyActionBusy.collectAsStateWithLifecycle()
     val isMembersLoading by vm.isMembersLoading.collectAsStateWithLifecycle()
+    val profileLoadError by vm.profileLoadError.collectAsStateWithLifecycle()
     val members by vm.members.collectAsStateWithLifecycle()
     val activeMember by vm.activeMember.collectAsStateWithLifecycle()
     val activeMemberId by vm.activeMemberId.collectAsStateWithLifecycle()
@@ -639,7 +640,8 @@ fun FamiChatApp(
                             }
                         }
                     },
-                    onRetryLoad = vm::retryLoadProfiles
+                    onRetryLoad = vm::retryLoadProfiles,
+                    errorMessage = profileLoadError
                 )
             }
 

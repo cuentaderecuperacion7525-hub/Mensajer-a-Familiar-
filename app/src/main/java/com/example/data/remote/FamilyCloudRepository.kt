@@ -252,17 +252,22 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         }
     }
 
-    suspend fun ensureFixedFamily(uid: String, fixedCode: String = "NIDO01"): Result<String> {
+    suspend fun ensureFixedFamily(
+        uid: String,
+        fixedCode: String = "NIDO01",
+        syncMembersInline: Boolean = true
+    ): Result<String> {
         val code = fixedCode.trim().uppercase()
         val invRef = db.collection("familyInvites").document(code)
         return try {
-            val invSnap = withTimeoutOrNull(10_000L) { invRef.get().await() }
+            val invSnap = withTimeoutOrNull(8_000L) { invRef.get().await() }
                 ?: return Result.failure(IllegalStateException("Tiempo de espera agotado al buscar la familia."))
             if (invSnap.exists() && invSnap.getBoolean("active") == true) {
                 joinFamilyByInviteCode(
                     uid = uid,
                     rawCode = code,
-                    prefetchedFamilyId = invSnap.getString("familyId")
+                    prefetchedFamilyId = invSnap.getString("familyId"),
+                    syncMembersInline = syncMembersInline
                 )
             } else {
                 val created = createFamily(
@@ -280,7 +285,8 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                         joinFamilyByInviteCode(
                             uid = uid,
                             rawCode = code,
-                            prefetchedFamilyId = retrySnap.getString("familyId")
+                            prefetchedFamilyId = retrySnap.getString("familyId"),
+                            syncMembersInline = syncMembersInline
                         )
                     } else {
                         created
@@ -297,7 +303,8 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
     suspend fun joinFamilyByInviteCode(
         uid: String,
         rawCode: String,
-        prefetchedFamilyId: String? = null
+        prefetchedFamilyId: String? = null,
+        syncMembersInline: Boolean = true
     ): Result<String> {
         val code = rawCode.trim().uppercase()
         if (code.length < 6 || !code.all { it.isLetterOrDigit() }) {
@@ -309,7 +316,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             val familyId = if (!prefetchedFamilyId.isNullOrBlank()) {
                 prefetchedFamilyId
             } else {
-                val invSnap = withTimeoutOrNull(10_000L) { invRef.get().await() }
+                val invSnap = withTimeoutOrNull(8_000L) { invRef.get().await() }
                     ?: return Result.failure(IllegalStateException("Tiempo de espera agotado al verificar el código."))
                 if (!invSnap.exists() || invSnap.getBoolean("active") != true) {
                     return Result.failure(IllegalArgumentException("Código familiar no encontrado o inactivo."))
@@ -323,7 +330,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             // Attempt joining directly in 1 round-trip; if already in memberUids, Firestore rules
             // reject the size+1 join update with PERMISSION_DENIED and we verify membership once.
             try {
-                withTimeoutOrNull(10_000L) {
+                withTimeoutOrNull(8_000L) {
                     fRef.update(
                         mapOf(
                             "memberUids" to FieldValue.arrayUnion(uid),
@@ -346,28 +353,30 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                 if (!alreadyMember) throw updateErr
             }
 
-            // Sync joining UID onto existing members in parallel so ProfileSelectorScreen loads right away
-            val bootstrap = runCatching {
-                withTimeoutOrNull(6_000L) { fRef.collection("meta").document("bootstrap").get().await() }
-            }.getOrNull()
-            val memberIds = (bootstrap?.get("memberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+            if (syncMembersInline) {
+                // Sync joining UID onto existing members in parallel when requested synchronously
+                val bootstrap = runCatching {
+                    withTimeoutOrNull(6_000L) { fRef.collection("meta").document("bootstrap").get().await() }
+                }.getOrNull()
+                val memberIds = (bootstrap?.get("memberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
 
-            if (memberIds.isNotEmpty()) {
-                coroutineScope {
-                    memberIds.map { mId ->
-                        async {
-                            runCatching {
-                                withTimeoutOrNull(5_000L) {
-                                    fRef.collection("members").document(mId).update(
-                                        mapOf(
-                                            "memberUids" to FieldValue.arrayUnion(uid),
-                                            "updatedAt" to FieldValue.serverTimestamp()
-                                        )
-                                    ).await()
+                if (memberIds.isNotEmpty()) {
+                    coroutineScope {
+                        memberIds.map { mId ->
+                            async {
+                                runCatching {
+                                    withTimeoutOrNull(5_000L) {
+                                        fRef.collection("members").document(mId).update(
+                                            mapOf(
+                                                "memberUids" to FieldValue.arrayUnion(uid),
+                                                "updatedAt" to FieldValue.serverTimestamp()
+                                            )
+                                        ).await()
+                                    }
                                 }
                             }
-                        }
-                    }.awaitAll()
+                        }.awaitAll()
+                    }
                 }
             }
             Result.success(familyId)

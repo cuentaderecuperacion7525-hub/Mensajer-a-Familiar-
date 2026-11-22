@@ -245,6 +245,9 @@ class FamilyViewModel(
     private val _isMembersLoading = MutableStateFlow(!(hasBootFastActiveProfile || hasBootFastSelector))
     val isMembersLoading: StateFlow<Boolean> = _isMembersLoading.asStateFlow()
 
+    private val _profileLoadError = MutableStateFlow<String?>(null)
+    val profileLoadError: StateFlow<String?> = _profileLoadError.asStateFlow()
+
     private val _isResolvingFamilySpace = MutableStateFlow(!(hasBootFastActiveProfile || hasBootFastSelector))
     private val _membersRetryTick = MutableStateFlow(0)
     private val _optimisticRegisteredMember = MutableStateFlow<Pair<String, FamilyMemberEntity>?>(null)
@@ -257,31 +260,70 @@ class FamilyViewModel(
     )
     private var membersLoadingTimeoutJob: Job? = null
 
+    private fun isNonRetryableFirestoreError(err: Throwable?): Boolean {
+        val code = err?.unwrapFirestoreException()?.code ?: return false
+        return code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED ||
+            code == com.google.firebase.firestore.FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED ||
+            code == com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAUTHENTICATED
+    }
+
+    private fun formatProfileLoadError(err: Throwable?): String {
+        val fsErr = err?.unwrapFirestoreException()
+        return when (fsErr?.code) {
+            com.google.firebase.firestore.FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED ->
+                "Se alcanzó el límite diario de lecturas en la nube (RESOURCE_EXHAUSTED). Se restablecerá mañana."
+            com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED ->
+                "Sin permisos para leer la familia en la nube (PERMISSION_DENIED)."
+            com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAVAILABLE ->
+                "No se pudo conectar con el servidor. Verifica tu conexión a internet (UNAVAILABLE)."
+            com.google.firebase.firestore.FirebaseFirestoreException.Code.DEADLINE_EXCEEDED ->
+                "La conexión tardó demasiado al descargar los perfiles (DEADLINE_EXCEEDED)."
+            else -> {
+                val raw = fsErr?.localizedMessage ?: err?.localizedMessage
+                if (!raw.isNullOrBlank()) {
+                    raw
+                } else {
+                    "No se pudieron descargar los perfiles. Verifica tu internet e intenta de nuevo."
+                }
+            }
+        }
+    }
+
     private val rawMembers: StateFlow<List<FamilyMemberEntity>> = combine(
         _activeFamilyId,
         _isResolvingFamilySpace,
         _membersRetryTick
-    ) { fid, resolving, _ -> fid to resolving }
-        .flatMapLatest { (fid, resolving) ->
+    ) { fid, resolving, retryTick ->
+        Triple(fid, if (fid.isNullOrBlank()) resolving else false, retryTick)
+    }
+        .distinctUntilChanged()
+        .flatMapLatest { (fid, resolving, _) ->
             membersLoadingTimeoutJob?.cancel()
             if (fid.isNullOrBlank()) {
                 _isMembersLoading.value = resolving
                 if (resolving) {
                     membersLoadingTimeoutJob = viewModelScope.launch {
-                        delay(22_000L)
+                        delay(16_000L)
                         if (_activeFamilyId.value.isNullOrBlank()) {
                             _isResolvingFamilySpace.value = false
                             _isMembersLoading.value = false
+                            if (_profileLoadError.value.isNullOrBlank()) {
+                                _profileLoadError.value =
+                                    "La conexión tardó demasiado al buscar los perfiles. Verifica tu internet e intenta de nuevo."
+                            }
                         }
                     }
                 }
                 flowOf(emptyList())
             } else {
-                _isMembersLoading.value = _bootstrapFallbackMembers.value?.let { it.first != fid || it.second.isEmpty() } ?: true
-                membersLoadingTimeoutJob = viewModelScope.launch {
-                    delay(12_000L)
-                    if (_activeFamilyId.value == fid) {
-                        _isMembersLoading.value = false
+                val hasFallback = _bootstrapFallbackMembers.value?.let { it.first == fid && it.second.isNotEmpty() } == true
+                _isMembersLoading.value = !hasFallback
+                if (!hasFallback) {
+                    membersLoadingTimeoutJob = viewModelScope.launch {
+                        delay(10_000L)
+                        if (_activeFamilyId.value == fid) {
+                            _isMembersLoading.value = false
+                        }
                     }
                 }
                 var handledInitialEmpty = false
@@ -1007,21 +1049,33 @@ class FamilyViewModel(
 
                 if (savedMemberId == null) {
                     // Show ProfileSelectorScreen immediately in "Cargando perfiles…" state on fresh device
+                    _profileLoadError.value = null
                     _isMembersLoading.value = true
                     _isSessionReady.value = true
                 }
-                var resolvedFamilyId = resolveInitialFamilySpace(savedFamilyId)
-                // Automatic silent retry on fresh install (e.g. cold Firestore gRPC / auth token propagation on 4G)
-                var attempt = 1
-                while (resolvedFamilyId == null && attempt < 3) {
-                    delay(attempt * 900L)
-                    resolvedFamilyId = resolveInitialFamilySpace(savedFamilyId)
-                    attempt++
+                var resolveResult = resolveInitialFamilySpaceDetailed(savedFamilyId)
+                var resolvedFamilyId = resolveResult.first
+                var lastResolveError = resolveResult.second
+                // At most 1 quick retry for transient network/gRPC cold-start hiccups; stop immediately on permanent errors.
+                if (resolvedFamilyId == null && !isNonRetryableFirestoreError(lastResolveError)) {
+                    delay(800L)
+                    resolveResult = resolveInitialFamilySpaceDetailed(savedFamilyId)
+                    resolvedFamilyId = resolveResult.first
+                    if (resolveResult.second != null) {
+                        lastResolveError = resolveResult.second
+                    }
                 }
                 if (resolvedFamilyId != null) {
-                    // Pre-fetch profiles before exposing the selector so first launch never flashes empty state
-                    val prefetchedMembers = cloudRepo.fetchMembersOnceFromServer(resolvedFamilyId, currentUserId)
-                        .ifEmpty { cloudRepo.fetchBootstrapMembersById(resolvedFamilyId) }
+                    _profileLoadError.value = null
+                    // On fresh installs, bootstrap member reads succeed immediately via isFamilyMemberByDoc(familyId)
+                    // without waiting for per-member memberUids writes to finish first.
+                    val prefetchedMembers = if (savedFamilyId.isNullOrBlank()) {
+                        cloudRepo.fetchBootstrapMembersById(resolvedFamilyId)
+                            .ifEmpty { cloudRepo.fetchMembersOnceFromServer(resolvedFamilyId, currentUserId) }
+                    } else {
+                        cloudRepo.fetchMembersOnceFromServer(resolvedFamilyId, currentUserId)
+                            .ifEmpty { cloudRepo.fetchBootstrapMembersById(resolvedFamilyId) }
+                    }
                     if (prefetchedMembers.isNotEmpty()) {
                         _bootstrapFallbackMembers.value = resolvedFamilyId to prefetchedMembers
                         prefs.saveCachedFamilyMembers(
@@ -1033,6 +1087,9 @@ class FamilyViewModel(
                     // Set _activeFamilyId BEFORE clearing _isResolvingFamilySpace so combine() never sees (null, false)
                     _activeFamilyId.value = resolvedFamilyId
                     _isResolvingFamilySpace.value = false
+                    if (prefetchedMembers.isNotEmpty()) {
+                        _isMembersLoading.value = false
+                    }
                     prefs.setActiveFamilyId(resolvedFamilyId)
                     // Sync members & chats in the background so the profile selector never waits on docs
                     viewModelScope.launch {
@@ -1083,13 +1140,16 @@ class FamilyViewModel(
                         }
                     }
                 } else {
+                    _profileLoadError.value = formatProfileLoadError(lastResolveError)
                     _isResolvingFamilySpace.value = false
                     _isMembersLoading.value = false
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                showMessage(e.localizedMessage ?: "No se pudieron cargar los perfiles")
+                val errMsg = formatProfileLoadError(e)
+                _profileLoadError.value = errMsg
+                showMessage(errMsg)
                 _isMembersLoading.value = false
             } finally {
                 _isResolvingFamilySpace.value = false
@@ -1316,47 +1376,87 @@ class FamilyViewModel(
 
     // --- Family Setup / Join ---
 
-    private suspend fun resolveInitialFamilySpace(savedFamilyId: String?): String? {
-        val fams = withTimeoutOrNull(7_000L) {
+    private suspend fun resolveInitialFamilySpaceDetailed(savedFamilyId: String?): Pair<String?, Throwable?> {
+        if (savedFamilyId.isNullOrBlank()) {
+            // Fresh install: join fixed family NIDO01 directly without wasting a families query on a brand-new UID.
+            val ensuredResult = withTimeoutOrNull(14_000L) {
+                cloudRepo.ensureFixedFamily(currentUserId, syncMembersInline = false)
+            } ?: Result.failure(IllegalStateException("Tiempo de espera agotado al conectar con la familia."))
+            val ensuredId = ensuredResult.getOrNull()
+            if (!ensuredId.isNullOrBlank()) {
+                return ensuredId to null
+            }
+            val ensureErr = ensuredResult.exceptionOrNull()
+            val fallbackFams = withTimeoutOrNull(5_000L) {
+                cloudRepo.fetchMyFamiliesOnce(currentUserId)
+            } ?: emptyList()
+            val fallbackId = fallbackFams.firstOrNull { it.inviteCode == "NIDO01" }?.id
+                ?: fallbackFams.firstOrNull()?.id
+            return fallbackId to (if (fallbackId == null) ensureErr else null)
+        }
+
+        val fams = withTimeoutOrNull(6_000L) {
             cloudRepo.fetchMyFamiliesOnce(currentUserId)
         } ?: emptyList()
-        val verifiedSavedFamilyId = savedFamilyId?.takeIf { id -> fams.any { it.id == id } }
-        return verifiedSavedFamilyId
-            ?: fams.firstOrNull { it.inviteCode == "NIDO01" }?.id
-            ?: withTimeoutOrNull(15_000L) { cloudRepo.ensureFixedFamily(currentUserId).getOrNull() }
+        val verifiedSavedFamilyId = savedFamilyId.takeIf { id -> fams.any { it.id == id } }
+        val directFound = verifiedSavedFamilyId ?: fams.firstOrNull { it.inviteCode == "NIDO01" }?.id
+        if (!directFound.isNullOrBlank()) {
+            return directFound to null
+        }
+        val ensuredResult = withTimeoutOrNull(14_000L) {
+            cloudRepo.ensureFixedFamily(currentUserId, syncMembersInline = false)
+        } ?: Result.failure(IllegalStateException("Tiempo de espera agotado al conectar con la familia."))
+        val resolved = ensuredResult.getOrNull()
             ?: fams.firstOrNull()?.id
             ?: savedFamilyId
+        return resolved to (if (resolved == null) ensuredResult.exceptionOrNull() else null)
     }
+
+    private suspend fun resolveInitialFamilySpace(savedFamilyId: String?): String? =
+        resolveInitialFamilySpaceDetailed(savedFamilyId).first
 
     fun retryLoadProfiles() {
         viewModelScope.launch {
+            _profileLoadError.value = null
             _isResolvingFamilySpace.value = true
             _isMembersLoading.value = true
             try {
                 val currentFamId = _activeFamilyId.value
+                var retryError: Throwable? = null
                 val targetFamId = if (currentFamId.isNullOrBlank()) {
                     val savedFamId = prefs.activeFamilyIdFlow.first()
-                    resolveInitialFamilySpace(savedFamId)?.also { fid ->
-                        _activeFamilyId.value = fid
-                        prefs.setActiveFamilyId(fid)
+                    val (fid, err) = resolveInitialFamilySpaceDetailed(savedFamId)
+                    retryError = err
+                    fid?.also {
+                        _activeFamilyId.value = it
+                        prefs.setActiveFamilyId(it)
                     }
                 } else {
                     val code = activeFamily.value?.inviteCode?.ifBlank { "NIDO01" } ?: "NIDO01"
-                    withTimeoutOrNull(10_000L) {
-                        cloudRepo.joinFamilyByInviteCode(currentUserId, code).getOrNull()
-                    } ?: currentFamId
+                    val joinRes = withTimeoutOrNull(10_000L) {
+                        cloudRepo.joinFamilyByInviteCode(currentUserId, code, syncMembersInline = false)
+                    }
+                    retryError = joinRes?.exceptionOrNull()
+                    joinRes?.getOrNull() ?: currentFamId
                 }
                 _isResolvingFamilySpace.value = false
                 if (!targetFamId.isNullOrBlank()) {
-                    _membersRetryTick.value += 1
                     val fallback = cloudRepo.fetchBootstrapMembersById(targetFamId)
+                        .ifEmpty { cloudRepo.fetchMembersOnceFromServer(targetFamId, currentUserId) }
                     if (fallback.isNotEmpty()) {
+                        _profileLoadError.value = null
                         _bootstrapFallbackMembers.value = targetFamId to fallback
+                        _isMembersLoading.value = false
+                    } else if (retryError != null) {
+                        _profileLoadError.value = formatProfileLoadError(retryError)
                     }
+                    _membersRetryTick.value += 1
                     viewModelScope.launch {
+                        cloudRepo.syncJoiningMembers(targetFamId, currentUserId)
                         cloudRepo.syncJoiningChats(targetFamId, currentUserId)
                     }
                 } else {
+                    _profileLoadError.value = formatProfileLoadError(retryError)
                     _isMembersLoading.value = false
                 }
             } finally {

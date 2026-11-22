@@ -140,7 +140,8 @@ fun ProfileSelectorScreen(
     snackbarMessage: String?,
     onClearSnackbar: () -> Unit,
     onSelectMember: (FamilyMemberEntity) -> Unit,
-    onRetryLoad: () -> Unit
+    onRetryLoad: () -> Unit,
+    errorMessage: String? = null
 ) {
     val view = LocalView.current
     if (!view.isInEditMode) {
@@ -258,7 +259,11 @@ fun ProfileSelectorScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 Text(
-                                    text = "Aún no hay perfiles. Pídele al administrador que cree la familia.",
+                                    text = if (!errorMessage.isNullOrBlank()) {
+                                        "No se pudieron cargar los perfiles"
+                                    } else {
+                                        "Aún no hay perfiles. Pídele al administrador que cree la familia."
+                                    },
                                     fontFamily = InterFontFamily,
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 14.sp,
@@ -266,6 +271,18 @@ fun ProfileSelectorScreen(
                                     color = SelectorTitleInk,
                                     textAlign = TextAlign.Center
                                 )
+                                if (!errorMessage.isNullOrBlank()) {
+                                    Text(
+                                        text = errorMessage,
+                                        fontFamily = InterFontFamily,
+                                        fontWeight = FontWeight.Normal,
+                                        fontSize = 12.sp,
+                                        lineHeight = 18.sp,
+                                        color = SelectorSubtitleGray,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.testTag("selector_error_detail")
+                                    )
+                                }
                                 Button(
                                     onClick = onRetryLoad,
                                     shape = RoundedCornerShape(50),

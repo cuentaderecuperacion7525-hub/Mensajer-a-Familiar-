@@ -1,5 +1,10 @@
 # Novedades de FamiChat
 
+## 2.8.47
+- Carga mucho más rápida de perfiles en instalaciones nuevas (para familiares que instalan por primera vez): se une directo a la familia y descarga los perfiles de inmediato en lugar de esperar escrituras previas o consultas vacías.
+- Se corrigió el reinicio doble del observador de perfiles que podía dejar girando «Cargando perfiles...» durante demasiado tiempo.
+- Si ocurre algún problema de red o de servidor al cargar perfiles, ahora se muestra el motivo exacto junto al botón «Reintentar» en lugar de girar sin aviso.
+
 ## 2.8.46
 - Corrección urgente del cierre al abrir detectado en la 2.8.45 (se desactivó el recorte agresivo de R8 que eliminaba clases internas de DataStore/Firestore).
 - Se conserva la compilación Release optimizada (`debuggable=false` con ART AOT y perfiles de arranque) y la misma firma para actualizar encima sin desinstalar.
