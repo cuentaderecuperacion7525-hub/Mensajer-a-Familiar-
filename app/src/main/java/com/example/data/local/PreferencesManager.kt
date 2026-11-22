@@ -9,9 +9,12 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.data.model.FamilyMemberEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "nidofamiliar_prefs")
 
@@ -47,6 +50,12 @@ enum class AppFontScale(val key: String, val label: String, val multiplier: Floa
         }
 }
 
+data class BootDisplayPrefs(
+    val themeMode: AppThemeMode,
+    val fontScale: AppFontScale,
+    val fromFastCache: Boolean
+)
+
 data class InitialSessionSnapshot(
     val activeFamilyId: String?,
     val activeMemberId: String?,
@@ -56,6 +65,10 @@ data class InitialSessionSnapshot(
 
 class PreferencesManager(private val context: Context) {
     companion object {
+        private const val BOOT_DISPLAY_PREFS_NAME = "famichat_boot_display_prefs"
+        private const val BOOT_KEY_THEME_MODE = "theme_mode"
+        private const val BOOT_KEY_FONT_SCALE = "font_scale"
+
         private val KEY_MASTER_PIN = stringPreferencesKey("master_pin")
         private val KEY_SWITCH_PIN = stringPreferencesKey("switch_pin")
         private val KEY_ACTIVE_MEMBER_ID = stringPreferencesKey("active_member_id")
@@ -130,6 +143,64 @@ class PreferencesManager(private val context: Context) {
 
     val fontScaleFlow: Flow<AppFontScale> = context.dataStore.data.map { prefs ->
         AppFontScale.fromKey(prefs[KEY_FONT_SCALE])
+    }
+
+    private fun bootDisplayPrefs() =
+        context.applicationContext.getSharedPreferences(BOOT_DISPLAY_PREFS_NAME, Context.MODE_PRIVATE)
+
+    private fun mirrorBootDisplayPrefs(
+        themeMode: AppThemeMode? = null,
+        fontScale: AppFontScale? = null
+    ) {
+        val editor = bootDisplayPrefs().edit()
+        if (themeMode != null) editor.putString(BOOT_KEY_THEME_MODE, themeMode.key)
+        if (fontScale != null) editor.putString(BOOT_KEY_FONT_SCALE, fontScale.key)
+        editor.apply()
+    }
+
+    /**
+     * Reads themeMode and fontScale synchronously before MainActivity draws its first frame.
+     * Uses the lightweight SharedPreferences mirror when available, falling back once to
+     * DataStore (and backfilling the mirror) on devices upgrading from older versions.
+     */
+    fun readBootDisplayPrefsSync(): BootDisplayPrefs {
+        val sp = bootDisplayPrefs()
+        val cachedTheme = AppThemeMode.fromKey(sp.getString(BOOT_KEY_THEME_MODE, null))
+        val cachedScaleRaw = sp.getString(BOOT_KEY_FONT_SCALE, null)
+        if (cachedTheme != null && cachedScaleRaw != null) {
+            return BootDisplayPrefs(
+                themeMode = cachedTheme,
+                fontScale = AppFontScale.fromKey(cachedScaleRaw),
+                fromFastCache = true
+            )
+        }
+        val fallback = runCatching {
+            runBlocking(Dispatchers.IO) {
+                withTimeoutOrNull(500L) {
+                    val prefs = context.dataStore.data.first()
+                    val resolvedTheme = AppThemeMode.fromKey(prefs[KEY_THEME_MODE])
+                        ?: when (prefs[KEY_IS_DARK_THEME]) {
+                            true -> AppThemeMode.DARK
+                            false -> AppThemeMode.LIGHT
+                            null -> AppThemeMode.SYSTEM
+                        }
+                    val resolvedScale = AppFontScale.fromKey(prefs[KEY_FONT_SCALE])
+                    resolvedTheme to resolvedScale
+                }
+            }
+        }.getOrNull()
+        val finalTheme = cachedTheme ?: fallback?.first ?: AppThemeMode.SYSTEM
+        val finalScale = if (cachedScaleRaw != null) {
+            AppFontScale.fromKey(cachedScaleRaw)
+        } else {
+            fallback?.second ?: AppFontScale.NORMAL
+        }
+        mirrorBootDisplayPrefs(themeMode = finalTheme, fontScale = finalScale)
+        return BootDisplayPrefs(
+            themeMode = finalTheme,
+            fontScale = finalScale,
+            fromFastCache = false
+        )
     }
 
     val updateRepoSlugFlow: Flow<String> = context.dataStore.data.map { prefs ->
@@ -332,13 +403,16 @@ class PreferencesManager(private val context: Context) {
     }
 
     suspend fun setDarkTheme(isDark: Boolean) {
+        val mode = if (isDark) AppThemeMode.DARK else AppThemeMode.LIGHT
+        mirrorBootDisplayPrefs(themeMode = mode)
         context.dataStore.edit { prefs ->
             prefs[KEY_IS_DARK_THEME] = isDark
-            prefs[KEY_THEME_MODE] = if (isDark) AppThemeMode.DARK.key else AppThemeMode.LIGHT.key
+            prefs[KEY_THEME_MODE] = mode.key
         }
     }
 
     suspend fun setThemeMode(mode: AppThemeMode) {
+        mirrorBootDisplayPrefs(themeMode = mode)
         context.dataStore.edit { prefs ->
             prefs[KEY_THEME_MODE] = mode.key
             when (mode) {
@@ -350,6 +424,7 @@ class PreferencesManager(private val context: Context) {
     }
 
     suspend fun setFontScale(scale: AppFontScale) {
+        mirrorBootDisplayPrefs(fontScale = scale)
         context.dataStore.edit { prefs ->
             prefs[KEY_FONT_SCALE] = scale.key
         }

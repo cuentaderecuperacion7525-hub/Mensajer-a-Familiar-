@@ -113,6 +113,7 @@ import com.example.BuildConfig
 import com.example.data.local.AppFontScale
 import com.example.data.local.AppThemeMode
 import com.example.data.local.PreferencesManager
+import com.example.util.StartupTimelineTracker
 import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.OnlineGreen
 import com.example.util.AppReleaseInfo
@@ -1142,6 +1143,11 @@ fun AdminDiagnosticsScreen(
     var editTurnUser by remember(turnUsername) { mutableStateOf(turnUsername) }
     var editTurnCred by remember(turnCredential) { mutableStateOf(turnCredential) }
     var copiedBanner by remember { mutableStateOf<String?>(null) }
+    var startupTimelineCopied by remember { mutableStateOf(false) }
+    var startupTimeline by remember { mutableStateOf(StartupTimelineTracker.readSnapshot(context)) }
+    LaunchedEffect(Unit) {
+        startupTimeline = StartupTimelineTracker.readSnapshot(context)
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -1293,6 +1299,138 @@ fun AdminDiagnosticsScreen(
                                     color = OnlineGreen
                                 )
                             }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                // Admin-only local startup timeline (device SharedPreferences only, zero Firestore)
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("diagnostics_startup_timeline_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.MonitorHeart,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Línea de tiempo del último arranque",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Solo en este dispositivo · Sin consultas a Firestore",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        DiagnosticStackedRow(
+                            label = "onCreate ejecutado",
+                            ok = startupTimeline.onCreateCount <= 1 && !startupTimeline.processRestartDetected,
+                            detail = buildString {
+                                append("${startupTimeline.onCreateCount} ")
+                                append(if (startupTimeline.onCreateCount == 1) "vez" else "veces")
+                                if (startupTimeline.hasMultipleOnCreate) {
+                                    append(" · Recreación detectada")
+                                }
+                                if (startupTimeline.processRestartDetected) {
+                                    append(" · Reinicio rápido de proceso")
+                                }
+                            }
+                        )
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
+
+                        DiagnosticStackedRow(
+                            label = "FamilyViewModel creado",
+                            ok = startupTimeline.viewModelCreateCount <= 1 && !startupTimeline.uidChanged,
+                            detail = buildString {
+                                append("${startupTimeline.viewModelCreateCount} ")
+                                append(if (startupTimeline.viewModelCreateCount == 1) "vez" else "veces")
+                                append(if (startupTimeline.uidChanged) " · ¡Cambió el UID!" else " · Mismo UID")
+                            }
+                        )
+
+                        if (startupTimeline.events.isNotEmpty()) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                startupTimeline.events.forEach { ev ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.Top,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "${startupTimeline.formatClock(ev.timestampMs)} (+${ev.elapsedMs} ms)",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = ev.label,
+                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (ev.detail.isNotBlank()) {
+                                                Text(
+                                                    text = ev.detail,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "Aún no hay eventos registrados en este dispositivo.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(startupTimeline.formatReport()))
+                                startupTimelineCopied = true
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("copy_startup_timeline_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.ContentCopy,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Copiar línea de tiempo")
+                        }
+
+                        if (startupTimelineCopied) {
+                            Text(
+                                text = "Línea de tiempo copiada al portapapeles",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = OnlineGreen
+                            )
                         }
                     }
                 }

@@ -4,22 +4,31 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,6 +53,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
@@ -89,6 +100,7 @@ import com.example.ui.theme.FamiChatTheme
 import com.example.ui.viewmodel.FamilyViewModel
 import com.example.ui.viewmodel.MainTab
 import com.example.util.FamiChatNotificationHelper
+import com.example.util.StartupTimelineTracker
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
@@ -115,7 +127,14 @@ object Routes {
 }
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        private const val SPLASH_MAX_HOLD_MS = 2_000L
+    }
+
     private var pendingNotifChatId by mutableStateOf<String?>(null)
+
+    @Volatile
+    private var isStartupReadyForSplash: Boolean = false
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -127,16 +146,56 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
+        val splashStartElapsedMs = SystemClock.elapsedRealtime()
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+
+        val appCtx = applicationContext
+        StartupTimelineTracker.recordOnCreate(appCtx, savedInstanceState != null)
+
+        val bootPrefs = PreferencesManager(appCtx)
+        val initialDisplayPrefs = bootPrefs.readBootDisplayPrefsSync()
+        val systemDarkNow =
+            (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        val initialIsDark = when (initialDisplayPrefs.themeMode) {
+            AppThemeMode.LIGHT -> false
+            AppThemeMode.DARK -> true
+            AppThemeMode.SYSTEM -> systemDarkNow
+        }
+        val initialBarStyle = if (initialIsDark) {
+            SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+        } else {
+            SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+        }
+        enableEdgeToEdge(
+            statusBarStyle = initialBarStyle,
+            navigationBarStyle = initialBarStyle
+        )
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !initialIsDark
+            isAppearanceLightNavigationBars = !initialIsDark
+        }
+        StartupTimelineTracker.recordThemeApplied(
+            context = appCtx,
+            themeLabel = initialDisplayPrefs.themeMode.label,
+            fontScaleLabel = initialDisplayPrefs.fontScale.label,
+            fromFastCache = initialDisplayPrefs.fromFastCache
+        )
+
+        splashScreen.setKeepOnScreenCondition {
+            !isStartupReadyForSplash &&
+                (SystemClock.elapsedRealtime() - splashStartElapsedMs) < SPLASH_MAX_HOLD_MS
+        }
+
+        val hadInitialFirebaseUser = Firebase.auth.currentUser != null
         pendingNotifChatId = intent?.getStringExtra(FamiChatNotificationHelper.EXTRA_OPEN_CHAT_ID)
         setContent {
             val context = LocalContext.current
             val appContext = context.applicationContext
-            val prefs = remember { PreferencesManager(appContext) }
+            val prefs = remember { bootPrefs }
             val scope = rememberCoroutineScope()
-            val themeMode by prefs.themeModeFlow.collectAsStateWithLifecycle(initialValue = AppThemeMode.SYSTEM)
-            val fontScalePref by prefs.fontScaleFlow.collectAsStateWithLifecycle(initialValue = AppFontScale.NORMAL)
+            val themeMode by prefs.themeModeFlow.collectAsStateWithLifecycle(initialValue = initialDisplayPrefs.themeMode)
+            val fontScalePref by prefs.fontScaleFlow.collectAsStateWithLifecycle(initialValue = initialDisplayPrefs.fontScale)
             val systemDark = isSystemInDarkTheme()
             val isDarkTheme = when (themeMode) {
                 AppThemeMode.LIGHT -> false
@@ -183,28 +242,33 @@ class MainActivity : ComponentActivity() {
                             signedInOverride = Firebase.auth.currentUser
                         } catch (e: Exception) {
                             authError = e.localizedMessage ?: "No se pudo conectar. Verifica tu internet."
+                            isStartupReadyForSplash = true
                         } finally {
                             isAuthLoading = false
                         }
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.background),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                    if (isAuthLoading) {
+                        FamiChatLogoLoadingScreen(subtitle = "Conectando a FamiChat...")
+                    } else {
+                        LaunchedEffect(Unit) {
+                            isStartupReadyForSplash = true
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background),
+                            contentAlignment = Alignment.Center
                         ) {
-                            if (isAuthLoading) {
-                                CircularProgressIndicator()
-                                Text(
-                                    text = "Conectando a FamiChat...",
-                                    color = MaterialTheme.colorScheme.onBackground
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.ic_famichat_logo),
+                                    contentDescription = "FamiChat",
+                                    modifier = Modifier.size(72.dp)
                                 )
-                            } else {
                                 Text(
                                     text = authError ?: "No se pudo conectar",
                                     color = MaterialTheme.colorScheme.error
@@ -216,12 +280,23 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 } else {
+                    LaunchedEffect(signedInUser.uid) {
+                        StartupTimelineTracker.recordFirebaseSessionReady(
+                            context = appContext,
+                            uid = signedInUser.uid,
+                            alreadySignedIn = hadInitialFirebaseUser
+                        )
+                    }
                     val vm: FamilyViewModel = viewModel(
                         key = "family_vm_${signedInUser.uid}",
                         factory = remember(signedInUser.uid) {
                             object : ViewModelProvider.Factory {
                                 @Suppress("UNCHECKED_CAST")
                                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                    StartupTimelineTracker.recordViewModelCreated(
+                                        context = appContext,
+                                        uid = signedInUser.uid
+                                    )
                                     return FamilyViewModel(
                                         appContext = appContext,
                                         cloudRepo = FamilyCloudRepository(appContext),
@@ -239,6 +314,10 @@ class MainActivity : ComponentActivity() {
                         isDarkTheme = isDarkTheme,
                         externalOpenChatId = pendingNotifChatId,
                         onConsumeExternalOpenChatId = { pendingNotifChatId = null },
+                        onStartupVisualReady = { screenName ->
+                            StartupTimelineTracker.recordFirstScreenVisible(appContext, screenName)
+                            isStartupReadyForSplash = true
+                        },
                         onSignOutGoogle = {
                             scope.launch {
                                 signedInOverride = null
@@ -255,6 +334,47 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+private fun FamiChatLogoLoadingScreen(subtitle: String? = null) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .testTag("startup_logo_loading_screen"),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.ic_famichat_logo),
+                contentDescription = "FamiChat",
+                modifier = Modifier.size(84.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "FamiChat",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.size(26.dp),
+                strokeWidth = 2.8.dp
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun FamiChatApp(
     vm: FamilyViewModel,
     userEmail: String,
@@ -262,8 +382,10 @@ fun FamiChatApp(
     isDarkTheme: Boolean,
     externalOpenChatId: String?,
     onConsumeExternalOpenChatId: () -> Unit,
-    onSignOutGoogle: () -> Unit
+    onSignOutGoogle: () -> Unit,
+    onStartupVisualReady: (String) -> Unit = {}
 ) {
+    val appContext = LocalContext.current.applicationContext
     LaunchedEffect(externalOpenChatId) {
         if (!externalOpenChatId.isNullOrBlank()) {
             vm.requestOpenChatFromNotification(externalOpenChatId)
@@ -297,19 +419,24 @@ fun FamiChatApp(
     val activeMember by vm.activeMember.collectAsStateWithLifecycle()
     val activeMemberId by vm.activeMemberId.collectAsStateWithLifecycle()
 
-    if (!isSessionReady) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background),
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator()
+    LaunchedEffect(isSessionReady) {
+        if (isSessionReady) {
+            StartupTimelineTracker.recordSessionRestored(
+                context = appContext,
+                hasActiveProfile = vm.activeMember.value != null || !vm.activeMemberId.value.isNullOrBlank()
+            )
         }
+    }
+
+    if (!isSessionReady) {
+        FamiChatLogoLoadingScreen()
         return
     }
 
     if (showFamilySpacesSetup) {
+        LaunchedEffect(Unit) {
+            onStartupVisualReady("Configurar familia")
+        }
         FamilySetupScreen(
             userEmail = userEmail,
             userName = userName,
@@ -465,6 +592,9 @@ fun FamiChatApp(
             startDestination = initialRoute
         ) {
             composable(Routes.SELECTOR) {
+                LaunchedEffect(Unit) {
+                    onStartupVisualReady("Selector de perfiles")
+                }
                 LaunchedEffect(activeMember?.id) {
                     if (activeMember != null &&
                         navController.currentBackStackEntry?.destination?.route == Routes.SELECTOR
@@ -506,16 +636,12 @@ fun FamiChatApp(
                             }
                         }
                     } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.background),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator()
-                        }
+                        FamiChatLogoLoadingScreen()
                     }
                 } else {
+                    LaunchedEffect(Unit) {
+                        onStartupVisualReady("Chats")
+                    }
                     val userGroupsCount = remember(chatPreviews) {
                         chatPreviews.count { it.chat.type == ChatType.GROUP }
                     }

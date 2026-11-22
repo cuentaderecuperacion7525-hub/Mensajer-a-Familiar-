@@ -1,5 +1,10 @@
 # Novedades de FamiChat
 
+## 2.8.42
+- Pantalla de inicio oficial de Android con el logo de FamiChat al abrir la app para evitar parpadeos o pantallas vacías en el arranque.
+- Carga inmediata del tema y tamaño de letra guardados antes de dibujar el primer cuadro.
+- Nueva línea de tiempo local del último arranque en Ajustes → Diagnóstico (solo administrador) para verificar los tiempos y eventos de inicio sin consultas adicionales.
+
 ## 2.8.41
 - Rediseño completo de Ajustes → Actualizaciones con la tarjeta limpia de «Buscar actualizaciones» y «Novedades de esta versión», y «Detalles técnicos» con etiqueta Admin solo para el administrador.
 - Nuevos cuadros emergentes limpios para «Estás al día», «Hay una versión nueva» con sección «Qué incluye», «Buscando…», «Descargando», «Lista para instalar», permiso de instalación y errores.

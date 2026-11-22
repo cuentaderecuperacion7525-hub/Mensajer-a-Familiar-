@@ -3043,6 +3043,83 @@ class ExampleRobolectricTest {
     prefs.setCachedVersionHistoryJson(encoded)
     assertEquals(history, com.example.util.AppUpdateChecker.decodeVersionHistoryJson(prefs.getCachedVersionHistoryJson()))
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `boot display prefs mirror and local startup timeline display in admin diagnostics only`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val prefs = com.example.data.local.PreferencesManager(context)
+
+    kotlinx.coroutines.runBlocking {
+      // 1. Saving theme & fontScale mirrors immediately into SharedPreferences for synchronous pre-frame read
+      prefs.setThemeMode(com.example.data.local.AppThemeMode.DARK)
+      prefs.setFontScale(com.example.data.local.AppFontScale.LARGE)
+    }
+    val fastBoot = prefs.readBootDisplayPrefsSync()
+    assertTrue(fastBoot.fromFastCache)
+    assertEquals(com.example.data.local.AppThemeMode.DARK, fastBoot.themeMode)
+    assertEquals(com.example.data.local.AppFontScale.LARGE, fastBoot.fontScale)
+
+    // 2. Clearing SharedPreferences mirror falls back once to DataStore and backfills the mirror
+    context.getSharedPreferences("famichat_boot_display_prefs", Context.MODE_PRIVATE)
+      .edit()
+      .clear()
+      .commit()
+    val fallbackBoot = prefs.readBootDisplayPrefsSync()
+    assertFalse(fallbackBoot.fromFastCache)
+    assertEquals(com.example.data.local.AppThemeMode.DARK, fallbackBoot.themeMode)
+    assertEquals(com.example.data.local.AppFontScale.LARGE, fallbackBoot.fontScale)
+    assertTrue(prefs.readBootDisplayPrefsSync().fromFastCache)
+
+    // 3. StartupTimelineTracker records onCreate counts, ViewModel counts, UID change, and all startup events locally
+    com.example.util.StartupTimelineTracker.resetForTest(context)
+    com.example.util.StartupTimelineTracker.recordOnCreate(context, hasSavedInstanceState = false)
+    com.example.util.StartupTimelineTracker.recordThemeApplied(context, "Oscuro", "Grande", fromFastCache = true)
+    com.example.util.StartupTimelineTracker.recordFirebaseSessionReady(context, "uid_alpha_001", alreadySignedIn = true)
+    com.example.util.StartupTimelineTracker.recordViewModelCreated(context, "uid_alpha_001")
+    com.example.util.StartupTimelineTracker.recordSessionRestored(context, hasActiveProfile = true)
+    com.example.util.StartupTimelineTracker.recordFirstScreenVisible(context, "Chats")
+
+    val cleanSnap = com.example.util.StartupTimelineTracker.readSnapshot(context)
+    assertEquals(1, cleanSnap.onCreateCount)
+    assertEquals(1, cleanSnap.viewModelCreateCount)
+    assertFalse(cleanSnap.uidChanged)
+    assertEquals(6, cleanSnap.events.size)
+
+    // Simulate a second onCreate & ViewModel creation with a different UID
+    com.example.util.StartupTimelineTracker.recordOnCreate(context, hasSavedInstanceState = true)
+    com.example.util.StartupTimelineTracker.recordViewModelCreated(context, "uid_beta_999")
+    val recreatedSnap = com.example.util.StartupTimelineTracker.readSnapshot(context)
+    assertEquals(2, recreatedSnap.onCreateCount)
+    assertEquals(2, recreatedSnap.viewModelCreateCount)
+    assertTrue(recreatedSnap.uidChanged)
+
+    // 4. AdminDiagnosticsScreen displays the startup timeline card for admin
+    composeTestRule.setContent {
+      AdminDiagnosticsScreen(
+        isAdmin = true,
+        familyId = "fam_123",
+        memberName = "José Manuel Martínez",
+        notificationsEnabled = true,
+        fcmToken = "fcm_tok",
+        turnUrl = "turn:openrelay.metered.ca:80",
+        turnUsername = "openrelayproject",
+        turnCredential = "openrelayproject",
+        snackbarMessage = null,
+        onClearSnackbar = {},
+        onSendTestNotification = {},
+        onSaveTurnConfig = { _, _, _ -> },
+        onBack = {}
+      )
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("diagnostics_startup_timeline_card").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Línea de tiempo del último arranque").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("onCreate (#1)").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Primera pantalla visible").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("copy_startup_timeline_button").performScrollTo().assertIsDisplayed()
+  }
 }
 
 
