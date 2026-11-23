@@ -1,5 +1,9 @@
 # Novedades de FamiChat
 
+## 2.8.52
+- Nuevo diseño integrado al buscar actualizaciones: al tocar «Buscar actualizaciones» la búsqueda se muestra directamente dentro de la misma fila con ícono giratorio, subtítulo en azul, indicador compacto y barra de progreso delgada, sin oscurecer toda la pantalla.
+- Mejora visual en modo oscuro para los cuadros de actualización (fondo uniforme `#161B22` con borde sutil acorde a la estética de FamiChat).
+
 ## 2.8.51
 - Conexión completa a la nueva base de datos de producción (`famichat-prod`) sin candado diario de escrituras (`RESOURCE_EXHAUSTED`), conservando todos los perfiles, chats, mensajes, notas, agenda y compras existentes.
 - Actualización de reglas y disparadores de notificaciones en segundo plano hacia `famichat-prod`.

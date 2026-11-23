@@ -2925,10 +2925,12 @@ class ExampleRobolectricTest {
     composeTestRule.waitForIdle()
 
     assertEquals(1, clicks)
+    composeTestRule.onNodeWithTag("updates_dialog_card").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("updates_check_button").assertIsNotEnabled()
     composeTestRule.onNodeWithTag("updates_state_checking").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Buscando…").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Un momento, por favor").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("updates_checking_indicator").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Buscando actualizaciones…", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_checking_indicator", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("updates_checking_progress_bar").assertIsDisplayed()
   }
 
   @Test

@@ -3,9 +3,16 @@ package com.example.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -68,6 +75,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -143,6 +151,7 @@ fun AppUpdatesScreen(
     var apkInspection by remember { mutableStateOf<ApkInspectionResult?>(null) }
     val latestUpdateState by rememberUpdatedState(updateState)
 
+    val isChecking = updateState is AppUpdateUiState.Checking
     val hasNewUpdate = updateState is AppUpdateUiState.UpdateAvailable ||
         updateState is AppUpdateUiState.ReadyToInstall
 
@@ -221,8 +230,8 @@ fun AppUpdatesScreen(
     }
 
     // Back press closes any open dialog without leaving the Actualizaciones screen
-    // and never cancels an active download
-    val anyOverlayOpen = showPermissionDialog || isDialogVisible
+    // and never cancels an active download. Checking runs inline in Row 1 (no modal overlay).
+    val anyOverlayOpen = showPermissionDialog || (isDialogVisible && !isChecking)
     BackHandler(enabled = anyOverlayOpen) {
         if (showPermissionDialog) {
             showPermissionDialog = false
@@ -295,91 +304,164 @@ fun AppUpdatesScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
-                            // Row 1: Buscar actualizaciones
-                            Row(
+                            // Row 1: Buscar actualizaciones (con estado de búsqueda integrado en la misma fila)
+                            val syncRotation = if (isChecking) {
+                                val infiniteTransition = rememberInfiniteTransition(label = "updates_sync_spin")
+                                val angle by infiniteTransition.animateFloat(
+                                    initialValue = 0f,
+                                    targetValue = 360f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(durationMillis = 1100, easing = LinearEasing),
+                                        repeatMode = RepeatMode.Restart
+                                    ),
+                                    label = "updates_sync_angle"
+                                )
+                                angle
+                            } else {
+                                0f
+                            }
+                            val checkingIconBorder by animateColorAsState(
+                                targetValue = if (isChecking) accentBlue.copy(alpha = 0.55f) else Color.Transparent,
+                                animationSpec = tween(durationMillis = 220),
+                                label = "updates_icon_border"
+                            )
+                            val subtitleColor by animateColorAsState(
+                                targetValue = if (isChecking) accentBlue else inkSecondary,
+                                animationSpec = tween(durationMillis = 220),
+                                label = "updates_subtitle_color"
+                            )
+
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(min = 72.dp)
-                                    .clickable(
-                                        role = Role.Button,
-                                        onClick = {
-                                            isDialogVisible = true
-                                            onCheckForUpdate()
-                                        }
+                                    .then(
+                                        if (isChecking) Modifier.testTag("updates_state_checking") else Modifier
                                     )
-                                    .padding(horizontal = 16.dp, vertical = 16.dp)
-                                    .testTag("updates_check_button"),
-                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(
+                                Row(
                                     modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(RoundedCornerShape(13.dp))
-                                        .background(iconBoxBg),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Sync,
-                                        contentDescription = null,
-                                        tint = iconBoxTint,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(
-                                            text = "Buscar actualizaciones",
-                                            style = MaterialTheme.typography.titleSmall.copy(
-                                                fontFamily = InterFontFamily,
-                                                fontWeight = FontWeight.Medium,
-                                                fontSize = 15.sp
-                                            ),
-                                            color = inkPrimary,
-                                            modifier = Modifier.weight(1f, fill = false)
+                                        .fillMaxWidth()
+                                        .heightIn(min = 72.dp)
+                                        .clickable(
+                                            enabled = !isChecking,
+                                            role = Role.Button,
+                                            onClick = {
+                                                isDialogVisible = true
+                                                onCheckForUpdate()
+                                            }
                                         )
-                                        if (hasNewUpdate) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(8.dp)
-                                                    .clip(CircleShape)
-                                                    .background(UpdatesRedDot)
-                                                    .testTag("updates_row_new_badge_dot")
-                                            )
-                                        }
+                                        .padding(horizontal = 16.dp, vertical = 16.dp)
+                                        .testTag("updates_check_button"),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(13.dp))
+                                            .background(iconBoxBg)
+                                            .border(
+                                                width = if (isChecking) 1.dp else 0.dp,
+                                                color = checkingIconBorder,
+                                                shape = RoundedCornerShape(13.dp)
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Sync,
+                                            contentDescription = null,
+                                            tint = if (isChecking) accentBlue else iconBoxTint,
+                                            modifier = Modifier
+                                                .size(22.dp)
+                                                .rotate(syncRotation)
+                                        )
                                     }
-                                    Text(
-                                        text = "Comprueba si hay una versión nueva de FamiChat",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontFamily = InterFontFamily,
-                                            fontSize = 13.sp,
-                                            lineHeight = 18.sp
-                                        ),
-                                        color = inkSecondary,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "Buscar actualizaciones",
+                                                style = MaterialTheme.typography.titleSmall.copy(
+                                                    fontFamily = InterFontFamily,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontSize = 15.sp
+                                                ),
+                                                color = inkPrimary,
+                                                modifier = Modifier.weight(1f, fill = false)
+                                            )
+                                            if (hasNewUpdate && !isChecking) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(8.dp)
+                                                        .clip(CircleShape)
+                                                        .background(UpdatesRedDot)
+                                                        .testTag("updates_row_new_badge_dot")
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = if (isChecking) {
+                                                "Buscando actualizaciones…"
+                                            } else {
+                                                "Comprueba si hay una versión nueva de FamiChat"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontFamily = InterFontFamily,
+                                                fontWeight = if (isChecking) FontWeight.Medium else FontWeight.Normal,
+                                                fontSize = 13.sp,
+                                                lineHeight = 18.sp
+                                            ),
+                                            color = subtitleColor,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    if (isChecking) {
+                                        CircularProgressIndicator(
+                                            color = accentBlue,
+                                            trackColor = progressTrack,
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier
+                                                .size(18.dp)
+                                                .testTag("updates_checking_indicator")
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                            contentDescription = null,
+                                            tint = chevronTint,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                }
+
+                                AnimatedVisibility(visible = isChecking) {
+                                    LinearProgressIndicator(
+                                        color = accentBlue,
+                                        trackColor = progressTrack.copy(alpha = 0.45f),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp)
+                                            .height(2.dp)
+                                            .clip(CircleShape)
+                                            .testTag("updates_checking_progress_bar")
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                    contentDescription = null,
-                                    tint = chevronTint,
-                                    modifier = Modifier.size(22.dp)
-                                )
                             }
 
-                            HorizontalDivider(
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                thickness = 1.dp,
-                                color = dividerColor
-                            )
+                            if (!isChecking) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    thickness = 1.dp,
+                                    color = dividerColor
+                                )
+                            }
 
                             // Row 2: Novedades de esta versión
                             Row(
@@ -586,8 +668,9 @@ fun AppUpdatesScreen(
                 Surface(
                     shape = RoundedCornerShape(24.dp),
                     color = dialogBg,
-                    tonalElevation = if (isDarkTheme) 6.dp else 0.dp,
+                    tonalElevation = 0.dp,
                     shadowElevation = 8.dp,
+                    border = if (isDarkTheme) BorderStroke(1.dp, MaterialTheme.colorScheme.outline) else null,
                     modifier = Modifier
                         .padding(horizontal = 24.dp, vertical = 24.dp)
                         .widthIn(min = 260.dp, max = 312.dp)
@@ -617,16 +700,6 @@ fun AppUpdatesScreen(
                                     onCancel = {
                                         showPermissionDialog = false
                                     }
-                                )
-                            }
-
-                            // CUADRO 4A: BUSCANDO (Imagen 4 arriba)
-                            updateState is AppUpdateUiState.Checking -> {
-                                CheckingDialogContent(
-                                    inkPrimary = inkPrimary,
-                                    inkSecondary = inkSecondary,
-                                    accentBlue = accentBlue,
-                                    trackColor = progressTrack
                                 )
                             }
 
@@ -739,53 +812,6 @@ fun AppUpdatesScreen(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun CheckingDialogContent(
-    inkPrimary: Color,
-    inkSecondary: Color,
-    accentBlue: Color,
-    trackColor: Color
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("updates_state_checking"),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        CircularProgressIndicator(
-            color = accentBlue,
-            trackColor = trackColor,
-            strokeWidth = 3.5.dp,
-            modifier = Modifier
-                .size(38.dp)
-                .testTag("updates_checking_indicator")
-        )
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Text(
-                text = "Buscando…",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontFamily = InterFontFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 17.sp
-                ),
-                color = inkPrimary
-            )
-            Text(
-                text = "Un momento, por favor",
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontFamily = InterFontFamily,
-                    fontSize = 13.sp
-                ),
-                color = inkSecondary
-            )
         }
     }
 }
