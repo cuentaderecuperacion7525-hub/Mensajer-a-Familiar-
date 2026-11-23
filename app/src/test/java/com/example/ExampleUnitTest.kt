@@ -571,5 +571,13 @@ class ExampleUnitTest {
     assertFalse(generated.contains("aistudio", ignoreCase = true))
     assertFalse(generated.contains("nidofamiliar", ignoreCase = true))
   }
+
+  @Test
+  fun `switch key verification accepts only switchPin and rejects admin masterPin`() {
+    assertTrue(com.example.ui.viewmodel.FamilyViewModel.matchesSwitchKey(entered = "2802", activeSwitchPin = "2802"))
+    assertFalse(com.example.ui.viewmodel.FamilyViewModel.matchesSwitchKey(entered = "7525", activeSwitchPin = "2802"))
+    assertFalse(com.example.ui.viewmodel.FamilyViewModel.matchesSwitchKey(entered = "", activeSwitchPin = "2802"))
+    assertFalse(com.example.ui.viewmodel.FamilyViewModel.matchesSwitchKey(entered = "2802", activeSwitchPin = ""))
+  }
 }
 

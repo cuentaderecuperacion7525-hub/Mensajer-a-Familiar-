@@ -2003,7 +2003,7 @@ class FamilyViewModel(
     fun verifyPin(entered: String): Boolean = entered == masterPin.value
 
     fun verifySwitchKey(entered: String): Boolean =
-        entered == switchPin.value || entered == masterPin.value
+        matchesSwitchKey(entered = entered, activeSwitchPin = switchPin.value)
 
     fun updateMasterPin(newPin: String) {
         if (newPin.length != 4 || !newPin.all(Char::isDigit)) {
@@ -4253,6 +4253,9 @@ class FamilyViewModel(
     }
 
     companion object {
+        fun matchesSwitchKey(entered: String, activeSwitchPin: String): Boolean =
+            activeSwitchPin.length == 4 && entered == activeSwitchPin
+
         fun isMessageVisibleForMember(
             msg: ChatMessageEntity,
             memberId: String,

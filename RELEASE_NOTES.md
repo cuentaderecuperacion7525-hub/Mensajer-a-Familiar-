@@ -1,5 +1,8 @@
 # Novedades de FamiChat
 
+## 2.8.53
+- Corrección de seguridad en «Cambiar de perfil (Switch)»: ahora acepta únicamente la Clave de Switch configurada y ya no permite entrar con el PIN de administrador.
+
 ## 2.8.52
 - Nuevo diseño integrado al buscar actualizaciones: al tocar «Buscar actualizaciones» la búsqueda se muestra directamente dentro de la misma fila con ícono giratorio, subtítulo en azul, indicador compacto y barra de progreso delgada, sin oscurecer toda la pantalla.
 - Mejora visual en modo oscuro para los cuadros de actualización (fondo uniforme `#161B22` con borde sutil acorde a la estética de FamiChat).
