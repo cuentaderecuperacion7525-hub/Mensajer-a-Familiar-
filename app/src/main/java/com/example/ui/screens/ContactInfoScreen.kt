@@ -58,6 +58,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -93,6 +94,7 @@ import com.example.data.model.MessageType
 import com.example.ui.components.ChatWallpaperPalette
 import com.example.ui.components.extractAvatarInitials
 import com.example.ui.theme.DangerRed
+import com.example.ui.theme.LocalDarkTheme
 import com.example.ui.viewmodel.ChatThreadUi
 import com.example.util.DocumentMediaHelper
 import com.example.util.ImageCompressionHelper
@@ -135,8 +137,20 @@ fun ContactInfoScreen(
     onOpenDocument: (ChatMessageEntity) -> Unit,
     onRequestClearChat: () -> Unit,
     onRequestToggleBlockContact: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    isDarkTheme: Boolean = LocalDarkTheme.current
 ) {
+    val screenBg = if (isDarkTheme) MaterialTheme.colorScheme.background else Color.White
+    val cardBg = if (isDarkTheme) MaterialTheme.colorScheme.surface else ContactCardBg
+    val inkPrimary = if (isDarkTheme) MaterialTheme.colorScheme.onSurface else ContactInkPrimary
+    val inkSecondary = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant else ContactInkSecondary
+    val dividerColor = if (isDarkTheme) MaterialTheme.colorScheme.outline.copy(alpha = 0.28f) else ContactDividerColor
+    val pillInactiveBg = if (isDarkTheme) MaterialTheme.colorScheme.surfaceVariant else ContactPillInactiveBg
+    val statusPillBg = if (isDarkTheme) Color(0xFF133827) else ContactStatusPillBg
+    val statusPillText = if (isDarkTheme) Color(0xFF6EE7B7) else ContactStatusPillText
+    val wallpaperBorder = if (isDarkTheme) MaterialTheme.colorScheme.outline else ContactWallpaperBorder
+    val sheetBg = if (isDarkTheme) MaterialTheme.colorScheme.surface else Color.White
+
     val context = LocalContext.current
     val isGroup = chatUi.chat.type == ChatType.GROUP
 
@@ -245,7 +259,7 @@ fun ContactInfoScreen(
     }
 
     Scaffold(
-        containerColor = Color.White,
+        containerColor = screenBg,
         contentWindowInsets = WindowInsets.safeDrawing,
         modifier = Modifier
             .fillMaxSize()
@@ -254,7 +268,7 @@ fun ContactInfoScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.White)
+                .background(screenBg)
                 .padding(innerPadding),
             contentAlignment = Alignment.TopCenter
         ) {
@@ -263,7 +277,7 @@ fun ContactInfoScreen(
                     .fillMaxSize()
                     .widthIn(max = 600.dp)
             ) {
-                // Flat white top bar with left Back arrow and right 3-dots menu
+                // Flat theme-aware top bar with left Back arrow and right 3-dots menu
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -281,7 +295,7 @@ fun ContactInfoScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Volver al chat",
-                            tint = ContactInkPrimary
+                            tint = inkPrimary
                         )
                     }
 
@@ -295,13 +309,13 @@ fun ContactInfoScreen(
                             Icon(
                                 imageVector = Icons.Filled.MoreVert,
                                 contentDescription = "Más opciones",
-                                tint = ContactInkPrimary
+                                tint = inkPrimary
                             )
                         }
                         DropdownMenu(
                             expanded = showMoreMenu,
                             onDismissRequest = { showMoreMenu = false },
-                            containerColor = Color.White
+                            containerColor = sheetBg
                         ) {
                             DropdownMenuItem(
                                 text = { Text("Vaciar chat", color = DangerRed) },
@@ -402,7 +416,7 @@ fun ContactInfoScreen(
                             }
                         }
 
-                        // Presence dot: 18dp with 3dp white border; green ONLY if online, gray otherwise
+                        // Presence dot: 18dp with 3dp surface border; green ONLY if online, gray otherwise
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
@@ -411,7 +425,7 @@ fun ContactInfoScreen(
                                     color = if (isOnline) ContactOnlineDot else ContactOfflineDot,
                                     shape = CircleShape
                                 )
-                                .border(3.dp, Color.White, CircleShape)
+                                .border(3.dp, screenBg, CircleShape)
                                 .testTag("contact_info_presence_dot")
                         )
                     }
@@ -423,7 +437,7 @@ fun ContactInfoScreen(
                         fontSize = 20.sp,
                         lineHeight = 26.sp,
                         fontWeight = FontWeight.Medium,
-                        color = ContactInkPrimary,
+                        color = inkPrimary,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.testTag("contact_info_name")
                     )
@@ -432,7 +446,7 @@ fun ContactInfoScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Surface(
                             shape = RoundedCornerShape(50),
-                            color = ContactStatusPillBg,
+                            color = statusPillBg,
                             tonalElevation = 0.dp,
                             shadowElevation = 0.dp,
                             modifier = Modifier.testTag("contact_info_status_pill")
@@ -453,7 +467,7 @@ fun ContactInfoScreen(
                                     fontSize = 12.sp,
                                     lineHeight = 16.sp,
                                     fontWeight = FontWeight.Medium,
-                                    color = ContactStatusPillText
+                                    color = statusPillText
                                 )
                             }
                         }
@@ -461,11 +475,11 @@ fun ContactInfoScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // PHRASE CARD (#F5F7FB, 18dp radius)
+                    // PHRASE CARD (18dp radius)
                     if (personalBio.isNotBlank() || lastSeenLine.isNotBlank() || memberSinceLine != null) {
                         Surface(
                             shape = RoundedCornerShape(18.dp),
-                            color = ContactCardBg,
+                            color = cardBg,
                             tonalElevation = 0.dp,
                             shadowElevation = 0.dp,
                             modifier = Modifier
@@ -496,7 +510,7 @@ fun ContactInfoScreen(
                                             fontSize = 13.sp,
                                             lineHeight = 19.sp,
                                             fontWeight = FontWeight.Medium,
-                                            color = ContactInkPrimary,
+                                            color = inkPrimary,
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .padding(top = 2.dp)
@@ -509,7 +523,7 @@ fun ContactInfoScreen(
                                         text = lastSeenLine,
                                         fontSize = 12.sp,
                                         lineHeight = 16.sp,
-                                        color = ContactInkSecondary,
+                                        color = inkSecondary,
                                         modifier = Modifier.testTag("contact_info_last_seen")
                                     )
                                 }
@@ -518,7 +532,7 @@ fun ContactInfoScreen(
                                         text = memberSinceLine,
                                         fontSize = 11.sp,
                                         lineHeight = 15.sp,
-                                        color = ContactInkSecondary,
+                                        color = inkSecondary,
                                         modifier = Modifier.testTag("contact_info_member_since")
                                     )
                                 }
@@ -538,6 +552,7 @@ fun ContactInfoScreen(
                             icon = Icons.Outlined.ChatBubbleOutline,
                             label = "Mensaje",
                             accentColor = accentColor,
+                            labelColor = inkPrimary,
                             tag = "contact_action_message",
                             onClick = onBack,
                             modifier = Modifier.weight(1f)
@@ -546,6 +561,7 @@ fun ContactInfoScreen(
                             icon = Icons.Outlined.Call,
                             label = "Llamar",
                             accentColor = accentColor,
+                            labelColor = inkPrimary,
                             tag = "contact_action_voice_call",
                             onClick = { onStartCall(CallType.VOICE) },
                             modifier = Modifier.weight(1f)
@@ -554,6 +570,7 @@ fun ContactInfoScreen(
                             icon = Icons.Outlined.Videocam,
                             label = "Video",
                             accentColor = accentColor,
+                            labelColor = inkPrimary,
                             tag = "contact_action_video_call",
                             onClick = { onStartCall(CallType.VIDEO) },
                             modifier = Modifier.weight(1f)
@@ -562,6 +579,7 @@ fun ContactInfoScreen(
                             icon = Icons.Filled.Search,
                             label = "Buscar",
                             accentColor = accentColor,
+                            labelColor = inkPrimary,
                             tag = "contact_action_search",
                             onClick = onSearchInChat,
                             modifier = Modifier.weight(1f)
@@ -570,7 +588,7 @@ fun ContactInfoScreen(
 
                     // SHARED SECTION (Fotos N, Archivos N, Enlaces N)
                     Spacer(modifier = Modifier.height(24.dp))
-                    SectionHeaderLabel(text = "COMPARTIDO")
+                    SectionHeaderLabel(text = "COMPARTIDO", color = inkSecondary)
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
@@ -583,6 +601,8 @@ fun ContactInfoScreen(
                             label = "Fotos ${sharedPhotos.size}",
                             selected = selectedSharedTab == ContactSharedTab.PHOTOS,
                             accentColor = accentColor,
+                            inactiveBg = pillInactiveBg,
+                            inactiveText = inkPrimary,
                             tag = "contact_shared_tab_photos",
                             onClick = { selectedSharedTab = ContactSharedTab.PHOTOS }
                         )
@@ -590,6 +610,8 @@ fun ContactInfoScreen(
                             label = "Archivos ${sharedFiles.size}",
                             selected = selectedSharedTab == ContactSharedTab.FILES,
                             accentColor = accentColor,
+                            inactiveBg = pillInactiveBg,
+                            inactiveText = inkPrimary,
                             tag = "contact_shared_tab_files",
                             onClick = { selectedSharedTab = ContactSharedTab.FILES }
                         )
@@ -597,6 +619,8 @@ fun ContactInfoScreen(
                             label = "Enlaces ${sharedLinks.size}",
                             selected = selectedSharedTab == ContactSharedTab.LINKS,
                             accentColor = accentColor,
+                            inactiveBg = pillInactiveBg,
+                            inactiveText = inkPrimary,
                             tag = "contact_shared_tab_links",
                             onClick = { selectedSharedTab = ContactSharedTab.LINKS }
                         )
@@ -610,7 +634,7 @@ fun ContactInfoScreen(
                                 Text(
                                     text = "Aún no se han compartido fotos en este chat.",
                                     fontSize = 13.sp,
-                                    color = ContactInkSecondary,
+                                    color = inkSecondary,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .testTag("contact_shared_photos_empty")
@@ -631,7 +655,7 @@ fun ContactInfoScreen(
                                             modifier = Modifier
                                                 .size(60.dp)
                                                 .clip(RoundedCornerShape(12.dp))
-                                                .background(ContactCardBg)
+                                                .background(cardBg)
                                                 .clickable {
                                                     if (isOverflowTile) {
                                                         showAllPhotosSheet = true
@@ -674,7 +698,7 @@ fun ContactInfoScreen(
                                 Text(
                                     text = "Aún no se han compartido archivos en este chat.",
                                     fontSize = 13.sp,
-                                    color = ContactInkSecondary,
+                                    color = inkSecondary,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .testTag("contact_shared_files_empty")
@@ -682,7 +706,7 @@ fun ContactInfoScreen(
                             } else {
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
-                                    color = ContactCardBg,
+                                    color = cardBg,
                                     tonalElevation = 0.dp,
                                     shadowElevation = 0.dp,
                                     modifier = Modifier.fillMaxWidth()
@@ -710,21 +734,21 @@ fun ContactInfoScreen(
                                                         text = docMsg.fileName?.ifBlank { "Documento" } ?: "Documento",
                                                         fontSize = 13.sp,
                                                         fontWeight = FontWeight.Medium,
-                                                        color = ContactInkPrimary,
+                                                        color = inkPrimary,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                     Text(
                                                         text = "$sizeLabel · ${TimeFormatters.formatCallDateTime(docMsg.timestamp)}",
                                                         fontSize = 11.sp,
-                                                        color = ContactInkSecondary,
+                                                        color = inkSecondary,
                                                         maxLines = 1
                                                     )
                                                 }
                                             }
                                             if (index < sharedFiles.take(10).lastIndex) {
                                                 HorizontalDivider(
-                                                    color = ContactDividerColor,
+                                                    color = dividerColor,
                                                     thickness = 1.dp,
                                                     modifier = Modifier.padding(horizontal = 14.dp)
                                                 )
@@ -740,7 +764,7 @@ fun ContactInfoScreen(
                                 Text(
                                     text = "Aún no se han compartido enlaces en este chat.",
                                     fontSize = 13.sp,
-                                    color = ContactInkSecondary,
+                                    color = inkSecondary,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .testTag("contact_shared_links_empty")
@@ -748,7 +772,7 @@ fun ContactInfoScreen(
                             } else {
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
-                                    color = ContactCardBg,
+                                    color = cardBg,
                                     tonalElevation = 0.dp,
                                     shadowElevation = 0.dp,
                                     modifier = Modifier.fillMaxWidth()
@@ -781,21 +805,21 @@ fun ContactInfoScreen(
                                                         text = url,
                                                         fontSize = 13.sp,
                                                         fontWeight = FontWeight.Medium,
-                                                        color = ContactInkPrimary,
+                                                        color = inkPrimary,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                     Text(
                                                         text = TimeFormatters.formatCallDateTime(linkMsg.timestamp),
                                                         fontSize = 11.sp,
-                                                        color = ContactInkSecondary,
+                                                        color = inkSecondary,
                                                         maxLines = 1
                                                     )
                                                 }
                                             }
                                             if (index < sharedLinks.take(10).lastIndex) {
                                                 HorizontalDivider(
-                                                    color = ContactDividerColor,
+                                                    color = dividerColor,
                                                     thickness = 1.dp,
                                                     modifier = Modifier.padding(horizontal = 14.dp)
                                                 )
@@ -807,14 +831,14 @@ fun ContactInfoScreen(
                         }
                     }
 
-                    // CHAT SETTINGS CARD (#F5F7FB with 4 rows)
+                    // CHAT SETTINGS CARD (4 rows)
                     Spacer(modifier = Modifier.height(24.dp))
-                    SectionHeaderLabel(text = "AJUSTES DEL CHAT")
+                    SectionHeaderLabel(text = "AJUSTES DEL CHAT", color = inkSecondary)
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Surface(
                         shape = RoundedCornerShape(18.dp),
-                        color = ContactCardBg,
+                        color = cardBg,
                         tonalElevation = 0.dp,
                         shadowElevation = 0.dp,
                         modifier = Modifier
@@ -843,34 +867,34 @@ fun ContactInfoScreen(
                                     text = "Fondo del chat",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Medium,
-                                    color = ContactInkPrimary,
+                                    color = inkPrimary,
                                     modifier = Modifier.weight(1f)
                                 )
                                 Box(
                                     modifier = Modifier
                                         .size(18.dp)
                                         .clip(CircleShape)
-                                        .background(currentWallpaper.lightBg)
-                                        .border(1.dp, ContactWallpaperBorder, CircleShape)
+                                        .background(if (isDarkTheme) currentWallpaper.darkBg else currentWallpaper.lightBg)
+                                        .border(1.dp, wallpaperBorder, CircleShape)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = currentWallpaper.label,
                                     fontSize = 13.sp,
-                                    color = ContactInkSecondary,
+                                    color = inkSecondary,
                                     modifier = Modifier.testTag("contact_setting_wallpaper_value")
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                     contentDescription = null,
-                                    tint = ContactInkSecondary,
+                                    tint = inkSecondary,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
 
                             HorizontalDivider(
-                                color = ContactDividerColor,
+                                color = dividerColor,
                                 thickness = 1.dp,
                                 modifier = Modifier.padding(horizontal = 16.dp)
                             )
@@ -918,26 +942,26 @@ fun ContactInfoScreen(
                                     text = "Tono de notificación",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Medium,
-                                    color = ContactInkPrimary,
+                                    color = inkPrimary,
                                     modifier = Modifier.weight(1f)
                                 )
                                 Text(
                                     text = if (selectedNotificationToneUri.isBlank()) "Predeterminado" else "Personalizado",
                                     fontSize = 13.sp,
-                                    color = ContactInkSecondary,
+                                    color = inkSecondary,
                                     modifier = Modifier.testTag("contact_setting_tone_value")
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                     contentDescription = null,
-                                    tint = ContactInkSecondary,
+                                    tint = inkSecondary,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
 
                             HorizontalDivider(
-                                color = ContactDividerColor,
+                                color = dividerColor,
                                 thickness = 1.dp,
                                 modifier = Modifier.padding(horizontal = 16.dp)
                             )
@@ -963,7 +987,7 @@ fun ContactInfoScreen(
                                     text = "Fijar chat arriba",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Medium,
-                                    color = ContactInkPrimary,
+                                    color = inkPrimary,
                                     modifier = Modifier.weight(1f)
                                 )
                                 Switch(
@@ -973,7 +997,7 @@ fun ContactInfoScreen(
                                         checkedThumbColor = Color.White,
                                         checkedTrackColor = accentColor,
                                         uncheckedThumbColor = Color.White,
-                                        uncheckedTrackColor = ContactWallpaperBorder,
+                                        uncheckedTrackColor = wallpaperBorder,
                                         uncheckedBorderColor = Color.Transparent
                                     ),
                                     modifier = Modifier.testTag("contact_setting_pin_switch")
@@ -981,7 +1005,7 @@ fun ContactInfoScreen(
                             }
 
                             HorizontalDivider(
-                                color = ContactDividerColor,
+                                color = dividerColor,
                                 thickness = 1.dp,
                                 modifier = Modifier.padding(horizontal = 16.dp)
                             )
@@ -1007,7 +1031,7 @@ fun ContactInfoScreen(
                                     text = "Silenciar notificaciones",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Medium,
-                                    color = ContactInkPrimary,
+                                    color = inkPrimary,
                                     modifier = Modifier.weight(1f)
                                 )
                                 Switch(
@@ -1017,7 +1041,7 @@ fun ContactInfoScreen(
                                         checkedThumbColor = Color.White,
                                         checkedTrackColor = accentColor,
                                         uncheckedThumbColor = Color.White,
-                                        uncheckedTrackColor = ContactWallpaperBorder,
+                                        uncheckedTrackColor = wallpaperBorder,
                                         uncheckedBorderColor = Color.Transparent
                                     ),
                                     modifier = Modifier.testTag("contact_setting_mute_switch")
@@ -1030,13 +1054,13 @@ fun ContactInfoScreen(
         }
     }
 
-    // 3-column Wallpaper Bottom Sheet (no right-side clipping, larger circles, #C9CED8 border, checkmark)
+    // 3-column Wallpaper Bottom Sheet
     if (showWallpaperSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = { showWallpaperSheet = false },
             sheetState = sheetState,
-            containerColor = Color.White,
+            containerColor = sheetBg,
             tonalElevation = 0.dp,
             modifier = Modifier.testTag("contact_wallpaper_sheet")
         ) {
@@ -1052,7 +1076,7 @@ fun ContactInfoScreen(
                     text = "Fondo del chat",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = ContactInkPrimary
+                    color = inkPrimary
                 )
                 val rows = remember { ChatWallpaperPalette.options.chunked(3) }
                 Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -1080,10 +1104,10 @@ fun ContactInfoScreen(
                                         modifier = Modifier
                                             .size(56.dp)
                                             .clip(CircleShape)
-                                            .background(opt.lightBg)
+                                            .background(if (isDarkTheme) opt.darkBg else opt.lightBg)
                                             .border(
                                                 width = if (selected) 2.5.dp else 1.5.dp,
-                                                color = if (selected) accentColor else ContactWallpaperBorder,
+                                                color = if (selected) accentColor else wallpaperBorder,
                                                 shape = CircleShape
                                             ),
                                         contentAlignment = Alignment.Center
@@ -1102,7 +1126,7 @@ fun ContactInfoScreen(
                                         text = opt.label,
                                         fontSize = 12.sp,
                                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (selected) accentColor else ContactInkPrimary,
+                                        color = if (selected) accentColor else inkPrimary,
                                         textAlign = TextAlign.Center,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -1125,7 +1149,7 @@ fun ContactInfoScreen(
         ModalBottomSheet(
             onDismissRequest = { showAllPhotosSheet = false },
             sheetState = photosSheetState,
-            containerColor = Color.White,
+            containerColor = sheetBg,
             tonalElevation = 0.dp,
             modifier = Modifier.testTag("contact_all_photos_sheet")
         ) {
@@ -1141,7 +1165,7 @@ fun ContactInfoScreen(
                     text = "Fotos compartidas (${sharedPhotos.size})",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = ContactInkPrimary
+                    color = inkPrimary
                 )
                 val photoRows = remember(sharedPhotos) { sharedPhotos.chunked(3) }
                 Column(
@@ -1188,7 +1212,7 @@ fun ContactInfoScreen(
         ModalBottomSheet(
             onDismissRequest = { showFallbackToneSheet = false },
             sheetState = toneSheetState,
-            containerColor = Color.White,
+            containerColor = sheetBg,
             tonalElevation = 0.dp,
             modifier = Modifier.testTag("contact_tone_fallback_sheet")
         ) {
@@ -1205,24 +1229,26 @@ fun ContactInfoScreen(
                     text = "Tono de notificación",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = ContactInkPrimary,
+                    color = inkPrimary,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
                 ToneOptionRow(
                     title = "Predeterminado",
                     selected = selectedNotificationToneUri.isBlank(),
                     accentColor = accentColor,
+                    defaultTextColor = inkPrimary,
                     onClick = {
                         onSelectNotificationTone("")
                         showFallbackToneSheet = false
                     }
                 )
                 availableTones.forEach { (title, uriStr) ->
-                    HorizontalDivider(color = ContactDividerColor, thickness = 1.dp)
+                    HorizontalDivider(color = dividerColor, thickness = 1.dp)
                     ToneOptionRow(
                         title = title,
                         selected = selectedNotificationToneUri == uriStr,
                         accentColor = accentColor,
+                        defaultTextColor = inkPrimary,
                         onClick = {
                             onSelectNotificationTone(uriStr)
                             showFallbackToneSheet = false
@@ -1235,14 +1261,14 @@ fun ContactInfoScreen(
 }
 
 @Composable
-private fun SectionHeaderLabel(text: String) {
+private fun SectionHeaderLabel(text: String, color: Color) {
     Text(
         text = text,
         fontSize = 11.sp,
         lineHeight = 14.sp,
         fontWeight = FontWeight.SemiBold,
         letterSpacing = 0.6.sp,
-        color = ContactInkSecondary,
+        color = color,
         modifier = Modifier.fillMaxWidth()
     )
 }
@@ -1252,6 +1278,7 @@ private fun ContactQuickAction(
     icon: ImageVector,
     label: String,
     accentColor: Color,
+    labelColor: Color,
     tag: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -1268,7 +1295,7 @@ private fun ContactQuickAction(
             modifier = Modifier
                 .size(44.dp)
                 .clip(CircleShape)
-                .background(accentColor.copy(alpha = 0.12f)),
+                .background(accentColor.copy(alpha = 0.14f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -1284,7 +1311,7 @@ private fun ContactQuickAction(
             fontSize = 11.sp,
             lineHeight = 14.sp,
             fontWeight = FontWeight.Medium,
-            color = ContactInkPrimary,
+            color = labelColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -1296,12 +1323,14 @@ private fun SharedFilterPill(
     label: String,
     selected: Boolean,
     accentColor: Color,
+    inactiveBg: Color,
+    inactiveText: Color,
     tag: String,
     onClick: () -> Unit
 ) {
     Surface(
         shape = RoundedCornerShape(50),
-        color = if (selected) accentColor else ContactPillInactiveBg,
+        color = if (selected) accentColor else inactiveBg,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
         modifier = Modifier
@@ -1319,7 +1348,7 @@ private fun SharedFilterPill(
                 fontSize = 12.sp,
                 lineHeight = 16.sp,
                 fontWeight = FontWeight.Medium,
-                color = if (selected) Color.White else ContactInkPrimary,
+                color = if (selected) Color.White else inactiveText,
                 maxLines = 1
             )
         }
@@ -1331,6 +1360,7 @@ private fun ToneOptionRow(
     title: String,
     selected: Boolean,
     accentColor: Color,
+    defaultTextColor: Color,
     onClick: () -> Unit
 ) {
     Row(
@@ -1345,7 +1375,7 @@ private fun ToneOptionRow(
             text = title,
             fontSize = 14.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) accentColor else ContactInkPrimary,
+            color = if (selected) accentColor else defaultTextColor,
             modifier = Modifier.weight(1f)
         )
         if (selected) {

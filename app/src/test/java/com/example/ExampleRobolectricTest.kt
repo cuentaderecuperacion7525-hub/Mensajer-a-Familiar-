@@ -3229,6 +3229,72 @@ class ExampleRobolectricTest {
     val clearedSnap = prefs.readInitialSessionSnapshotSync()
     assertTrue(clearedSnap?.cachedMembers.orEmpty().isEmpty())
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `contact info screen adapts cleanly when dark theme is applied`() {
+    val me = sampleMember(id = "m_me", name = "José Manuel", isAdmin = true)
+    val contact = sampleMember(id = "m_mom", name = "Tila del Carmen").copy(
+      bioText = "Siempre aquí",
+      isOnline = true,
+      lastSeenText = "En casa",
+      liveStatusAt = System.currentTimeMillis()
+    )
+    val chatUi = com.example.ui.viewmodel.ChatThreadUi(
+      chat = com.example.data.model.ChatThreadEntity(
+        id = "direct_tila",
+        type = com.example.data.model.ChatType.DIRECT,
+        title = contact.name,
+        avatarColorHex = contact.avatarColorHex,
+        avatarEmoji = contact.avatarEmoji,
+        participantIdsJson = "[\"${me.id}\",\"${contact.id}\"]"
+      ),
+      displayTitle = contact.name,
+      displayEmoji = contact.avatarEmoji,
+      displayColorHex = contact.avatarColorHex,
+      partnerBioText = contact.bioText,
+      isOnline = true,
+      subtitleStatus = "En línea",
+      lastMessagePreview = "Hola",
+      lastMessageTime = "10:00",
+      unreadCount = 0,
+      lastMessageStatus = null,
+      isLastMessageFromMe = false,
+      participants = listOf(me, contact),
+      rightStatusText = "En línea"
+    )
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = true) {
+        com.example.ui.screens.ContactInfoScreen(
+          chatUi = chatUi,
+          activeMember = me,
+          allMembers = listOf(me, contact),
+          visibleMessages = emptyList(),
+          calls = emptyList(),
+          selectedWallpaperKey = "default",
+          selectedNotificationToneUri = "",
+          isContactBlocked = false,
+          onSelectWallpaper = {},
+          onSelectNotificationTone = {},
+          onTogglePinChat = {},
+          onToggleMuteChat = {},
+          onStartCall = {},
+          onSearchInChat = {},
+          onOpenImage = {},
+          onOpenDocument = {},
+          onRequestClearChat = {},
+          onRequestToggleBlockContact = {},
+          onBack = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("contact_info_screen").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Tila del Carmen").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("contact_info_status_pill").assertIsDisplayed()
+  }
 }
 
 

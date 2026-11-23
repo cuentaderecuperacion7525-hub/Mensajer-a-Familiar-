@@ -1,5 +1,9 @@
 # Novedades de FamiChat
 
+## 2.8.55
+- Eliminación del destello blanco al navegar o dar retroceso en Modo oscuro: se sincronizó en vivo el fondo de la ventana Android con el tema aplicado (Modo claro, Modo oscuro o Sistema) y se reemplazó el fundido transparente de navegación por transiciones limpias sobre fondo sólido adaptable.
+- Adaptación completa de «Info del contacto / grupo» (y sus hojas de fondo de chat, fotos compartidas y tonos) tanto al Modo oscuro como al Modo claro.
+
 ## 2.8.54
 - El selector de perfiles («¿Quién eres?») ahora respeta automáticamente el tema aplicado en la aplicación (Modo claro, Modo oscuro o Tema del sistema), incluyendo tarjetas, fondos, insignias y barras del sistema.
 
