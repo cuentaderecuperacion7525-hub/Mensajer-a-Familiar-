@@ -272,8 +272,16 @@ class FamilyViewModel(
     private fun formatProfileLoadError(err: Throwable?): String {
         val fsErr = err?.unwrapFirestoreException()
         return when (fsErr?.code) {
-            com.google.firebase.firestore.FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED ->
-                "Se alcanzó el límite diario de operaciones en la nube (RESOURCE_EXHAUSTED). Se restablecerá mañana."
+            com.google.firebase.firestore.FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED -> {
+                val rawDetail = fsErr.localizedMessage.orEmpty()
+                if (rawDetail.contains("free tier database", ignoreCase = true) ||
+                    rawDetail.contains("cannot exceed free quota limits", ignoreCase = true)
+                ) {
+                    "La base de datos Firestore sigue limitada a cuota gratuita (20,000 escrituras/día) aunque el proyecto tenga Blaze (RESOURCE_EXHAUSTED). Se restablece mañana o al quitar el modo Free Tier de la base en Google Cloud Console."
+                } else {
+                    "Se alcanzó el límite diario de operaciones en la nube (RESOURCE_EXHAUSTED). Se restablecerá mañana."
+                }
+            }
             com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED ->
                 "Sin permisos para leer o unirse a la familia en la nube (PERMISSION_DENIED)."
             com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAVAILABLE ->
@@ -958,8 +966,13 @@ class FamilyViewModel(
                 if (hasBootFastSelector && bootActiveFamilyId != null) {
                     val savedFamilyId = bootActiveFamilyId
                     delay(350L)
-                    cloudRepo.syncJoiningMembers(savedFamilyId, currentUserId)
-                    cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
+                    val serverMembers = cloudRepo.fetchMembersOnceFromServer(savedFamilyId, currentUserId)
+                    if (serverMembers.isEmpty()) {
+                        cloudRepo.syncJoiningMembers(savedFamilyId, currentUserId)
+                        cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
+                    } else {
+                        prefs.saveCachedFamilyMembers(savedFamilyId, serverMembers)
+                    }
                     return@launch
                 }
 
@@ -1058,8 +1071,13 @@ class FamilyViewModel(
                     _isMembersLoading.value = false
                     _isSessionReady.value = true
                     viewModelScope.launch {
-                        cloudRepo.syncJoiningMembers(savedFamilyId, currentUserId)
-                        cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
+                        val serverMembers = cloudRepo.fetchMembersOnceFromServer(savedFamilyId, currentUserId)
+                        if (serverMembers.isEmpty()) {
+                            cloudRepo.syncJoiningMembers(savedFamilyId, currentUserId)
+                            cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
+                        } else {
+                            prefs.saveCachedFamilyMembers(savedFamilyId, serverMembers)
+                        }
                     }
                     return@launch
                 }
@@ -1922,14 +1940,22 @@ class FamilyViewModel(
         val key = "$chatId:${status.name}"
 
         if (!forceClear && status != PresenceStatus.ONLINE &&
-            key == lastSentPresenceKey && (now - lastSentPresenceAt) < 2500L
+            key == lastSentPresenceKey && (now - lastSentPresenceAt) < 4_000L
+        ) {
+            return
+        }
+        val raw = rawMembers.value.find { it.id == memberId }
+        if (status == PresenceStatus.ONLINE &&
+            raw != null &&
+            raw.isOnline &&
+            raw.liveStatus == PresenceStatus.ONLINE &&
+            raw.liveChatId.isNullOrBlank()
         ) {
             return
         }
         lastSentPresenceKey = key
         lastSentPresenceAt = now
 
-        val raw = rawMembers.value.find { it.id == memberId }
         val onlineLabel = onlineStatusLabelFor(raw?.lastSeenText.orEmpty())
         presenceClearJob?.cancel()
         viewModelScope.launch {

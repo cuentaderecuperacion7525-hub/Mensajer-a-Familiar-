@@ -9,8 +9,8 @@ data class ResolvedPresence(
 )
 
 object PresenceResolver {
-    const val ONLINE_TTL_MS = 75_000L
-    const val HEARTBEAT_INTERVAL_MS = 25_000L
+    const val ONLINE_TTL_MS = 150_000L
+    const val HEARTBEAT_INTERVAL_MS = 60_000L
     const val CLOCK_TICK_MS = 15_000L
     const val LIVE_ACTION_TTL_MS = 7_000L
 

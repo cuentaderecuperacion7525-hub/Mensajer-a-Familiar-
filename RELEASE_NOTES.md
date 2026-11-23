@@ -1,5 +1,17 @@
 # Novedades de FamiChat
 
+## 2.8.51
+- Conexión completa a la nueva base de datos de producción (`famichat-prod`) sin candado diario de escrituras (`RESOURCE_EXHAUSTED`), conservando todos los perfiles, chats, mensajes, notas, agenda y compras existentes.
+- Actualización de reglas y disparadores de notificaciones en segundo plano hacia `famichat-prod`.
+
+## 2.8.50
+- Los dispositivos que ya estaban registrados en la familia ahora pueden cargar y mostrar los perfiles en modo solo lectura incluso si la base de datos alcanzó su límite diario de escrituras (`RESOURCE_EXHAUSTED`).
+- Verificación directa al servidor al consultar las familias del dispositivo para evitar falsos vacíos por caché local.
+
+## 2.8.49
+- Reducción drástica del consumo diario de escrituras en Firestore (~80–90% menos): se limitó y agrupó en lotes la resincronización histórica al unirse nuevos dispositivos, se eliminó la sincronización repetida en el selector de perfiles y se espació el latido de estado «En línea» a cada 60 segundos.
+- Diagnóstico más preciso cuando la base de datos de Firestore tiene activo el candado «Free Tier» (límite de 20,000 escrituras/día incluso con plan Blaze).
+
 ## 2.8.48
 - Corrección definitiva del error «Tiempo de espera agotado al unirse a la familia» en instalaciones nuevas o al reinstalar: ahora se confirma correctamente la unión directa al servidor y se cargan de inmediato todos los perfiles creados por el administrador.
 - Reducción importante de escrituras redundantes en la nube al abrir la app desde dispositivos ya conectados, protegiendo el límite diario gratuito de Firebase.

@@ -55,12 +55,10 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             .map { snap -> snap.documents.mapNotNull(FirestoreMappers::toFamilySpace) }
 
     suspend fun fetchMyFamiliesOnce(uid: String): List<FamilySpace> = try {
-        db.collection("families")
-            .whereArrayContains("memberUids", uid)
-            .get()
-            .await()
-            .documents
-            .mapNotNull(FirestoreMappers::toFamilySpace)
+        val query = db.collection("families").whereArrayContains("memberUids", uid)
+        val snap = runCatching { query.get(Source.SERVER).await() }
+            .getOrElse { query.get().await() }
+        snap.documents.mapNotNull(FirestoreMappers::toFamilySpace)
     } catch (e: CancellationException) {
         throw e
     } catch (_: Exception) {
@@ -353,7 +351,10 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                 }
             } catch (updateErr: Exception) {
                 if (updateErr is CancellationException) throw updateErr
-                if (updateErr.unwrapFirestoreException()?.code != FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                val errCode = updateErr.unwrapFirestoreException()?.code
+                if (errCode != FirebaseFirestoreException.Code.PERMISSION_DENIED &&
+                    errCode != FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED
+                ) {
                     throw updateErr
                 }
                 val alreadyMember = runCatching {
@@ -601,23 +602,54 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
     suspend fun syncMemberUidsAcrossExistingDocs(familyId: String, allFamilyUids: List<String>, myUid: String) {
         if (allFamilyUids.isEmpty()) return
         val fRef = familyRef(familyId)
-        val collections = listOf("members", "chats", "messages", "media_chunks", "calls", "statuses", "shoppingItems", "events", "notes")
-        collections.forEach { colName ->
+        val collectionCaps = listOf(
+            "members" to Int.MAX_VALUE,
+            "chats" to Int.MAX_VALUE,
+            "shoppingItems" to 100,
+            "events" to 100,
+            "notes" to 100,
+            "statuses" to 30,
+            "calls" to 40,
+            "messages" to 120
+        )
+        for ((colName, maxDocs) in collectionCaps) {
             try {
                 val docs = fRef.collection(colName).whereArrayContains("memberUids", myUid).get().await()
-                for (doc: DocumentSnapshot in docs.documents) {
+                val candidates = docs.documents.filter { doc ->
                     val existingUids = (doc.get("memberUids") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
-                    val missing = allFamilyUids.filter { it !in existingUids }
-                    if (missing.isNotEmpty()) {
-                        doc.reference.update(
-                            mapOf(
-                                "memberUids" to (existingUids + missing).distinct().take(500),
-                                "updatedAt" to FieldValue.serverTimestamp()
-                            )
-                        ).await()
-                    }
+                    allFamilyUids.any { it !in existingUids }
                 }
-            } catch (_: Exception) {
+                if (candidates.isEmpty()) continue
+                val prioritized = if (candidates.size > maxDocs) {
+                    candidates.sortedByDescending { doc ->
+                        (doc.get("timestamp") as? Number)?.toLong() ?: 0L
+                    }.take(maxDocs)
+                } else {
+                    candidates
+                }
+                for (chunk in prioritized.chunked(400)) {
+                    val batch = db.batch()
+                    for (doc: DocumentSnapshot in chunk) {
+                        val existingUids = (doc.get("memberUids") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+                        val missing = allFamilyUids.filter { it !in existingUids }
+                        if (missing.isNotEmpty()) {
+                            batch.update(
+                                doc.reference,
+                                mapOf(
+                                    "memberUids" to (existingUids + missing).distinct().take(500),
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                )
+                            )
+                        }
+                    }
+                    batch.commit().await()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (e.unwrapFirestoreException()?.code == FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED) {
+                    return
+                }
             }
         }
     }

@@ -5,7 +5,7 @@ const { getMessaging } = require("firebase-admin/messaging");
 
 initializeApp();
 
-const DATABASE_ID = "ai-studio-android-nidofami-a8e12eb9-edf1-4ad5-a4f0-5cadecff7ae7";
+const DATABASE_ID = "famichat-prod";
 const REGION = "us-east1";
 const db = getFirestore(DATABASE_ID);
 
