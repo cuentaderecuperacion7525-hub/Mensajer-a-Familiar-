@@ -641,7 +641,8 @@ fun FamiChatApp(
                         }
                     },
                     onRetryLoad = vm::retryLoadProfiles,
-                    errorMessage = profileLoadError
+                    errorMessage = profileLoadError,
+                    isDarkTheme = isDarkTheme
                 )
             }
 

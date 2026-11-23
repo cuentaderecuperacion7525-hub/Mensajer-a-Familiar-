@@ -34,6 +34,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -60,6 +61,7 @@ import coil.compose.AsyncImage
 import com.example.data.model.FamilyMemberEntity
 import com.example.ui.components.extractAvatarInitials
 import com.example.ui.theme.InterFontFamily
+import com.example.ui.theme.LocalDarkTheme
 import com.example.util.ImageCompressionHelper
 import com.example.util.parseHexColor
 
@@ -141,15 +143,25 @@ fun ProfileSelectorScreen(
     onClearSnackbar: () -> Unit,
     onSelectMember: (FamilyMemberEntity) -> Unit,
     onRetryLoad: () -> Unit,
-    errorMessage: String? = null
+    errorMessage: String? = null,
+    isDarkTheme: Boolean = LocalDarkTheme.current
 ) {
+    val screenBg = if (isDarkTheme) MaterialTheme.colorScheme.background else SelectorScreenBg
+    val titleInk = if (isDarkTheme) MaterialTheme.colorScheme.onBackground else SelectorTitleInk
+    val subtitleInk = if (isDarkTheme) MaterialTheme.colorScheme.onSurfaceVariant else SelectorSubtitleGray
+    val cardBg = if (isDarkTheme) MaterialTheme.colorScheme.surface else SelectorCardBg
+    val cardBorder = if (isDarkTheme) MaterialTheme.colorScheme.outline else SelectorCardBorder
+    val adminPillBg = if (isDarkTheme) MaterialTheme.colorScheme.primaryContainer else SelectorAdminPillBg
+    val adminBlue = if (isDarkTheme) MaterialTheme.colorScheme.primary else SelectorAdminBlue
+    val retryContentColor = if (isDarkTheme) MaterialTheme.colorScheme.onPrimary else Color.White
+
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as? Activity)?.window ?: return@SideEffect
             val controller = WindowCompat.getInsetsController(window, view)
-            controller.isAppearanceLightStatusBars = true
-            controller.isAppearanceLightNavigationBars = true
+            controller.isAppearanceLightStatusBars = !isDarkTheme
+            controller.isAppearanceLightNavigationBars = !isDarkTheme
         }
     }
 
@@ -174,16 +186,17 @@ fun ProfileSelectorScreen(
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
-        containerColor = SelectorScreenBg,
+        containerColor = screenBg,
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(SelectorScreenBg)
+                .background(screenBg)
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 32.dp),
+                .padding(horizontal = 20.dp, vertical = 32.dp)
+                .testTag("profile_selector_root"),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Column(
@@ -200,7 +213,7 @@ fun ProfileSelectorScreen(
                     fontWeight = FontWeight.Medium,
                     fontSize = 22.sp,
                     lineHeight = 28.sp,
-                    color = SelectorTitleInk,
+                    color = titleInk,
                     textAlign = TextAlign.Center
                 )
                 Spacer(modifier = Modifier.height(6.dp))
@@ -210,7 +223,7 @@ fun ProfileSelectorScreen(
                     fontWeight = FontWeight.Normal,
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
-                    color = SelectorSubtitleGray,
+                    color = subtitleInk,
                     textAlign = TextAlign.Center
                 )
 
@@ -227,7 +240,7 @@ fun ProfileSelectorScreen(
                             verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
                             CircularProgressIndicator(
-                                color = SelectorAdminBlue,
+                                color = adminBlue,
                                 strokeWidth = 3.dp,
                                 modifier = Modifier.size(32.dp)
                             )
@@ -236,7 +249,7 @@ fun ProfileSelectorScreen(
                                 fontFamily = InterFontFamily,
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 14.sp,
-                                color = SelectorSubtitleGray,
+                                color = subtitleInk,
                                 textAlign = TextAlign.Center
                             )
                         }
@@ -245,8 +258,8 @@ fun ProfileSelectorScreen(
                     orderedMembers.isEmpty() -> {
                         Surface(
                             shape = RoundedCornerShape(18.dp),
-                            color = SelectorCardBg,
-                            border = BorderStroke(1.dp, SelectorCardBorder),
+                            color = cardBg,
+                            border = BorderStroke(1.dp, cardBorder),
                             tonalElevation = 0.dp,
                             shadowElevation = 0.dp,
                             modifier = Modifier
@@ -268,7 +281,7 @@ fun ProfileSelectorScreen(
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 14.sp,
                                     lineHeight = 20.sp,
-                                    color = SelectorTitleInk,
+                                    color = titleInk,
                                     textAlign = TextAlign.Center
                                 )
                                 if (!errorMessage.isNullOrBlank()) {
@@ -278,7 +291,7 @@ fun ProfileSelectorScreen(
                                         fontWeight = FontWeight.Normal,
                                         fontSize = 12.sp,
                                         lineHeight = 18.sp,
-                                        color = SelectorSubtitleGray,
+                                        color = subtitleInk,
                                         textAlign = TextAlign.Center,
                                         modifier = Modifier.testTag("selector_error_detail")
                                     )
@@ -287,8 +300,8 @@ fun ProfileSelectorScreen(
                                     onClick = onRetryLoad,
                                     shape = RoundedCornerShape(50),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = SelectorAdminBlue,
-                                        contentColor = Color.White
+                                        containerColor = adminBlue,
+                                        contentColor = retryContentColor
                                     ),
                                     elevation = ButtonDefaults.buttonElevation(
                                         defaultElevation = 0.dp,
@@ -336,6 +349,13 @@ fun ProfileSelectorScreen(
                                                 member = member,
                                                 resolvedColorHex = resolvedColors[member.id] ?: member.avatarColorHex,
                                                 cardWidth = cardWidth,
+                                                isDarkTheme = isDarkTheme,
+                                                cardBg = cardBg,
+                                                cardBorder = cardBorder,
+                                                titleInk = titleInk,
+                                                subtitleInk = subtitleInk,
+                                                adminPillBg = adminPillBg,
+                                                adminBlue = adminBlue,
                                                 onClick = { onSelectMember(member) }
                                             )
                                         }
@@ -355,12 +375,21 @@ private fun ProfileSelectionCard(
     member: FamilyMemberEntity,
     resolvedColorHex: String,
     cardWidth: androidx.compose.ui.unit.Dp,
+    isDarkTheme: Boolean,
+    cardBg: Color,
+    cardBorder: Color,
+    titleInk: Color,
+    subtitleInk: Color,
+    adminPillBg: Color,
+    adminBlue: Color,
     onClick: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(18.dp)
     val avatarShape = RoundedCornerShape(18.dp)
     val hasPhoto = member.avatarPhotoData.isNotBlank()
-    val avatarBg = if (hasPhoto) Color.White else parseHexColor(resolvedColorHex)
+    val photoSurfaceBg = if (isDarkTheme) MaterialTheme.colorScheme.surfaceVariant else Color.White
+    val avatarBg = if (hasPhoto) photoSurfaceBg else parseHexColor(resolvedColorHex)
+    val lockBadgeBg = if (isDarkTheme) MaterialTheme.colorScheme.surfaceVariant else SelectorTitleInk
     val displayName = remember(member.name) { formatShortProfileName(member.name) }
     val initials = remember(displayName, member.name, member.avatarEmoji) {
         extractAvatarInitials(displayName.ifBlank { member.name }, member.avatarEmoji)
@@ -368,8 +397,8 @@ private fun ProfileSelectionCard(
 
     Surface(
         shape = cardShape,
-        color = SelectorCardBg,
-        border = BorderStroke(1.dp, SelectorCardBorder),
+        color = cardBg,
+        border = BorderStroke(1.dp, cardBorder),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
         modifier = Modifier
@@ -420,8 +449,8 @@ private fun ProfileSelectionCard(
                             .offset(x = 3.dp, y = 3.dp)
                             .size(20.dp)
                             .clip(CircleShape)
-                            .background(SelectorTitleInk)
-                            .border(2.dp, SelectorCardBg, CircleShape),
+                            .background(lockBadgeBg)
+                            .border(2.dp, cardBg, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -442,7 +471,7 @@ private fun ProfileSelectionCard(
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp,
                 lineHeight = 16.sp,
-                color = SelectorTitleInk,
+                color = titleInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center
@@ -453,7 +482,7 @@ private fun ProfileSelectionCard(
             if (member.isAdmin) {
                 Surface(
                     shape = RoundedCornerShape(50),
-                    color = SelectorAdminPillBg,
+                    color = adminPillBg,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp
                 ) {
@@ -463,7 +492,7 @@ private fun ProfileSelectionCard(
                         fontWeight = FontWeight.Medium,
                         fontSize = 11.sp,
                         lineHeight = 14.sp,
-                        color = SelectorAdminBlue,
+                        color = adminBlue,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
@@ -476,7 +505,7 @@ private fun ProfileSelectionCard(
                     fontWeight = FontWeight.Normal,
                     fontSize = 11.sp,
                     lineHeight = 14.sp,
-                    color = SelectorSubtitleGray,
+                    color = subtitleInk,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center

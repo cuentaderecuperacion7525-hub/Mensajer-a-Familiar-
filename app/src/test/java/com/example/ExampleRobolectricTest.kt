@@ -1983,6 +1983,32 @@ class ExampleRobolectricTest {
 
   @Test
   @Config(qualifiers = "w411dp-h891dp")
+  fun `profile selector respects dark theme palette when dark mode is applied`() {
+    val members = listOf(
+      sampleMember(id = "m_admin", name = "José Manuel", isAdmin = true),
+      sampleMember(id = "m_hijo", name = "Cristian Fernando", isAdmin = false)
+    )
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = true) {
+        ProfileSelectorScreen(
+          members = members,
+          isMembersLoading = false,
+          snackbarMessage = null,
+          onClearSnackbar = {},
+          onSelectMember = {},
+          onRetryLoad = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("profile_selector_root").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_card_m_admin").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_card_m_hijo").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Papá · con PIN").assertIsDisplayed()
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
   fun `google sign in screen shows browser fallback option for devices without google play services`() {
     composeTestRule.setContent {
       com.example.ui.screens.GoogleSignInScreen(

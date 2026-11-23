@@ -1,5 +1,8 @@
 # Novedades de FamiChat
 
+## 2.8.54
+- El selector de perfiles («¿Quién eres?») ahora respeta automáticamente el tema aplicado en la aplicación (Modo claro, Modo oscuro o Tema del sistema), incluyendo tarjetas, fondos, insignias y barras del sistema.
+
 ## 2.8.53
 - Corrección de seguridad en «Cambiar de perfil (Switch)»: ahora acepta únicamente la Clave de Switch configurada y ya no permite entrar con el PIN de administrador.
 
