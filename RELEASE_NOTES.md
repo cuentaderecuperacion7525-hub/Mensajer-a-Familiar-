@@ -1,5 +1,10 @@
 # Novedades de FamiChat
 
+## 2.8.48
+- Corrección definitiva del error «Tiempo de espera agotado al unirse a la familia» en instalaciones nuevas o al reinstalar: ahora se confirma correctamente la unión directa al servidor y se cargan de inmediato todos los perfiles creados por el administrador.
+- Reducción importante de escrituras redundantes en la nube al abrir la app desde dispositivos ya conectados, protegiendo el límite diario gratuito de Firebase.
+- Mensajes de diagnóstico más claros si el servidor reporta algún límite o bloqueo específico al descargar los perfiles familiares.
+
 ## 2.8.47
 - Carga mucho más rápida de perfiles en instalaciones nuevas (para familiares que instalan por primera vez): se une directo a la familia y descarga los perfiles de inmediato en lugar de esperar escrituras previas o consultas vacías.
 - Se corrigió el reinicio doble del observador de perfiles que podía dejar girando «Cargando perfiles...» durante demasiado tiempo.

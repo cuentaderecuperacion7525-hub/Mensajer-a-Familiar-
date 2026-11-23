@@ -24,6 +24,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Source
+import com.google.firebase.firestore.TransactionOptions
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -260,7 +261,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
         val code = fixedCode.trim().uppercase()
         val invRef = db.collection("familyInvites").document(code)
         return try {
-            val invSnap = withTimeoutOrNull(8_000L) { invRef.get().await() }
+            val invSnap = withTimeoutOrNull(8_000L) { invRef.get(Source.SERVER).await() }
                 ?: return Result.failure(IllegalStateException("Tiempo de espera agotado al buscar la familia."))
             if (invSnap.exists() && invSnap.getBoolean("active") == true) {
                 joinFamilyByInviteCode(
@@ -316,7 +317,7 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             val familyId = if (!prefetchedFamilyId.isNullOrBlank()) {
                 prefetchedFamilyId
             } else {
-                val invSnap = withTimeoutOrNull(8_000L) { invRef.get().await() }
+                val invSnap = withTimeoutOrNull(8_000L) { invRef.get(Source.SERVER).await() }
                     ?: return Result.failure(IllegalStateException("Tiempo de espera agotado al verificar el código."))
                 if (!invSnap.exists() || invSnap.getBoolean("active") != true) {
                     return Result.failure(IllegalArgumentException("Código familiar no encontrado o inactivo."))
@@ -327,25 +328,39 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             val fRef = familyRef(familyId)
             currentPath = fRef.path
 
-            // Attempt joining directly in 1 round-trip; if already in memberUids, Firestore rules
-            // reject the size+1 join update with PERMISSION_DENIED and we verify membership once.
+            // Commit the join via a direct online unary transaction RPC rather than fRef.update().
+            // fRef.update() enqueues into the persistent offline WriteStream, which backs off
+            // silently on non-permanent errors (e.g. RESOURCE_EXHAUSTED, UNAVAILABLE, stalled
+            // HTTP/2 streams) and causes an 8s timeout instead of completing or reporting the error.
+            // If uid is already in memberUids, Firestore rules return PERMISSION_DENIED immediately
+            // and we verify membership once.
             try {
-                withTimeoutOrNull(8_000L) {
-                    fRef.update(
-                        mapOf(
-                            "memberUids" to FieldValue.arrayUnion(uid),
-                            "updatedAt" to FieldValue.serverTimestamp()
+                val txOptions = TransactionOptions.Builder().setMaxAttempts(2).build()
+                val joined = withTimeoutOrNull(8_000L) {
+                    db.runTransaction(txOptions) { tx ->
+                        tx.update(
+                            fRef,
+                            mapOf(
+                                "memberUids" to FieldValue.arrayUnion(uid),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
                         )
-                    ).await()
-                } ?: return Result.failure(IllegalStateException("Tiempo de espera agotado al unirse a la familia."))
+                        true
+                    }.await()
+                }
+                if (joined != true) {
+                    return Result.failure(IllegalStateException("Tiempo de espera agotado al unirse a la familia."))
+                }
             } catch (updateErr: Exception) {
                 if (updateErr is CancellationException) throw updateErr
                 if (updateErr.unwrapFirestoreException()?.code != FirebaseFirestoreException.Code.PERMISSION_DENIED) {
                     throw updateErr
                 }
                 val alreadyMember = runCatching {
-                    val existingUids = (withTimeoutOrNull(6_000L) { fRef.get().await() }
-                        ?.get("memberUids") as? List<*>)
+                    val existingUids = (withTimeoutOrNull(6_000L) {
+                        runCatching { fRef.get(Source.SERVER).await() }
+                            .getOrElse { fRef.get().await() }
+                    }?.get("memberUids") as? List<*>)
                         ?.mapNotNull { it as? String }
                         ?: emptyList()
                     uid in existingUids
@@ -354,15 +369,16 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
             }
 
             if (syncMembersInline) {
-                // Sync joining UID onto existing members in parallel when requested synchronously
+                // Sync joining UID onto existing members and chats in parallel when requested synchronously
                 val bootstrap = runCatching {
                     withTimeoutOrNull(6_000L) { fRef.collection("meta").document("bootstrap").get().await() }
                 }.getOrNull()
                 val memberIds = (bootstrap?.get("memberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+                val chatIds = (bootstrap?.get("chatIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
 
-                if (memberIds.isNotEmpty()) {
+                if (memberIds.isNotEmpty() || chatIds.isNotEmpty()) {
                     coroutineScope {
-                        memberIds.map { mId ->
+                        val jobs = memberIds.map { mId ->
                             async {
                                 runCatching {
                                     withTimeoutOrNull(5_000L) {
@@ -375,7 +391,21 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                                     }
                                 }
                             }
-                        }.awaitAll()
+                        } + chatIds.map { cId ->
+                            async {
+                                runCatching {
+                                    withTimeoutOrNull(5_000L) {
+                                        fRef.collection("chats").document(cId).update(
+                                            mapOf(
+                                                "memberUids" to FieldValue.arrayUnion(uid),
+                                                "updatedAt" to FieldValue.serverTimestamp()
+                                            )
+                                        ).await()
+                                    }
+                                }
+                            }
+                        }
+                        jobs.awaitAll()
                     }
                 }
             }
@@ -489,7 +519,8 @@ class FamilyCloudRepository(private val db: FirebaseFirestore) {
                     async {
                         runCatching {
                             withTimeoutOrNull(5_000L) {
-                                fRef.collection("members").document(mId).get().await()
+                                runCatching { fRef.collection("members").document(mId).get(Source.SERVER).await() }
+                                    .getOrElse { fRef.collection("members").document(mId).get().await() }
                             }?.let(FirestoreMappers::toMember)
                         }.getOrNull()
                     }

@@ -264,26 +264,35 @@ class FamilyViewModel(
         val code = err?.unwrapFirestoreException()?.code ?: return false
         return code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED ||
             code == com.google.firebase.firestore.FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED ||
-            code == com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAUTHENTICATED
+            code == com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAUTHENTICATED ||
+            code == com.google.firebase.firestore.FirebaseFirestoreException.Code.INVALID_ARGUMENT ||
+            code == com.google.firebase.firestore.FirebaseFirestoreException.Code.NOT_FOUND
     }
 
     private fun formatProfileLoadError(err: Throwable?): String {
         val fsErr = err?.unwrapFirestoreException()
         return when (fsErr?.code) {
             com.google.firebase.firestore.FirebaseFirestoreException.Code.RESOURCE_EXHAUSTED ->
-                "Se alcanzó el límite diario de lecturas en la nube (RESOURCE_EXHAUSTED). Se restablecerá mañana."
+                "Se alcanzó el límite diario de operaciones en la nube (RESOURCE_EXHAUSTED). Se restablecerá mañana."
             com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED ->
-                "Sin permisos para leer la familia en la nube (PERMISSION_DENIED)."
+                "Sin permisos para leer o unirse a la familia en la nube (PERMISSION_DENIED)."
             com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAVAILABLE ->
                 "No se pudo conectar con el servidor. Verifica tu conexión a internet (UNAVAILABLE)."
             com.google.firebase.firestore.FirebaseFirestoreException.Code.DEADLINE_EXCEEDED ->
                 "La conexión tardó demasiado al descargar los perfiles (DEADLINE_EXCEEDED)."
+            com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAUTHENTICATED ->
+                "No se pudo validar la sesión con el servidor (UNAUTHENTICATED). Intenta de nuevo."
+            com.google.firebase.firestore.FirebaseFirestoreException.Code.ABORTED,
+            com.google.firebase.firestore.FirebaseFirestoreException.Code.FAILED_PRECONDITION ->
+                "El servidor rechazó temporalmente la unión a la familia (${fsErr.code.name}). Intenta de nuevo."
             else -> {
+                val codeName = fsErr?.code?.name
+                val codeSuffix = codeName?.let { " ($it)" }.orEmpty()
                 val raw = fsErr?.localizedMessage ?: err?.localizedMessage
                 if (!raw.isNullOrBlank()) {
-                    raw
+                    if (codeName != null && !raw.contains(codeName)) "$raw$codeSuffix" else raw
                 } else {
-                    "No se pudieron descargar los perfiles. Verifica tu internet e intenta de nuevo."
+                    "No se pudieron descargar los perfiles$codeSuffix. Verifica tu internet e intenta de nuevo."
                 }
             }
         }
@@ -899,9 +908,6 @@ class FamilyViewModel(
                     val savedMemberId = bootActiveMemberId
                     delay(350L)
                     syncPushAndBackgroundWork(savedFamilyId, savedMemberId)
-                    cloudRepo.syncJoiningMembers(savedFamilyId, currentUserId)
-                    cloudRepo.syncSingleMemberUid(savedFamilyId, savedMemberId, currentUserId)
-                    cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
                     if (_isAppForeground.value && isShowLastSeenEnabledFor(savedMemberId)) {
                         startPresenceHeartbeat()
                     }
@@ -914,6 +920,9 @@ class FamilyViewModel(
                                 preserveMemberId = savedMemberId
                             )
                         } else {
+                            cloudRepo.syncJoiningMembers(savedFamilyId, currentUserId)
+                            cloudRepo.syncSingleMemberUid(savedFamilyId, savedMemberId, currentUserId)
+                            cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
                             val confirmedDeleted = cloudRepo.isMemberConfirmedDeletedOnServer(
                                 familyId = savedFamilyId,
                                 memberId = savedMemberId,
@@ -934,10 +943,14 @@ class FamilyViewModel(
                         }
                     } else {
                         val rejoined = resolveInitialFamilySpace(savedFamilyId)
-                        if (!rejoined.isNullOrBlank() && rejoined != savedFamilyId) {
-                            _activeFamilyId.value = rejoined
-                            prefs.setActiveFamilyId(rejoined)
+                        val targetFamId = rejoined?.takeIf { it.isNotBlank() } ?: savedFamilyId
+                        if (targetFamId != savedFamilyId) {
+                            _activeFamilyId.value = targetFamId
+                            prefs.setActiveFamilyId(targetFamId)
                         }
+                        cloudRepo.syncJoiningMembers(targetFamId, currentUserId)
+                        cloudRepo.syncSingleMemberUid(targetFamId, savedMemberId, currentUserId)
+                        cloudRepo.syncJoiningChats(targetFamId, currentUserId)
                     }
                     return@launch
                 }
@@ -986,9 +999,6 @@ class FamilyViewModel(
                         }
                         viewModelScope.launch {
                             syncPushAndBackgroundWork(savedFamilyId, savedMemberId)
-                            cloudRepo.syncJoiningMembers(savedFamilyId, currentUserId)
-                            cloudRepo.syncSingleMemberUid(savedFamilyId, savedMemberId, currentUserId)
-                            cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
                             if (_isAppForeground.value && isShowLastSeenEnabledFor(savedMemberId)) {
                                 startPresenceHeartbeat()
                             }
@@ -1001,6 +1011,9 @@ class FamilyViewModel(
                                         preserveMemberId = savedMemberId
                                     )
                                 } else {
+                                    cloudRepo.syncJoiningMembers(savedFamilyId, currentUserId)
+                                    cloudRepo.syncSingleMemberUid(savedFamilyId, savedMemberId, currentUserId)
+                                    cloudRepo.syncJoiningChats(savedFamilyId, currentUserId)
                                     // Verify positively on server before ever wiping the saved profile
                                     val confirmedDeleted = cloudRepo.isMemberConfirmedDeletedOnServer(
                                         familyId = savedFamilyId,
@@ -1023,10 +1036,14 @@ class FamilyViewModel(
                             } else {
                                 // Device UID may need re-syncing (e.g. after reinstall with Auto Backup)
                                 val rejoined = resolveInitialFamilySpace(savedFamilyId)
-                                if (!rejoined.isNullOrBlank() && rejoined != savedFamilyId) {
-                                    _activeFamilyId.value = rejoined
-                                    prefs.setActiveFamilyId(rejoined)
+                                val targetFamId = rejoined?.takeIf { it.isNotBlank() } ?: savedFamilyId
+                                if (targetFamId != savedFamilyId) {
+                                    _activeFamilyId.value = targetFamId
+                                    prefs.setActiveFamilyId(targetFamId)
                                 }
+                                cloudRepo.syncJoiningMembers(targetFamId, currentUserId)
+                                cloudRepo.syncSingleMemberUid(targetFamId, savedMemberId, currentUserId)
+                                cloudRepo.syncJoiningChats(targetFamId, currentUserId)
                             }
                         }
                         return@launch
