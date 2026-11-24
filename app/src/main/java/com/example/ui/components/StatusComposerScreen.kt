@@ -850,27 +850,6 @@ private fun TextStatusComposerPage(
             }
         }
 
-        // Centered 24h badge pill
-        Box(
-            modifier = Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = Color.Black.copy(alpha = 0.24f)
-            ) {
-                Text(
-                    text = "Se borra en 24 horas",
-                    fontFamily = InterFontFamily,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.White,
-                    maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
-                )
-            }
-        }
-
         // Editable centered text directly on colored background
         BoxWithConstraints(
             modifier = Modifier
@@ -1621,6 +1600,8 @@ private fun VideoStatusPreviewPage(
     var videoViewRef by remember(videoUri) { mutableStateOf<VideoView?>(null) }
     var mediaPlayerRef by remember(videoUri) { mutableStateOf<android.media.MediaPlayer?>(null) }
     var userAudioPlaying by remember(videoUri) { mutableStateOf(false) }
+    var hasStartedOnce by remember(videoUri) { mutableStateOf(false) }
+    var pendingStartWithSound by remember(videoUri) { mutableStateOf(false) }
     var isPrepared by remember(videoUri) { mutableStateOf(false) }
     var durationMs by remember(videoUri) { mutableIntStateOf(0) }
     var positionMs by remember(videoUri) { mutableIntStateOf(0) }
@@ -1628,7 +1609,7 @@ private fun VideoStatusPreviewPage(
     LaunchedEffect(videoUri, isPrepared, userAudioPlaying) {
         while (isPrepared) {
             val vv = videoViewRef
-            if (vv != null) {
+            if (vv != null && hasStartedOnce) {
                 try {
                     val dur = vv.duration.coerceAtLeast(1)
                     val pos = vv.currentPosition.coerceIn(0, dur)
@@ -1652,22 +1633,29 @@ private fun VideoStatusPreviewPage(
     }
 
     fun toggleVideoPlaybackWithSound() {
-        val vv = videoViewRef ?: return
+        val vv = videoViewRef
         val mp = mediaPlayerRef
         if (!userAudioPlaying) {
             userAudioPlaying = true
-            try {
-                mp?.isLooping = true
-                mp?.setVolume(1f, 1f)
-                if (!vv.isPlaying) {
-                    vv.start()
+            if (isPrepared && vv != null) {
+                hasStartedOnce = true
+                pendingStartWithSound = false
+                try {
+                    mp?.isLooping = true
+                    mp?.setVolume(1f, 1f)
+                    if (!vv.isPlaying) {
+                        vv.start()
+                    }
+                } catch (_: Exception) {
                 }
-            } catch (_: Exception) {
+            } else {
+                pendingStartWithSound = true
             }
         } else {
             userAudioPlaying = false
+            pendingStartWithSound = false
             try {
-                if (vv.isPlaying) {
+                if (vv != null && vv.isPlaying) {
                     vv.pause()
                 }
             } catch (_: Exception) {
@@ -1680,17 +1668,6 @@ private fun VideoStatusPreviewPage(
             .fillMaxSize()
             .background(GalleryDarkBg)
     ) {
-        val thumbBmp = previewInfo?.thumbnailBitmap
-        if (thumbBmp != null && !thumbBmp.isRecycled) {
-            val imgBmp = remember(thumbBmp) { thumbBmp.asImageBitmap() }
-            Image(
-                bitmap = imgBmp,
-                contentDescription = "Miniatura de video",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
         key(videoUri) {
             AndroidView(
                 factory = { ctx ->
@@ -1708,9 +1685,12 @@ private fun VideoStatusPreviewPage(
                                 isPrepared = true
                                 durationMs = mp.duration.coerceAtLeast(1)
                                 mp.isLooping = true
-                                // Auto-plays muted in loop until user taps center Play button
-                                mp.setVolume(0f, 0f)
-                                start()
+                                mp.setVolume(1f, 1f)
+                                if (pendingStartWithSound || userAudioPlaying) {
+                                    hasStartedOnce = true
+                                    pendingStartWithSound = false
+                                    start()
+                                }
                             }
                             setOnErrorListener { _, _, _ -> true }
                         }
@@ -1720,6 +1700,25 @@ private fun VideoStatusPreviewPage(
                 },
                 modifier = Modifier.fillMaxSize()
             )
+        }
+
+        // Crisp initial frame while paused before user presses Play (avoids unstarted SurfaceView black frame)
+        val thumbBmp = previewInfo?.thumbnailBitmap
+        if (!hasStartedOnce && thumbBmp != null && !thumbBmp.isRecycled) {
+            val imgBmp = remember(thumbBmp) { thumbBmp.asImageBitmap() }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(GalleryDarkBg),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = imgBmp,
+                    contentDescription = "Miniatura de video",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         // Top & bottom gradient overlays
@@ -1886,25 +1885,6 @@ private fun PreviewTopBar(
             }
         }
 
-        Box(
-            modifier = Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = Color.Black.copy(alpha = 0.38f)
-            ) {
-                Text(
-                    text = "Se borra en 24 horas",
-                    fontFamily = InterFontFamily,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.White,
-                    maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
-                )
-            }
-        }
     }
 }
 

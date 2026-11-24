@@ -3315,9 +3315,9 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
 
-    // Starts on Texto tab with empty prompt, 0/280, 24h badge, disabled Publicar
+    // Starts on Texto tab with empty prompt, 0/280, hidden 24h badge, disabled Publicar
     composeTestRule.onNodeWithTag("status_composer_screen").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Se borra en 24 horas").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Se borra en 24 horas").assertDoesNotExist()
     composeTestRule.onNodeWithText("Escribe tu estado…").assertIsDisplayed()
     composeTestRule.onNodeWithText("0/280").assertIsDisplayed()
     composeTestRule.onNodeWithTag("publish_status_button").assertIsNotEnabled()

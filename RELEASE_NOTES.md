@@ -1,5 +1,10 @@
 # Novedades de FamiChat
 
+## 2.8.59
+- Mejoras en la pantalla «Publicar estado»:
+  - Al elegir un video en la pestaña «Video», la vista previa inicia pausada en el primer cuadro (sin reproducirse sola en silencio) y comienza a reproducirse con sonido normal al presionar el botón central ▶.
+  - Se ocultó la leyenda visual «Se borra en 24 horas» en las pantallas de Texto, Foto y Video manteniendo intacta la caducidad automática de 24 horas.
+
 ## 2.8.58
 - Corrección en la pestaña «Video» al publicar estados para mostrar directamente los videos del carrete del teléfono:
   - Solicitud conjunta de permisos de fotos y videos desde la primera apertura para habilitar ambos carretes al instante.
