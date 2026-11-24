@@ -4,11 +4,15 @@ import android.Manifest
 import android.app.Activity
 import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
+import android.provider.Settings
+import android.util.Size
 import android.widget.FrameLayout
 import android.widget.VideoView
 import androidx.activity.compose.BackHandler
@@ -58,6 +62,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
@@ -69,6 +74,9 @@ import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -114,8 +122,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.ui.theme.InterFontFamily
@@ -158,8 +170,64 @@ private data class LocalGalleryMediaItem(
     val dateAddedSec: Long,
     val durationSec: Int = 0,
     val sizeBytes: Long = 0L,
-    val isOverLimit: Boolean = false
+    val isOverLimit: Boolean = false,
+    val bucketName: String = "Recientes"
 )
+
+private fun isPermissionGranted(context: Context, permission: String): Boolean =
+    ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+
+private fun hasPhotoGalleryAccess(context: Context): Boolean = when {
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+        isPermissionGranted(context, Manifest.permission.READ_MEDIA_IMAGES) ||
+            isPermissionGranted(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+        isPermissionGranted(context, Manifest.permission.READ_MEDIA_IMAGES)
+    else ->
+        isPermissionGranted(context, Manifest.permission.READ_EXTERNAL_STORAGE)
+}
+
+private fun hasVideoGalleryAccess(context: Context): Boolean = when {
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+        isPermissionGranted(context, Manifest.permission.READ_MEDIA_VIDEO) ||
+            isPermissionGranted(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+        isPermissionGranted(context, Manifest.permission.READ_MEDIA_VIDEO)
+    else ->
+        isPermissionGranted(context, Manifest.permission.READ_EXTERNAL_STORAGE)
+}
+
+private fun hasPartialMediaAccess(context: Context, isVideo: Boolean): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return false
+    val fullPerm = if (isVideo) Manifest.permission.READ_MEDIA_VIDEO else Manifest.permission.READ_MEDIA_IMAGES
+    return !isPermissionGranted(context, fullPerm) &&
+        isPermissionGranted(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+}
+
+private fun requiredPhotoPermissions(): Array<String> = when {
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+    else ->
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+}
+
+private fun requiredVideoPermissions(): Array<String> = when {
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+        arrayOf(Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+        arrayOf(Manifest.permission.READ_MEDIA_VIDEO)
+    else ->
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+}
+
+private fun primaryGalleryPermission(isVideo: Boolean): String = when {
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+        if (isVideo) Manifest.permission.READ_MEDIA_VIDEO else Manifest.permission.READ_MEDIA_IMAGES
+    else ->
+        Manifest.permission.READ_EXTERNAL_STORAGE
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -212,6 +280,78 @@ fun StatusComposerScreen(
     var mediaStorePhotos by remember { mutableStateOf<List<LocalGalleryMediaItem>>(emptyList()) }
     var mediaStoreVideos by remember { mutableStateOf<List<LocalGalleryMediaItem>>(emptyList()) }
 
+    var photoAccessGranted by remember { mutableStateOf(hasPhotoGalleryAccess(context)) }
+    var videoAccessGranted by remember { mutableStateOf(hasVideoGalleryAccess(context)) }
+    var partialPhotoAccess by remember { mutableStateOf(hasPartialMediaAccess(context, isVideo = false)) }
+    var partialVideoAccess by remember { mutableStateOf(hasPartialMediaAccess(context, isVideo = true)) }
+    var hasPromptedPhotoPermission by rememberSaveable { mutableStateOf(false) }
+    var hasPromptedVideoPermission by rememberSaveable { mutableStateOf(false) }
+    var manualPermissionIsVideo by remember { mutableStateOf<Boolean?>(null) }
+    var hadRationaleBeforeManualRequest by remember { mutableStateOf(false) }
+    var galleryRefreshTick by remember { mutableIntStateOf(0) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                photoAccessGranted = hasPhotoGalleryAccess(context)
+                videoAccessGranted = hasVideoGalleryAccess(context)
+                partialPhotoAccess = hasPartialMediaAccess(context, isVideo = false)
+                partialVideoAccess = hasPartialMediaAccess(context, isVideo = true)
+                galleryRefreshTick++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val galleryPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        val prevIsVideo = manualPermissionIsVideo
+        manualPermissionIsVideo = null
+        photoAccessGranted = hasPhotoGalleryAccess(context)
+        videoAccessGranted = hasVideoGalleryAccess(context)
+        partialPhotoAccess = hasPartialMediaAccess(context, isVideo = false)
+        partialVideoAccess = hasPartialMediaAccess(context, isVideo = true)
+        galleryRefreshTick++
+
+        if (prevIsVideo != null) {
+            val grantedNow = if (prevIsVideo) videoAccessGranted else photoAccessGranted
+            if (!grantedNow) {
+                val activity = context as? Activity
+                val primaryPerm = primaryGalleryPermission(prevIsVideo)
+                val showRationaleNow = activity != null &&
+                    ActivityCompat.shouldShowRequestPermissionRationale(activity, primaryPerm)
+                if (activity != null && !hadRationaleBeforeManualRequest && !showRationaleNow) {
+                    runCatching {
+                        activity.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.fromParts("package", context.packageName, null)
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun requestGalleryAccess(isVideo: Boolean, userInitiated: Boolean) {
+        if (userInitiated) {
+            val activity = context as? Activity
+            val primaryPerm = primaryGalleryPermission(isVideo)
+            hadRationaleBeforeManualRequest = activity != null &&
+                ActivityCompat.shouldShowRequestPermissionRationale(activity, primaryPerm)
+            manualPermissionIsVideo = isVideo
+        } else {
+            manualPermissionIsVideo = null
+        }
+        galleryPermissionLauncher.launch(
+            if (isVideo) requiredVideoPermissions() else requiredPhotoPermissions()
+        )
+    }
+
     var showDiscardDialog by remember { mutableStateOf(false) }
     var inlineWarningMsg by remember { mutableStateOf<String?>(null) }
 
@@ -222,13 +362,26 @@ fun StatusComposerScreen(
         }
     }
 
-    // Load real app-accessible gallery items without requesting any new storage permissions
-    LaunchedEffect(currentMode) {
+    // Automatically request scoped gallery permission on first Foto/Video visit & load device camera roll
+    LaunchedEffect(currentMode, photoAccessGranted, videoAccessGranted, galleryRefreshTick) {
+        photoAccessGranted = hasPhotoGalleryAccess(context)
+        videoAccessGranted = hasVideoGalleryAccess(context)
+        partialPhotoAccess = hasPartialMediaAccess(context, isVideo = false)
+        partialVideoAccess = hasPartialMediaAccess(context, isVideo = true)
+
         when (currentMode) {
             StatusComposerMode.PHOTO -> {
+                if (!photoAccessGranted && !hasPromptedPhotoPermission) {
+                    hasPromptedPhotoPermission = true
+                    requestGalleryAccess(isVideo = false, userInitiated = false)
+                }
                 mediaStorePhotos = loadAppAccessiblePhotos(context)
             }
             StatusComposerMode.VIDEO -> {
+                if (!videoAccessGranted && !hasPromptedVideoPermission) {
+                    hasPromptedVideoPermission = true
+                    requestGalleryAccess(isVideo = true, userInitiated = false)
+                }
                 mediaStoreVideos = loadAppAccessibleVideos(context)
             }
             StatusComposerMode.TEXT -> Unit
@@ -509,7 +662,10 @@ fun StatusComposerScreen(
                 MediaGalleryComposerPage(
                     isVideo = isVideoGallery,
                     items = if (isVideoGallery) combinedVideos else combinedPhotos,
+                    hasGalleryPermission = if (isVideoGallery) videoAccessGranted else photoAccessGranted,
+                    hasPartialAccess = if (isVideoGallery) partialVideoAccess else partialPhotoAccess,
                     onCloseClick = { handleBackOrClose(fromCloseButton = true) },
+                    onRequestPermission = { requestGalleryAccess(isVideo = isVideoGallery, userInitiated = true) },
                     onOpenPicker = {
                         if (isVideoGallery) {
                             videoPickerLauncher.launch(
@@ -858,12 +1014,45 @@ private fun TextStatusComposerPage(
 private fun MediaGalleryComposerPage(
     isVideo: Boolean,
     items: List<LocalGalleryMediaItem>,
+    hasGalleryPermission: Boolean,
+    hasPartialAccess: Boolean,
     onCloseClick: () -> Unit,
+    onRequestPermission: () -> Unit,
     onOpenPicker: () -> Unit,
     onOpenCamera: () -> Unit,
     onItemClick: (LocalGalleryMediaItem) -> Unit,
     onSelectTab: (StatusComposerMode) -> Unit
 ) {
+    var selectedBucket by rememberSaveable(isVideo) { mutableStateOf("Recientes") }
+    var showAlbumMenu by remember { mutableStateOf(false) }
+
+    val albums = remember(items, isVideo) {
+        if (isVideo) {
+            emptyList()
+        } else {
+            items
+                .groupBy { it.bucketName.ifBlank { "Cámara" } }
+                .map { (name, list) -> name to list.size }
+                .sortedByDescending { it.second }
+        }
+    }
+
+    LaunchedEffect(albums, selectedBucket) {
+        if (selectedBucket != "Recientes" && albums.none { it.first == selectedBucket }) {
+            selectedBucket = "Recientes"
+        }
+    }
+
+    val displayedItems = remember(items, isVideo, selectedBucket) {
+        if (!isVideo && selectedBucket != "Recientes") {
+            items.filter { it.bucketName == selectedBucket }
+        } else {
+            items
+        }
+    }
+
+    val showDirectCameraRoll = hasGalleryPermission && displayedItems.isNotEmpty()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -893,32 +1082,143 @@ private fun MediaGalleryComposerPage(
                 )
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .defaultMinSize(minHeight = 44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { onOpenPicker() }
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
-                    .testTag(if (isVideo) "status_gallery_title_videos" else "status_gallery_title_recents")
-            ) {
-                Text(
-                    text = if (isVideo) "Videos" else "Recientes",
-                    fontFamily = InterFontFamily,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
-                    maxLines = 1
-                )
-                if (!isVideo) {
-                    Icon(
-                        imageVector = Icons.Filled.KeyboardArrowDown,
-                        contentDescription = "Abrir galería del dispositivo",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+            Box(modifier = Modifier.align(Alignment.Center)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            if (!isVideo) {
+                                if (items.isNotEmpty() || hasGalleryPermission) {
+                                    showAlbumMenu = true
+                                } else {
+                                    onOpenPicker()
+                                }
+                            } else if (!hasGalleryPermission) {
+                                onOpenPicker()
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .testTag(if (isVideo) "status_gallery_title_videos" else "status_gallery_title_recents")
+                ) {
+                    Text(
+                        text = if (isVideo) "Videos" else selectedBucket,
+                        fontFamily = InterFontFamily,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    if (!isVideo) {
+                        Icon(
+                            imageVector = Icons.Filled.KeyboardArrowDown,
+                            contentDescription = "Cambiar álbum o galería",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+
+                if (!isVideo) {
+                    DropdownMenu(
+                        expanded = showAlbumMenu,
+                        onDismissRequest = { showAlbumMenu = false },
+                        containerColor = Color(0xFF1B2230),
+                        modifier = Modifier.testTag("status_album_dropdown")
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "Recientes (${items.size})",
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (selectedBucket == "Recientes") FontWeight.SemiBold else FontWeight.Normal,
+                                    color = Color.White
+                                )
+                            },
+                            trailingIcon = {
+                                if (selectedBucket == "Recientes") {
+                                    Icon(
+                                        imageVector = Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = Color(0xFF5A9BFF),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            },
+                            onClick = {
+                                selectedBucket = "Recientes"
+                                showAlbumMenu = false
+                            }
+                        )
+
+                        albums.forEach { (albumName, count) ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "$albumName ($count)",
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 14.sp,
+                                        fontWeight = if (selectedBucket == albumName) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                trailingIcon = {
+                                    if (selectedBucket == albumName) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Check,
+                                            contentDescription = null,
+                                            tint = Color(0xFF5A9BFF),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedBucket = albumName
+                                    showAlbumMenu = false
+                                }
+                            )
+                        }
+
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+
+                        if (hasPartialAccess) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Permitir más fotos…",
+                                        fontFamily = InterFontFamily,
+                                        fontSize = 14.sp,
+                                        color = Color(0xFF8AB4F8)
+                                    )
+                                },
+                                onClick = {
+                                    showAlbumMenu = false
+                                    onRequestPermission()
+                                }
+                            )
+                        }
+
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "Selector del sistema",
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 14.sp,
+                                    color = Color.White.copy(alpha = 0.85f)
+                                )
+                            },
+                            onClick = {
+                                showAlbumMenu = false
+                                onOpenPicker()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -934,6 +1234,47 @@ private fun MediaGalleryComposerPage(
                 .fillMaxWidth()
                 .testTag(if (isVideo) "status_video_gallery_grid" else "status_photo_gallery_grid")
         ) {
+            if (hasPartialAccess && displayedItems.isNotEmpty()) {
+                item(key = "partial_access_banner", span = { GridItemSpan(3) }) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = GalleryTileBg,
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 4.dp)
+                            .clickable { onRequestPermission() }
+                            .testTag("status_partial_gallery_banner")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = if (isVideo) {
+                                    "Mostrando videos seleccionados"
+                                } else {
+                                    "Mostrando fotos seleccionadas"
+                                },
+                                fontFamily = InterFontFamily,
+                                fontSize = 12.5.sp,
+                                color = Color.White.copy(alpha = 0.78f)
+                            )
+                            Text(
+                                text = "Permitir más",
+                                fontFamily = InterFontFamily,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF8AB4F8)
+                            )
+                        }
+                    }
+                }
+            }
+
             // Cell 0: Camera / Record
             item(key = "tile_camera") {
                 Box(
@@ -967,44 +1308,46 @@ private fun MediaGalleryComposerPage(
                 }
             }
 
-            // Cell 1: Android System Photo Picker tile (zero storage permission)
-            item(key = "tile_system_picker") {
-                Box(
-                    modifier = Modifier
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(GalleryTileBg)
-                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
-                        .clickable { onOpenPicker() }
-                        .testTag(if (isVideo) "status_pick_video_button" else "status_pick_gallery_button"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.padding(horizontal = 6.dp)
+            // Fallback System Photo Picker tile only when gallery access isn't granted or camera roll is empty
+            if (!showDirectCameraRoll) {
+                item(key = "tile_system_picker") {
+                    Box(
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(GalleryTileBg)
+                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                            .clickable { onOpenPicker() }
+                            .testTag(if (isVideo) "status_pick_video_button" else "status_pick_gallery_button"),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.PhotoLibrary,
-                            contentDescription = "Elegir de galería",
-                            tint = Color.White,
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Text(
-                            text = if (isVideo) "Elegir video" else "Galería",
-                            fontFamily = InterFontFamily,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.72f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(horizontal = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.PhotoLibrary,
+                                contentDescription = "Elegir de galería",
+                                tint = Color.White,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Text(
+                                text = if (isVideo) "Elegir video" else "Galería",
+                                fontFamily = InterFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White.copy(alpha = 0.72f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
 
-            // Real thumbnails (newest first)
-            items(items, key = { it.uri.toString() }) { item ->
+            // Real thumbnails (newest first) directly alongside Cámara / Grabar
+            items(displayedItems, key = { it.uri.toString() }) { item ->
                 GalleryRealMediaTile(
                     item = item,
                     isVideo = isVideo,
@@ -1012,13 +1355,61 @@ private fun MediaGalleryComposerPage(
                 )
             }
 
-            if (items.isEmpty()) {
+            if (!hasGalleryPermission) {
+                item(key = "gallery_permission_prompt", span = { GridItemSpan(3) }) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = GalleryTileBg,
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 14.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = if (isVideo) {
+                                    "Permite el acceso para ver los videos del teléfono directamente aquí."
+                                } else {
+                                    "Permite el acceso para ver el carrete de fotos del teléfono directamente aquí."
+                                },
+                                fontFamily = InterFontFamily,
+                                fontSize = 13.5.sp,
+                                lineHeight = 19.sp,
+                                color = Color.White.copy(alpha = 0.76f),
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Button(
+                                onClick = onRequestPermission,
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = DialogBluePrimary,
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 44.dp)
+                                    .testTag("status_request_gallery_permission_button")
+                            ) {
+                                Text(
+                                    text = "Permitir acceso al carrete",
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (displayedItems.isEmpty()) {
                 item(key = "picker_hint", span = { GridItemSpan(3) }) {
                     Text(
                         text = if (isVideo) {
-                            "Toca «Elegir video» para abrir la galería del dispositivo o «Grabar» para capturar uno."
+                            "No hay videos recientes. Toca «Elegir video» o «Grabar»."
                         } else {
-                            "Toca «Galería» o «Recientes» para elegir una foto del dispositivo."
+                            "No hay fotos recientes en esta carpeta. Toca «Galería» o «Cámara»."
                         },
                         fontFamily = InterFontFamily,
                         fontSize = 13.sp,
@@ -1114,6 +1505,7 @@ private fun GalleryRealMediaTile(
             val photoReq = remember(item.uri) {
                 ImageRequest.Builder(context)
                     .data(item.uri)
+                    .size(360)
                     .crossfade(false)
                     .build()
             }
@@ -1936,30 +2328,41 @@ private suspend fun loadAppAccessiblePhotos(context: Context): List<LocalGallery
         val result = mutableListOf<LocalGalleryMediaItem>()
         val seen = HashSet<String>()
 
-        // 1. App-accessible MediaStore photos (zero permission)
+        // 1. Device MediaStore photos (newest first, up to 240 items, grouped by album bucket)
         runCatching {
             val projection = arrayOf(
                 MediaStore.Images.Media._ID,
                 MediaStore.Images.Media.DATE_ADDED,
-                MediaStore.Images.Media.SIZE
+                MediaStore.Images.Media.SIZE,
+                MediaStore.Images.Media.BUCKET_DISPLAY_NAME
             )
             context.contentResolver.query(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                 projection,
                 null,
                 null,
-                "${MediaStore.Images.Media.DATE_ADDED} DESC"
+                "${MediaStore.Images.Media.DATE_ADDED} DESC, ${MediaStore.Images.Media._ID} DESC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
                 val dateCol = cursor.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
                 val sizeCol = cursor.getColumnIndex(MediaStore.Images.Media.SIZE)
-                while (cursor.moveToNext() && result.size < 60) {
+                val bucketCol = cursor.getColumnIndex(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
+                while (cursor.moveToNext() && result.size < 240) {
                     val id = cursor.getLong(idCol)
                     val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
                     val dateAdded = if (dateCol >= 0) cursor.getLong(dateCol) else 0L
                     val size = if (sizeCol >= 0) cursor.getLong(sizeCol) else 0L
+                    val rawBucket = if (bucketCol >= 0) cursor.getString(bucketCol) else null
+                    val bucketName = rawBucket?.trim().orEmpty().ifBlank { "Cámara" }
                     if (seen.add(uri.toString())) {
-                        result.add(LocalGalleryMediaItem(uri = uri, dateAddedSec = dateAdded, sizeBytes = size))
+                        result.add(
+                            LocalGalleryMediaItem(
+                                uri = uri,
+                                dateAddedSec = dateAdded,
+                                sizeBytes = size,
+                                bucketName = bucketName
+                            )
+                        )
                     }
                 }
             }
@@ -1980,7 +2383,8 @@ private suspend fun loadAppAccessiblePhotos(context: Context): List<LocalGallery
                                 LocalGalleryMediaItem(
                                     uri = uri,
                                     dateAddedSec = file.lastModified() / 1000L,
-                                    sizeBytes = file.length()
+                                    sizeBytes = file.length(),
+                                    bucketName = "Cámara"
                                 )
                             )
                         }
@@ -2008,13 +2412,13 @@ private suspend fun loadAppAccessibleVideos(context: Context): List<LocalGallery
                 projection,
                 null,
                 null,
-                "${MediaStore.Video.Media.DATE_ADDED} DESC"
+                "${MediaStore.Video.Media.DATE_ADDED} DESC, ${MediaStore.Video.Media._ID} DESC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
                 val dateCol = cursor.getColumnIndex(MediaStore.Video.Media.DATE_ADDED)
                 val durCol = cursor.getColumnIndex(MediaStore.Video.Media.DURATION)
                 val sizeCol = cursor.getColumnIndex(MediaStore.Video.Media.SIZE)
-                while (cursor.moveToNext() && result.size < 45) {
+                while (cursor.moveToNext() && result.size < 120) {
                     val id = cursor.getLong(idCol)
                     val uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
                     val dateAdded = if (dateCol >= 0) cursor.getLong(dateCol) else 0L
@@ -2081,6 +2485,15 @@ private suspend fun extractVideoDurationSec(context: Context, uri: Uri): Int =
 
 private suspend fun loadVideoThumbnailBitmap(context: Context, uri: Uri): Bitmap? =
     withContext(Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri.scheme == "content") {
+            val osThumb = runCatching {
+                context.contentResolver.loadThumbnail(uri, Size(360, 360), null)
+            }.getOrNull()
+            if (osThumb != null && !osThumb.isRecycled) {
+                return@withContext osThumb
+            }
+        }
+
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(context, uri)

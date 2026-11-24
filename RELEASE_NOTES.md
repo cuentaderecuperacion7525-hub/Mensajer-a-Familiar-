@@ -1,5 +1,11 @@
 # Novedades de FamiChat
 
+## 2.8.57
+- Integración directa del carrete de fotos y videos en «Publicar estado»:
+  - Al cambiar a la pestaña «Foto» o «Video», la aplicación solicita el permiso del sistema (una sola vez, con soporte de acceso total o fotos seleccionadas en Android 14+) y muestra de inmediato las miniaturas reales del teléfono junto a «Cámara» o «Grabar».
+  - En «Foto», el selector «Recientes ⌄» permite filtrar por carpeta o álbum del dispositivo además de acceder al selector del sistema si se prefiere.
+  - En «Video», se cargan directamente los videos recientes del teléfono con su duración real y aviso si superan el límite permitido de 5 MB.
+
 ## 2.8.56
 - Rediseño completo de «Publicar estado» a pantalla completa (Texto, Foto y Video):
   - En Texto: escritura centrada directa sobre el color elegido, 6 colores con selector en anillo, contador en tiempo real, ajuste automático del tamaño de letra y botón «Publicar» integrado arriba.

@@ -3419,6 +3419,61 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("status_publish_error_close_button").performClick()
     assertEquals(1, dismissErrorCalls)
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `status composer shows gallery permission prompt when denied and opens camera roll dropdown when granted`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val cameraCacheDir = java.io.File(app.cacheDir, "camera_photos").apply { mkdirs() }
+    val samplePhoto = java.io.File(cameraCacheDir, "test_status_roll.jpg").apply {
+      writeBytes(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xD9.toByte()))
+    }
+    try {
+      org.robolectric.Shadows.shadowOf(app).denyPermissions(
+        android.Manifest.permission.READ_MEDIA_IMAGES,
+        android.Manifest.permission.READ_MEDIA_VIDEO,
+        android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+      )
+
+      composeTestRule.setContent {
+        com.example.ui.theme.FamiChatTheme(darkTheme = false) {
+          com.example.ui.components.StatusComposerScreen(
+            publishState = com.example.ui.viewmodel.StatusPublishUiState.Idle,
+            onPublish = {},
+            onCancelPublish = {},
+            onDismissPublishError = {},
+            onClose = {}
+          )
+        }
+      }
+      composeTestRule.waitForIdle()
+
+      // Denied state displays permission CTA alongside Cámara + Galería fallback
+      composeTestRule.onNodeWithTag("status_tab_photo").performClick()
+      composeTestRule.waitForIdle()
+      composeTestRule.onNodeWithTag("status_take_photo_button").assertIsDisplayed()
+      composeTestRule.onNodeWithTag("status_pick_gallery_button").assertIsDisplayed()
+      composeTestRule.onNodeWithTag("status_request_gallery_permission_button").assertIsDisplayed()
+
+      // Grant permissions and reopen composer -> direct camera roll hides permission CTA & Recientes opens dropdown
+      org.robolectric.Shadows.shadowOf(app).grantPermissions(
+        android.Manifest.permission.READ_MEDIA_IMAGES,
+        android.Manifest.permission.READ_MEDIA_VIDEO
+      )
+      composeTestRule.onNodeWithTag("status_tab_video").performClick()
+      composeTestRule.waitForIdle()
+      composeTestRule.onNodeWithTag("status_tab_photo").performClick()
+      composeTestRule.waitForIdle()
+
+      composeTestRule.onNodeWithTag("status_request_gallery_permission_button").assertDoesNotExist()
+      composeTestRule.onNodeWithTag("status_gallery_title_recents").performClick()
+      composeTestRule.waitForIdle()
+      composeTestRule.onNodeWithTag("status_album_dropdown").assertIsDisplayed()
+      composeTestRule.onNodeWithText("Selector del sistema").assertIsDisplayed()
+    } finally {
+      samplePhoto.delete()
+    }
+  }
 }
 
 
