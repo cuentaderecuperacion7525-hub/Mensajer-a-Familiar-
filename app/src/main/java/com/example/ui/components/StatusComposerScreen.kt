@@ -177,47 +177,52 @@ private data class LocalGalleryMediaItem(
 private fun isPermissionGranted(context: Context, permission: String): Boolean =
     ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 
-private fun hasPhotoGalleryAccess(context: Context): Boolean = when {
-    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
-        isPermissionGranted(context, Manifest.permission.READ_MEDIA_IMAGES) ||
-            isPermissionGranted(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+private fun hasFullPhotoAccess(context: Context): Boolean = when {
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
         isPermissionGranted(context, Manifest.permission.READ_MEDIA_IMAGES)
     else ->
         isPermissionGranted(context, Manifest.permission.READ_EXTERNAL_STORAGE)
 }
 
-private fun hasVideoGalleryAccess(context: Context): Boolean = when {
-    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
-        isPermissionGranted(context, Manifest.permission.READ_MEDIA_VIDEO) ||
-            isPermissionGranted(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+private fun hasFullVideoAccess(context: Context): Boolean = when {
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
         isPermissionGranted(context, Manifest.permission.READ_MEDIA_VIDEO)
     else ->
         isPermissionGranted(context, Manifest.permission.READ_EXTERNAL_STORAGE)
 }
 
+private fun hasPhotoGalleryAccess(context: Context): Boolean = when {
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+        hasFullPhotoAccess(context) ||
+            isPermissionGranted(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    else ->
+        hasFullPhotoAccess(context)
+}
+
+private fun hasVideoGalleryAccess(context: Context): Boolean = when {
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+        hasFullVideoAccess(context) ||
+            isPermissionGranted(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    else ->
+        hasFullVideoAccess(context)
+}
+
 private fun hasPartialMediaAccess(context: Context, isVideo: Boolean): Boolean {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return false
-    val fullPerm = if (isVideo) Manifest.permission.READ_MEDIA_VIDEO else Manifest.permission.READ_MEDIA_IMAGES
-    return !isPermissionGranted(context, fullPerm) &&
+    val hasFull = if (isVideo) hasFullVideoAccess(context) else hasFullPhotoAccess(context)
+    return !hasFull &&
         isPermissionGranted(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
 }
 
-private fun requiredPhotoPermissions(): Array<String> = when {
+private fun requiredGalleryPermissions(): Array<String> = when {
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
-        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+        arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+            Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+        )
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
-        arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
-    else ->
-        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-}
-
-private fun requiredVideoPermissions(): Array<String> = when {
-    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
-        arrayOf(Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
-    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
-        arrayOf(Manifest.permission.READ_MEDIA_VIDEO)
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
     else ->
         arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
 }
@@ -347,9 +352,7 @@ fun StatusComposerScreen(
         } else {
             manualPermissionIsVideo = null
         }
-        galleryPermissionLauncher.launch(
-            if (isVideo) requiredVideoPermissions() else requiredPhotoPermissions()
-        )
+        galleryPermissionLauncher.launch(requiredGalleryPermissions())
     }
 
     var showDiscardDialog by remember { mutableStateOf(false) }
@@ -362,7 +365,7 @@ fun StatusComposerScreen(
         }
     }
 
-    // Automatically request scoped gallery permission on first Foto/Video visit & load device camera roll
+    // Automatically request combined photo+video gallery permission & load device camera roll
     LaunchedEffect(currentMode, photoAccessGranted, videoAccessGranted, galleryRefreshTick) {
         photoAccessGranted = hasPhotoGalleryAccess(context)
         videoAccessGranted = hasVideoGalleryAccess(context)
@@ -371,18 +374,24 @@ fun StatusComposerScreen(
 
         when (currentMode) {
             StatusComposerMode.PHOTO -> {
-                if (!photoAccessGranted && !hasPromptedPhotoPermission) {
+                val loadedPhotos = loadAppAccessiblePhotos(context)
+                mediaStorePhotos = loadedPhotos
+                val needsPrompt = !photoAccessGranted ||
+                    (!hasFullPhotoAccess(context) && loadedPhotos.isEmpty())
+                if (needsPrompt && !hasPromptedPhotoPermission) {
                     hasPromptedPhotoPermission = true
                     requestGalleryAccess(isVideo = false, userInitiated = false)
                 }
-                mediaStorePhotos = loadAppAccessiblePhotos(context)
             }
             StatusComposerMode.VIDEO -> {
-                if (!videoAccessGranted && !hasPromptedVideoPermission) {
+                val loadedVideos = loadAppAccessibleVideos(context)
+                mediaStoreVideos = loadedVideos
+                val needsPrompt = !videoAccessGranted ||
+                    (!hasFullVideoAccess(context) && loadedVideos.isEmpty())
+                if (needsPrompt && !hasPromptedVideoPermission) {
                     hasPromptedVideoPermission = true
                     requestGalleryAccess(isVideo = true, userInitiated = false)
                 }
-                mediaStoreVideos = loadAppAccessibleVideos(context)
             }
             StatusComposerMode.TEXT -> Unit
         }
@@ -1355,7 +1364,8 @@ private fun MediaGalleryComposerPage(
                 )
             }
 
-            if (!hasGalleryPermission) {
+            if (!hasGalleryPermission || (hasPartialAccess && displayedItems.isEmpty())) {
+                val partialEmpty = hasGalleryPermission && hasPartialAccess && displayedItems.isEmpty()
                 item(key = "gallery_permission_prompt", span = { GridItemSpan(3) }) {
                     Surface(
                         shape = RoundedCornerShape(16.dp),
@@ -1370,10 +1380,15 @@ private fun MediaGalleryComposerPage(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = if (isVideo) {
-                                    "Permite el acceso para ver los videos del teléfono directamente aquí."
-                                } else {
-                                    "Permite el acceso para ver el carrete de fotos del teléfono directamente aquí."
+                                text = when {
+                                    partialEmpty && isVideo ->
+                                        "No hay videos en la selección actual. Permite acceso completo o selecciona videos del teléfono."
+                                    partialEmpty ->
+                                        "No hay fotos en la selección actual. Permite acceso completo o selecciona más fotos."
+                                    isVideo ->
+                                        "Permite el acceso para ver los videos del teléfono directamente aquí."
+                                    else ->
+                                        "Permite el acceso para ver el carrete de fotos del teléfono directamente aquí."
                                 },
                                 fontFamily = InterFontFamily,
                                 fontSize = 13.5.sp,
@@ -1394,7 +1409,7 @@ private fun MediaGalleryComposerPage(
                                     .testTag("status_request_gallery_permission_button")
                             ) {
                                 Text(
-                                    text = "Permitir acceso al carrete",
+                                    text = if (isVideo) "Permitir acceso a videos" else "Permitir acceso al carrete",
                                     fontFamily = InterFontFamily,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold
@@ -2330,27 +2345,36 @@ private suspend fun loadAppAccessiblePhotos(context: Context): List<LocalGallery
 
         // 1. Device MediaStore photos (newest first, up to 240 items, grouped by album bucket)
         runCatching {
+            val imageCollection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            } else {
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            }
             val projection = arrayOf(
                 MediaStore.Images.Media._ID,
                 MediaStore.Images.Media.DATE_ADDED,
+                MediaStore.Images.Media.DATE_MODIFIED,
                 MediaStore.Images.Media.SIZE,
                 MediaStore.Images.Media.BUCKET_DISPLAY_NAME
             )
             context.contentResolver.query(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                imageCollection,
                 projection,
                 null,
                 null,
-                "${MediaStore.Images.Media.DATE_ADDED} DESC, ${MediaStore.Images.Media._ID} DESC"
+                "${MediaStore.Images.Media.DATE_MODIFIED} DESC, ${MediaStore.Images.Media._ID} DESC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
                 val dateCol = cursor.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
+                val modCol = cursor.getColumnIndex(MediaStore.Images.Media.DATE_MODIFIED)
                 val sizeCol = cursor.getColumnIndex(MediaStore.Images.Media.SIZE)
                 val bucketCol = cursor.getColumnIndex(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
                 while (cursor.moveToNext() && result.size < 240) {
                     val id = cursor.getLong(idCol)
-                    val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                    val uri = ContentUris.withAppendedId(imageCollection, id)
                     val dateAdded = if (dateCol >= 0) cursor.getLong(dateCol) else 0L
+                    val dateModified = if (modCol >= 0) cursor.getLong(modCol) else 0L
+                    val effectiveDate = maxOf(dateAdded, dateModified)
                     val size = if (sizeCol >= 0) cursor.getLong(sizeCol) else 0L
                     val rawBucket = if (bucketCol >= 0) cursor.getString(bucketCol) else null
                     val bucketName = rawBucket?.trim().orEmpty().ifBlank { "Cámara" }
@@ -2358,7 +2382,7 @@ private suspend fun loadAppAccessiblePhotos(context: Context): List<LocalGallery
                         result.add(
                             LocalGalleryMediaItem(
                                 uri = uri,
-                                dateAddedSec = dateAdded,
+                                dateAddedSec = effectiveDate,
                                 sizeBytes = size,
                                 bucketName = bucketName
                             )
@@ -2401,35 +2425,44 @@ private suspend fun loadAppAccessibleVideos(context: Context): List<LocalGallery
         val seen = HashSet<String>()
 
         runCatching {
+            val videoCollection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            } else {
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            }
             val projection = arrayOf(
                 MediaStore.Video.Media._ID,
                 MediaStore.Video.Media.DATE_ADDED,
+                MediaStore.Video.Media.DATE_MODIFIED,
                 MediaStore.Video.Media.DURATION,
                 MediaStore.Video.Media.SIZE
             )
             context.contentResolver.query(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                videoCollection,
                 projection,
                 null,
                 null,
-                "${MediaStore.Video.Media.DATE_ADDED} DESC, ${MediaStore.Video.Media._ID} DESC"
+                "${MediaStore.Video.Media.DATE_MODIFIED} DESC, ${MediaStore.Video.Media._ID} DESC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
                 val dateCol = cursor.getColumnIndex(MediaStore.Video.Media.DATE_ADDED)
+                val modCol = cursor.getColumnIndex(MediaStore.Video.Media.DATE_MODIFIED)
                 val durCol = cursor.getColumnIndex(MediaStore.Video.Media.DURATION)
                 val sizeCol = cursor.getColumnIndex(MediaStore.Video.Media.SIZE)
                 while (cursor.moveToNext() && result.size < 120) {
                     val id = cursor.getLong(idCol)
-                    val uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                    val uri = ContentUris.withAppendedId(videoCollection, id)
                     val dateAdded = if (dateCol >= 0) cursor.getLong(dateCol) else 0L
+                    val dateModified = if (modCol >= 0) cursor.getLong(modCol) else 0L
+                    val effectiveDate = maxOf(dateAdded, dateModified)
                     val durMs = if (durCol >= 0) cursor.getLong(durCol) else 0L
                     val size = if (sizeCol >= 0) cursor.getLong(sizeCol) else 0L
-                    val durSec = (durMs / 1000L).toInt().coerceAtLeast(1)
+                    val durSec = if (durMs > 0L) (durMs / 1000L).toInt().coerceAtLeast(1) else 0
                     if (seen.add(uri.toString())) {
                         result.add(
                             LocalGalleryMediaItem(
                                 uri = uri,
-                                dateAddedSec = dateAdded,
+                                dateAddedSec = effectiveDate,
                                 durationSec = durSec,
                                 sizeBytes = size,
                                 isOverLimit = size > VideoMediaHelper.MAX_VIDEO_BYTES

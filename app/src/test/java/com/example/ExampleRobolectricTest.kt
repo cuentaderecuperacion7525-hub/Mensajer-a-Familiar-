@@ -3474,6 +3474,40 @@ class ExampleRobolectricTest {
       samplePhoto.delete()
     }
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `status composer video tab prompts for video access when only partial photo access was granted`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    org.robolectric.Shadows.shadowOf(app).denyPermissions(
+      android.Manifest.permission.READ_MEDIA_IMAGES,
+      android.Manifest.permission.READ_MEDIA_VIDEO
+    )
+    org.robolectric.Shadows.shadowOf(app).grantPermissions(
+      android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+    )
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = false) {
+        com.example.ui.components.StatusComposerScreen(
+          publishState = com.example.ui.viewmodel.StatusPublishUiState.Idle,
+          onPublish = {},
+          onCancelPublish = {},
+          onDismissPublishError = {},
+          onClose = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("status_tab_video").performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("status_record_video_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_pick_video_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_request_gallery_permission_button").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Permitir acceso a videos").assertIsDisplayed()
+  }
 }
 
 

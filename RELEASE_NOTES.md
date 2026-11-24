@@ -1,5 +1,11 @@
 # Novedades de FamiChat
 
+## 2.8.58
+- Corrección en la pestaña «Video» al publicar estados para mostrar directamente los videos del carrete del teléfono:
+  - Solicitud conjunta de permisos de fotos y videos desde la primera apertura para habilitar ambos carretes al instante.
+  - Detección independiente del acceso a videos en Android 14+ para evitar que el acceso limitado a fotos bloquee la petición y oculte el botón «Permitir acceso a videos».
+  - Consulta reforzada de videos recientes en todo el almacenamiento externo ordenados del más nuevo al más antiguo.
+
 ## 2.8.57
 - Integración directa del carrete de fotos y videos en «Publicar estado»:
   - Al cambiar a la pestaña «Foto» o «Video», la aplicación solicita el permiso del sistema (una sola vez, con soporte de acceso total o fotos seleccionadas en Android 14+) y muestra de inmediato las miniaturas reales del teléfono junto a «Cámara» o «Grabar».
