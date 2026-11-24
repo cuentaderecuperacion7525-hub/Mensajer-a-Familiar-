@@ -2,6 +2,8 @@ package com.example.ui.components
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.net.Uri
 import android.view.Gravity
 import android.widget.FrameLayout
@@ -65,6 +67,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
@@ -438,16 +441,23 @@ fun StatusViewerDialog(
     var replyInput by remember(currentStatus.id) { mutableStateOf("") }
     var showViewersSheet by remember(currentStatus.id) { mutableStateOf(false) }
     var showOptionsMenu by remember(currentStatus.id) { mutableStateOf(false) }
+    var isTouchPaused by remember(currentStatus.id) { mutableStateOf(false) }
+    var isStatusAudioMuted by remember(group.member.id) { mutableStateOf(false) }
+
+    val attachedMusic = currentStatus.musicTrack
 
     // Video status state
     var readyVideoFile by remember(currentStatus.id) { mutableStateOf<File?>(null) }
     var videoLoadError by remember(currentStatus.id) { mutableStateOf<String?>(null) }
     var videoRetryNonce by remember(currentStatus.id) { mutableIntStateOf(0) }
     var videoViewRef by remember(currentStatus.id) { mutableStateOf<VideoView?>(null) }
-    var mediaPlayerRef by remember(currentStatus.id) { mutableStateOf<android.media.MediaPlayer?>(null) }
+    var mediaPlayerRef by remember(currentStatus.id) { mutableStateOf<MediaPlayer?>(null) }
     var isVideoPlaying by remember(currentStatus.id) { mutableStateOf(true) }
-    var isVideoMuted by remember(currentStatus.id) { mutableStateOf(false) }
     var videoProgress by remember(currentStatus.id) { mutableFloatStateOf(0f) }
+
+    // Background music player for online status tracks
+    var statusMusicPlayer by remember(currentStatus.id) { mutableStateOf<MediaPlayer?>(null) }
+    var isStatusMusicPrepared by remember(currentStatus.id) { mutableStateOf(false) }
 
     val thumbBitmap = remember(currentStatus.id, currentStatus.videoThumbnailData) {
         ImageCompressionHelper.decodeToBitmap(currentStatus.videoThumbnailData)?.asImageBitmap()
@@ -493,7 +503,96 @@ fun StatusViewerDialog(
         }
     }
 
-    val isOverlayPaused = replyInput.isNotEmpty() || showViewersSheet || showOptionsMenu || photoScale > 1.05f || videoLoadError != null
+    val isOverlayPaused = isTouchPaused || replyInput.isNotEmpty() || showViewersSheet ||
+        showOptionsMenu || photoScale > 1.05f || videoLoadError != null
+
+    // Sync original video track audio volume (respects user mute button & track muteOriginalVideo flag)
+    LaunchedEffect(currentStatus.id, mediaPlayerRef, isStatusAudioMuted, attachedMusic?.muteOriginalVideo) {
+        val mp = mediaPlayerRef ?: return@LaunchedEffect
+        val vol = if (isStatusAudioMuted || attachedMusic?.muteOriginalVideo == true) 0f else 1f
+        runCatching { mp.setVolume(vol, vol) }
+    }
+
+    // Prepare & dispose online music stream for the active status slide
+    DisposableEffect(currentStatus.id, attachedMusic?.previewUrl) {
+        val musicUrl = attachedMusic?.previewUrl?.trim().orEmpty()
+        var localPlayer: MediaPlayer? = null
+        if (musicUrl.isNotBlank()) {
+            val mp = MediaPlayer()
+            localPlayer = mp
+            statusMusicPlayer = mp
+            isStatusMusicPrepared = false
+            runCatching {
+                mp.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .build()
+                )
+                mp.setDataSource(musicUrl)
+                mp.isLooping = true
+                val vol = if (isStatusAudioMuted) 0f else 1f
+                mp.setVolume(vol, vol)
+                mp.setOnPreparedListener { readyMp ->
+                    if (statusMusicPlayer === readyMp) {
+                        isStatusMusicPrepared = true
+                        val currentVol = if (isStatusAudioMuted) 0f else 1f
+                        runCatching { readyMp.setVolume(currentVol, currentVol) }
+                        if (!isOverlayPaused) {
+                            runCatching { readyMp.start() }
+                        }
+                    }
+                }
+                mp.setOnErrorListener { _, _, _ -> true }
+                mp.prepareAsync()
+            }.onFailure {
+                runCatching { mp.release() }
+                if (statusMusicPlayer === mp) {
+                    statusMusicPlayer = null
+                    isStatusMusicPrepared = false
+                }
+            }
+        }
+        onDispose {
+            try {
+                videoViewRef?.stopPlayback()
+            } catch (_: Exception) {
+            }
+            mediaPlayerRef = null
+            val toRelease = localPlayer ?: statusMusicPlayer
+            if (statusMusicPlayer === toRelease) {
+                statusMusicPlayer = null
+                isStatusMusicPrepared = false
+            }
+            if (toRelease != null) {
+                runCatching { if (toRelease.isPlaying) toRelease.stop() }
+                runCatching { toRelease.reset() }
+                runCatching { toRelease.release() }
+            }
+        }
+    }
+
+    // Sync online music play/pause and mute volume with viewer state
+    LaunchedEffect(
+        currentStatus.id,
+        statusMusicPlayer,
+        isStatusMusicPrepared,
+        isOverlayPaused,
+        isStatusAudioMuted
+    ) {
+        val mp = statusMusicPlayer ?: return@LaunchedEffect
+        if (!isStatusMusicPrepared) return@LaunchedEffect
+        runCatching {
+            val vol = if (isStatusAudioMuted) 0f else 1f
+            mp.setVolume(vol, vol)
+            val videoShouldPlay = !currentStatus.isVideo || (readyVideoFile != null && isVideoPlaying)
+            if (!isOverlayPaused && videoShouldPlay) {
+                if (!mp.isPlaying) mp.start()
+            } else {
+                if (mp.isPlaying) mp.pause()
+            }
+        }
+    }
 
     // Track video progress smoothly without recomposing photo statuses
     LaunchedEffect(currentStatus.id, readyVideoFile, isVideoPlaying, isOverlayPaused) {
@@ -524,16 +623,6 @@ fun StatusViewerDialog(
                 }
             }
             delay(80L)
-        }
-    }
-
-    DisposableEffect(currentStatus.id) {
-        onDispose {
-            try {
-                videoViewRef?.stopPlayback()
-            } catch (_: Exception) {
-            }
-            mediaPlayerRef = null
         }
     }
 
@@ -626,6 +715,20 @@ fun StatusViewerDialog(
                         )
                     }
 
+                    if (attachedMusic != null || currentStatus.isVideo) {
+                        IconButton(
+                            onClick = { isStatusAudioMuted = !isStatusAudioMuted },
+                            modifier = Modifier.testTag("status_viewer_mute_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isStatusAudioMuted) Icons.AutoMirrored.Filled.VolumeOff
+                                else Icons.AutoMirrored.Filled.VolumeUp,
+                                contentDescription = if (isStatusAudioMuted) "Activar sonido" else "Silenciar",
+                                tint = Color.White
+                            )
+                        }
+                    }
+
                     if (hasMenuActions) {
                         Box {
                             IconButton(
@@ -665,24 +768,18 @@ fun StatusViewerDialog(
                                     )
                                     DropdownMenuItem(
                                         text = {
-                                            Text(if (isVideoMuted) "Activar sonido" else "Silenciar video")
+                                            Text(if (isStatusAudioMuted) "Activar sonido" else "Silenciar")
                                         },
                                         leadingIcon = {
                                             Icon(
-                                                imageVector = if (isVideoMuted) Icons.AutoMirrored.Filled.VolumeUp
+                                                imageVector = if (isStatusAudioMuted) Icons.AutoMirrored.Filled.VolumeUp
                                                 else Icons.AutoMirrored.Filled.VolumeOff,
                                                 contentDescription = null
                                             )
                                         },
                                         onClick = {
                                             showOptionsMenu = false
-                                            val nextMute = !isVideoMuted
-                                            isVideoMuted = nextMute
-                                            try {
-                                                val vol = if (nextMute) 0f else 1f
-                                                mediaPlayerRef?.setVolume(vol, vol)
-                                            } catch (_: Exception) {
-                                            }
+                                            isStatusAudioMuted = !isStatusAudioMuted
                                         }
                                     )
                                 }
@@ -740,6 +837,51 @@ fun StatusViewerDialog(
 
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Filled.Close, contentDescription = "Cerrar", tint = Color.White)
+                    }
+                }
+
+                if (attachedMusic != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = Color.White.copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
+                        modifier = Modifier
+                            .align(Alignment.Start)
+                            .widthIn(max = 310.dp)
+                            .testTag("status_viewer_music_badge")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        ) {
+                            if (attachedMusic.artworkUrl.isNotBlank()) {
+                                AsyncImage(
+                                    model = attachedMusic.artworkUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clip(CircleShape)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Filled.MusicNote,
+                                    contentDescription = null,
+                                    tint = Color(0xFF4ADE80),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                            }
+                            Text(
+                                text = "${attachedMusic.title} · ${attachedMusic.artist}",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
@@ -909,7 +1051,7 @@ fun StatusViewerDialog(
                                                             .coerceIn(0.35f, 2.5f)
                                                     }
                                                     mp.isLooping = false
-                                                    val vol = if (isVideoMuted) 0f else 1f
+                                                    val vol = if (isStatusAudioMuted || attachedMusic?.muteOriginalVideo == true) 0f else 1f
                                                     mp.setVolume(vol, vol)
                                                     start()
                                                     isVideoPlaying = true
@@ -1046,7 +1188,7 @@ fun StatusViewerDialog(
                 }
             }
 
-            // Left / Right navigation tap strips (only active when not zoomed in and no error overlay)
+            // Left / Right navigation tap strips + hold-to-pause (only active when not zoomed in and no error overlay)
             if (photoScale <= 1.05f && videoLoadError == null) {
                 Row(modifier = Modifier.fillMaxSize()) {
                     Box(
@@ -1055,6 +1197,14 @@ fun StatusViewerDialog(
                             .fillMaxHeight()
                             .pointerInput(currentStatus.id, safeIdx) {
                                 detectTapGestures(
+                                    onPress = {
+                                        isTouchPaused = true
+                                        try {
+                                            tryAwaitRelease()
+                                        } finally {
+                                            isTouchPaused = false
+                                        }
+                                    },
                                     onTap = { goPrevious() },
                                     onDoubleTap = {
                                         if (!currentStatus.isVideo && !currentStatus.mediaUri.isNullOrBlank()) {
@@ -1071,6 +1221,14 @@ fun StatusViewerDialog(
                             .fillMaxHeight()
                             .pointerInput(currentStatus.id, safeIdx) {
                                 detectTapGestures(
+                                    onPress = {
+                                        isTouchPaused = true
+                                        try {
+                                            tryAwaitRelease()
+                                        } finally {
+                                            isTouchPaused = false
+                                        }
+                                    },
                                     onTap = { advanceNextOrDismiss() },
                                     onDoubleTap = {
                                         if (!currentStatus.isVideo && !currentStatus.mediaUri.isNullOrBlank()) {

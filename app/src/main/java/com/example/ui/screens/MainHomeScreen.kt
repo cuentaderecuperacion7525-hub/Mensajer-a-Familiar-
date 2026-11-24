@@ -154,6 +154,7 @@ import com.example.ui.viewmodel.StatusPublishUiState
 import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateUiState
 import com.example.util.FamiChatNotificationHelper
+import com.example.util.StatusMusicTrack
 import com.example.util.TimeFormatters
 import kotlinx.coroutines.delay
 
@@ -216,7 +217,9 @@ fun MainHomeScreen(
     onDeleteNote: (String) -> Unit,
     onOpenSettings: () -> Unit = {},
     onOpenNotifications: () -> Unit = {},
-    isSwitchPinActive: Boolean = true
+    isSwitchPinActive: Boolean = true,
+    favoriteMusicTracks: List<StatusMusicTrack> = emptyList(),
+    onToggleFavoriteMusicTrack: (StatusMusicTrack) -> Unit = {}
 ) {
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -734,7 +737,9 @@ fun MainHomeScreen(
                 onClose = {
                     onDismissStatusPublishError()
                     showCreateStatusDialog = false
-                }
+                },
+                favoriteMusicTracks = favoriteMusicTracks,
+                onToggleFavoriteMusicTrack = onToggleFavoriteMusicTrack
             )
         }
     }

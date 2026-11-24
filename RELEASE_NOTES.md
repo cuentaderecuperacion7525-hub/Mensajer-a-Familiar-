@@ -1,5 +1,11 @@
 # Novedades de FamiChat
 
+## 2.8.60
+- Música en línea para tus estados (Texto, Foto y Video):
+  - Nuevo botón musical (♪) al crear un estado que abre un selector con búsqueda en tiempo real («Buscar canciones»), categorías («Sugerencias», «Estado de ánimo», «Género», «Cumpleaños y familia» y «Favoritas»), carrusel destacado con portadas, vista previa de audio en vivo y estrellas de favoritos.
+  - En estados de video, puedes silenciar o mantener el audio original del video con un toque al combinarlo con música.
+  - Al ver cualquier estado con música, se muestra la etiqueta de la canción y comienza la reproducción automática con control rápido de silencio y pausa al mantener presionado.
+
 ## 2.8.59
 - Mejoras en la pantalla «Publicar estado»:
   - Al elegir un video en la pestaña «Video», la vista previa inicia pausada en el primer cuadro (sin reproducirse sola en silencio) y comienza a reproducirse con sonido normal al presionar el botón central ▶.

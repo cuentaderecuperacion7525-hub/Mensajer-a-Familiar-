@@ -514,6 +514,7 @@ fun FamiChatApp(
     val voicePlaybackSpeed by vm.voicePlaybackSpeed.collectAsStateWithLifecycle()
     val mediaTransferProgress by vm.mediaTransferProgress.collectAsStateWithLifecycle()
     val statusPublishState by vm.statusPublishState.collectAsStateWithLifecycle()
+    val favoriteMusicTracks by vm.favoriteMusicTracks.collectAsStateWithLifecycle()
     val activeUploadLabel by vm.activeUploadLabel.collectAsStateWithLifecycle()
     val activeUploadProgress by vm.activeUploadProgress.collectAsStateWithLifecycle()
     val fcmToken by vm.fcmToken.collectAsStateWithLifecycle()
@@ -794,7 +795,9 @@ fun FamiChatApp(
                         onDeleteNote = vm::deleteFamilyNote,
                         onOpenSettings = { navigateSingleTop(Routes.SETTINGS) },
                         onOpenNotifications = { navigateSingleTop(Routes.NOTIFICATIONS) },
-                        isSwitchPinActive = switchPin.isNotBlank()
+                        isSwitchPinActive = switchPin.isNotBlank(),
+                        favoriteMusicTracks = favoriteMusicTracks,
+                        onToggleFavoriteMusicTrack = vm::toggleFavoriteMusicTrack
                     )
                 }
             }

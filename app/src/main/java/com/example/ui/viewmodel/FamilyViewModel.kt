@@ -44,6 +44,7 @@ import com.example.util.ImageCompressionHelper
 import com.example.util.LocationHelper
 import com.example.util.MessageFormatter
 import com.example.util.PresenceResolver
+import com.example.util.StatusMusicTrack
 import com.example.util.TimeFormatters
 import com.example.util.VideoMediaHelper
 import com.example.util.VoiceAudioHelper
@@ -87,7 +88,8 @@ data class StatusPublishRequest(
     val photoUri: Uri? = null,
     val photoCaption: String = "",
     val videoUri: Uri? = null,
-    val videoCaption: String = ""
+    val videoCaption: String = "",
+    val musicTrack: StatusMusicTrack? = null
 )
 
 sealed interface StatusPublishUiState {
@@ -589,6 +591,15 @@ class FamilyViewModel(
 
     val chatNotificationTones: StateFlow<Map<String, String>> = prefs.chatNotificationTonesFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    val favoriteMusicTracks: StateFlow<List<StatusMusicTrack>> = prefs.favoriteMusicTracksFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun toggleFavoriteMusicTrack(track: StatusMusicTrack) {
+        viewModelScope.launch {
+            prefs.toggleFavoriteMusicTrack(track)
+        }
+    }
 
     val pinnedChatIds: StateFlow<Set<String>> = prefs.pinnedChatIdsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
@@ -4036,7 +4047,8 @@ class FamilyViewModel(
                             createdAt = now,
                             expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
                             viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
-                            authorUid = currentUserId
+                            authorUid = currentUserId,
+                            musicTrack = request.musicTrack
                         )
                         val res = withTimeoutOrNull(18_000L) {
                             cloudRepo.createStatus(famId, status, currentMemberUids(), currentUserId)
@@ -4081,7 +4093,8 @@ class FamilyViewModel(
                             createdAt = now,
                             expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
                             viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
-                            authorUid = currentUserId
+                            authorUid = currentUserId,
+                            musicTrack = request.musicTrack
                         )
                         _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.PHOTO, 0.72f)
                         val res = withTimeoutOrNull(22_000L) {
@@ -4182,7 +4195,8 @@ class FamilyViewModel(
                             createdAt = now,
                             expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
                             viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
-                            authorUid = currentUserId
+                            authorUid = currentUserId,
+                            musicTrack = request.musicTrack
                         )
                         val res = withTimeoutOrNull(22_000L) {
                             cloudRepo.createStatus(famId, status, uids, currentUserId)

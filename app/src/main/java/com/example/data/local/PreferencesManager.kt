@@ -102,6 +102,7 @@ class PreferencesManager(private val context: Context) {
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         private val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
         private val KEY_REALTIME_BACKGROUND_SERVICE = booleanPreferencesKey("realtime_background_service_enabled")
+        private val KEY_FAVORITE_STATUS_MUSIC_JSON = stringPreferencesKey("favorite_status_music_json")
         const val DEFAULT_PIN = "7525"
         const val DEFAULT_SWITCH_PIN = "2580"
         const val DEFAULT_TURN_URL = "turn:openrelay.metered.ca:80"
@@ -292,6 +293,10 @@ class PreferencesManager(private val context: Context) {
     val chatNotificationTonesFlow: Flow<Map<String, String>> = context.dataStore.data.map { prefs ->
         val raw = prefs[KEY_CHAT_NOTIFICATION_TONES_JSON] ?: "{}"
         com.example.data.model.JsonHelpers.decodeReactions(raw)
+    }
+
+    val favoriteMusicTracksFlow: Flow<List<com.example.util.StatusMusicTrack>> = context.dataStore.data.map { prefs ->
+        com.example.util.StatusMusicCodec.decodeTrackList(prefs[KEY_FAVORITE_STATUS_MUSIC_JSON])
     }
 
     val fcmTokenFlow: Flow<String?> = context.dataStore.data.map { prefs ->
@@ -711,6 +716,23 @@ class PreferencesManager(private val context: Context) {
             val trimmed = if (hiddenList.size > 2000) hiddenList.takeLast(2000) else hiddenList
             prefs[KEY_LOCALLY_HIDDEN_MESSAGE_KEYS_JSON] =
                 com.example.data.model.JsonHelpers.encodeStringList(trimmed)
+        }
+    }
+
+    suspend fun toggleFavoriteMusicTrack(track: com.example.util.StatusMusicTrack) {
+        if (track.trackId.isBlank() || track.previewUrl.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val current = com.example.util.StatusMusicCodec
+                .decodeTrackList(prefs[KEY_FAVORITE_STATUS_MUSIC_JSON])
+                .toMutableList()
+            val existingIdx = current.indexOfFirst { it.trackId == track.trackId }
+            if (existingIdx >= 0) {
+                current.removeAt(existingIdx)
+            } else {
+                current.add(0, track.copy(muteOriginalVideo = false))
+            }
+            prefs[KEY_FAVORITE_STATUS_MUSIC_JSON] =
+                com.example.util.StatusMusicCodec.encodeTrackList(current.take(40))
         }
     }
 

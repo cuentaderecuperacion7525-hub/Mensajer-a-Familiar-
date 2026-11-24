@@ -42,6 +42,7 @@ import com.example.util.AppUpdateUiState
 import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -3507,6 +3508,237 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("status_pick_video_button").assertIsDisplayed()
     composeTestRule.onNodeWithTag("status_request_gallery_permission_button").assertIsDisplayed()
     composeTestRule.onNodeWithText("Permitir acceso a videos").assertIsDisplayed()
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `status composer music picker searches toggles favorites attaches track to publish and removes it`() {
+    val sampleTracks = listOf(
+      com.example.util.StatusMusicTrack(
+        trackId = "t1",
+        title = "Desde Que Te Tengo",
+        artist = "Carín León",
+        previewUrl = "https://example.com/1.m4a"
+      ),
+      com.example.util.StatusMusicTrack(
+        trackId = "t2",
+        title = "BbY WOW",
+        artist = "KAROL G",
+        previewUrl = "https://example.com/2.m4a"
+      )
+    )
+    val publishCalls = mutableListOf<com.example.ui.viewmodel.StatusPublishRequest>()
+    val toggledFavs = mutableListOf<com.example.util.StatusMusicTrack>()
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = false) {
+        com.example.ui.components.StatusComposerScreen(
+          publishState = com.example.ui.viewmodel.StatusPublishUiState.Idle,
+          onPublish = { publishCalls.add(it) },
+          onCancelPublish = {},
+          onDismissPublishError = {},
+          onClose = {},
+          favoriteMusicTracks = emptyList(),
+          onToggleFavoriteMusicTrack = { toggledFavs.add(it) },
+          musicSearchCatalog = { Result.success(sampleTracks) }
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Open music picker bottom sheet from Text composer
+    composeTestRule.onNodeWithTag("status_music_button").performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("status_music_picker_sheet").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Buscar canciones").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("music_category_suggestions").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("music_category_favorites").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Desde Que Te Tengo").assertIsDisplayed()
+
+    // Toggle favorite star and select track
+    composeTestRule.onNodeWithTag("music_favorite_t1").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(1, toggledFavs.size)
+    assertEquals("t1", toggledFavs.first().trackId)
+
+    composeTestRule.onNodeWithTag("music_select_t1").performClick()
+    composeTestRule.waitForIdle()
+
+    // Pill is shown and publish request includes selected musicTrack
+    composeTestRule.onNodeWithTag("status_selected_music_pill").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Desde Que Te Tengo · Carín León").assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("status_text_input").performTextInput("Buenos días familia")
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("publish_status_button").performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(1, publishCalls.size)
+    assertEquals("t1", publishCalls.first().musicTrack?.trackId)
+    assertEquals("Desde Que Te Tengo", publishCalls.first().musicTrack?.title)
+
+    // Remove attached music pill
+    composeTestRule.onNodeWithTag("status_music_remove_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_selected_music_pill").assertDoesNotExist()
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `status viewer displays attached music attribution pill and mute toggle`() {
+    val member = com.example.data.model.FamilyMemberEntity(
+      id = "m_mama",
+      name = "Mamá",
+      roleLabel = "Mamá",
+      isAdmin = false,
+      avatarColorHex = "#1A73E8",
+      avatarEmoji = "👩🏽"
+    )
+    val track = com.example.util.StatusMusicTrack(
+      trackId = "t_view",
+      title = "Las Mañanitas",
+      artist = "Mariachi Vargas",
+      previewUrl = "https://example.com/mananitas.m4a"
+    )
+    val now = System.currentTimeMillis()
+    val status = com.example.data.model.FamilyStatusEntity(
+      id = "st_music_1",
+      memberId = "m_mama",
+      text = "¡Feliz cumpleaños!",
+      mediaType = "TEXT",
+      backgroundHex = "#0E7C66",
+      createdAt = now,
+      expiresAt = now + com.example.data.model.FamilyStatusEntity.STATUS_TTL_MS,
+      musicTrack = track
+    )
+    val group = com.example.ui.components.MemberStatusGroup(
+      member = member,
+      items = listOf(status),
+      hasUnviewed = false
+    )
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = false) {
+        com.example.ui.components.StatusViewerDialog(
+          group = group,
+          activeMemberId = "m_otro",
+          allMembers = listOf(member),
+          onMarkViewed = {},
+          onDeleteStatus = {},
+          onReplyStatus = { _, _ -> },
+          onDismiss = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("status_viewer_music_badge").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Las Mañanitas · Mariachi Vargas").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_viewer_mute_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_viewer_mute_button").performClick()
+    composeTestRule.waitForIdle()
+  }
+
+  @Test
+  fun `status music codec packs and unpacks without altering approved status media payloads`() {
+    val track = com.example.util.StatusMusicTrack(
+      trackId = "101",
+      title = "Las Mañanitas",
+      artist = "Mariachi Vargas",
+      artworkUrl = "https://is1-ssl.mzstatic.com/image/thumb/art.jpg",
+      previewUrl = "https://audio-ssl.itunes.apple.com/preview.m4a",
+      durationSec = 30,
+      muteOriginalVideo = true
+    )
+
+    val (textMedia, textThumb) = com.example.util.StatusMusicCodec.packStatusFields(
+      mediaType = "TEXT",
+      rawMediaData = null,
+      rawVideoThumbnailData = null,
+      musicTrack = track
+    )
+    assertNull(textMedia)
+    assertTrue(textThumb?.startsWith("fmusic:") == true)
+    val unpackedText = com.example.util.StatusMusicCodec.unpackStatusFields(textMedia, textThumb)
+    assertNull(unpackedText.first)
+    assertNull(unpackedText.second)
+    assertEquals(track, unpackedText.third)
+
+    val imgDataUri = "data:image/jpeg;base64,ABC123=="
+    val (imgMedia, imgThumb) = com.example.util.StatusMusicCodec.packStatusFields(
+      mediaType = "IMAGE",
+      rawMediaData = imgDataUri,
+      rawVideoThumbnailData = null,
+      musicTrack = track.copy(muteOriginalVideo = false)
+    )
+    assertEquals(imgDataUri, imgMedia)
+    val unpackedImg = com.example.util.StatusMusicCodec.unpackStatusFields(imgMedia, imgThumb)
+    assertEquals(imgDataUri, unpackedImg.first)
+    assertNull(unpackedImg.second)
+    assertEquals("Las Mañanitas", unpackedImg.third?.title)
+
+    val (vidMedia, vidThumb) = com.example.util.StatusMusicCodec.packStatusFields(
+      mediaType = "VIDEO",
+      rawMediaData = "chunked:video/mp4",
+      rawVideoThumbnailData = "data:image/jpeg;base64,THUMB==",
+      musicTrack = track
+    )
+    assertTrue(vidMedia?.startsWith("chunked:video/mp4|fmusic:") == true)
+    val unpackedVid = com.example.util.StatusMusicCodec.unpackStatusFields(vidMedia, vidThumb)
+    assertEquals("chunked:video/mp4", unpackedVid.first)
+    assertEquals("data:image/jpeg;base64,THUMB==", unpackedVid.second)
+    assertEquals(true, unpackedVid.third?.muteOriginalVideo)
+
+    val encodedList = com.example.util.StatusMusicCodec.encodeTrackList(listOf(track))
+    val decodedList = com.example.util.StatusMusicCodec.decodeTrackList(encodedList)
+    assertEquals(1, decodedList.size)
+    assertEquals("101", decodedList.first().trackId)
+  }
+
+  @Test
+  fun `status music catalog parser normalizes https filters invalid items and deduplicates ids`() {
+    val sampleJson = """
+      {
+        "resultCount": 4,
+        "results": [
+          {
+            "trackId": 555,
+            "trackName": "Desde Que Te Tengo",
+            "artistName": "Carín León",
+            "previewUrl": "http://audio-ssl.itunes.apple.com/sample1.m4a",
+            "artworkUrl100": "http://is1-ssl.mzstatic.com/art1.jpg"
+          },
+          {
+            "trackId": 555,
+            "trackName": "Duplicate Track",
+            "artistName": "Dup",
+            "previewUrl": "https://audio-ssl.itunes.apple.com/sample1.m4a"
+          },
+          {
+            "trackId": 777,
+            "trackName": "No Preview Track",
+            "artistName": "Sin Audio",
+            "previewUrl": ""
+          },
+          {
+            "trackId": 888,
+            "trackName": "BbY WOW",
+            "artistName": "KAROL G",
+            "previewUrl": "https://audio-ssl.itunes.apple.com/sample2.m4a",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/art2.jpg"
+          }
+        ]
+      }
+    """.trimIndent()
+
+    val tracks = com.example.util.StatusMusicCatalog.parseItunesSearchJson(sampleJson)
+    assertEquals(2, tracks.size)
+    assertEquals("555", tracks[0].trackId)
+    assertEquals("https://audio-ssl.itunes.apple.com/sample1.m4a", tracks[0].previewUrl)
+    assertEquals("https://is1-ssl.mzstatic.com/art1.jpg", tracks[0].artworkUrl)
+    assertEquals("888", tracks[1].trackId)
+    assertEquals("KAROL G", tracks[1].artist)
   }
 }
 

@@ -7,7 +7,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.media.AudioAttributes
 import android.media.MediaMetadataRetriever
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -62,9 +64,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PriorityHigh
@@ -136,6 +141,8 @@ import com.example.ui.viewmodel.StatusComposerMode
 import com.example.ui.viewmodel.StatusPublishRequest
 import com.example.ui.viewmodel.StatusPublishUiState
 import com.example.util.CameraCaptureHelper
+import com.example.util.StatusMusicCatalog
+import com.example.util.StatusMusicTrack
 import com.example.util.TimeFormatters
 import com.example.util.VideoMediaHelper
 import com.example.util.VideoPreviewInfo
@@ -241,7 +248,10 @@ fun StatusComposerScreen(
     onPublish: (StatusPublishRequest) -> Unit,
     onCancelPublish: () -> Unit,
     onDismissPublishError: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    favoriteMusicTracks: List<StatusMusicTrack> = emptyList(),
+    onToggleFavoriteMusicTrack: (StatusMusicTrack) -> Unit = {},
+    musicSearchCatalog: suspend (String) -> Result<List<StatusMusicTrack>> = StatusMusicCatalog::searchTracks
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -275,6 +285,10 @@ fun StatusComposerScreen(
     var pickedVideoUri by remember { mutableStateOf<Uri?>(null) }
     var videoCaption by rememberSaveable { mutableStateOf("") }
     var videoPreviewInfo by remember { mutableStateOf<VideoPreviewInfo?>(null) }
+
+    var selectedMusicTrack by remember { mutableStateOf<StatusMusicTrack?>(null) }
+    var showMusicPickerSheet by remember { mutableStateOf(false) }
+    var isNonVideoMusicPlaying by remember { mutableStateOf(true) }
 
     var pendingCameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
     var pendingCameraVideoUri by remember { mutableStateOf<Uri?>(null) }
@@ -527,14 +541,97 @@ fun StatusComposerScreen(
     val isPublishing = publishState is StatusPublishUiState.Publishing
     val isErrorDialog = publishState is StatusPublishUiState.Error
 
+    // Preview attached music automatically for Text and Photo previews
+    var nonVideoMusicPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var nonVideoPreparedUrl by remember { mutableStateOf<String?>(null) }
+    val activeNonVideoMusicUrl = if (
+        (currentMode == StatusComposerMode.TEXT || isInPhotoPreview) &&
+        !showMusicPickerSheet &&
+        !isPublishing
+    ) {
+        selectedMusicTrack?.previewUrl
+    } else {
+        null
+    }
+
+    LaunchedEffect(activeNonVideoMusicUrl) {
+        val prev = nonVideoMusicPlayer
+        if (activeNonVideoMusicUrl.isNullOrBlank()) {
+            nonVideoMusicPlayer = null
+            nonVideoPreparedUrl = null
+            if (prev != null) {
+                runCatching { if (prev.isPlaying) prev.stop() }
+                runCatching { prev.reset() }
+                runCatching { prev.release() }
+            }
+            return@LaunchedEffect
+        }
+        if (nonVideoPreparedUrl == activeNonVideoMusicUrl && prev != null) {
+            return@LaunchedEffect
+        }
+        if (prev != null) {
+            runCatching { if (prev.isPlaying) prev.stop() }
+            runCatching { prev.reset() }
+            runCatching { prev.release() }
+        }
+        nonVideoPreparedUrl = activeNonVideoMusicUrl
+        val mp = MediaPlayer()
+        nonVideoMusicPlayer = mp
+        runCatching {
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .build()
+            )
+            mp.setDataSource(activeNonVideoMusicUrl)
+            mp.isLooping = true
+            mp.setOnPreparedListener { readyMp ->
+                if (nonVideoMusicPlayer === readyMp && isNonVideoMusicPlaying) {
+                    runCatching { readyMp.start() }
+                }
+            }
+            mp.setOnErrorListener { _, _, _ -> true }
+            mp.prepareAsync()
+        }.onFailure {
+            runCatching { mp.release() }
+            if (nonVideoMusicPlayer === mp) nonVideoMusicPlayer = null
+        }
+    }
+
+    LaunchedEffect(isNonVideoMusicPlaying, nonVideoMusicPlayer, activeNonVideoMusicUrl) {
+        val mp = nonVideoMusicPlayer ?: return@LaunchedEffect
+        if (activeNonVideoMusicUrl.isNullOrBlank()) return@LaunchedEffect
+        runCatching {
+            if (isNonVideoMusicPlaying) {
+                if (!mp.isPlaying) mp.start()
+            } else {
+                if (mp.isPlaying) mp.pause()
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            val mp = nonVideoMusicPlayer
+            nonVideoMusicPlayer = null
+            if (mp != null) {
+                runCatching { if (mp.isPlaying) mp.stop() }
+                runCatching { mp.reset() }
+                runCatching { mp.release() }
+            }
+        }
+    }
+
     fun hasUnsavedContent(): Boolean =
         statusText.isNotBlank() || pickedPhotoUri != null || pickedVideoUri != null ||
-            photoCaption.isNotBlank() || videoCaption.isNotBlank()
+            photoCaption.isNotBlank() || videoCaption.isNotBlank() || selectedMusicTrack != null
 
     fun triggerPublishCurrent() {
         if (isPublishing) return
         keyboardController?.hide()
         focusManager.clearFocus()
+        isNonVideoMusicPlaying = false
         when {
             isInPhotoPreview -> {
                 val uri = pickedPhotoUri ?: return
@@ -542,7 +639,8 @@ fun StatusComposerScreen(
                     StatusPublishRequest(
                         mode = StatusComposerMode.PHOTO,
                         photoUri = uri,
-                        photoCaption = photoCaption
+                        photoCaption = photoCaption,
+                        musicTrack = selectedMusicTrack
                     )
                 )
             }
@@ -552,7 +650,8 @@ fun StatusComposerScreen(
                     StatusPublishRequest(
                         mode = StatusComposerMode.VIDEO,
                         videoUri = uri,
-                        videoCaption = videoCaption
+                        videoCaption = videoCaption,
+                        musicTrack = selectedMusicTrack
                     )
                 )
             }
@@ -561,7 +660,8 @@ fun StatusComposerScreen(
                     StatusPublishRequest(
                         mode = StatusComposerMode.TEXT,
                         text = statusText,
-                        backgroundHex = selectedHex
+                        backgroundHex = selectedHex,
+                        musicTrack = selectedMusicTrack
                     )
                 )
             }
@@ -630,6 +730,15 @@ fun StatusComposerScreen(
                     photoUri = pickedPhotoUri!!,
                     caption = photoCaption,
                     isPublishing = isPublishing,
+                    selectedMusic = selectedMusicTrack,
+                    isMusicPlaying = isNonVideoMusicPlaying,
+                    onToggleMusicPlayback = { isNonVideoMusicPlaying = !isNonVideoMusicPlaying },
+                    onOpenMusicPicker = {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                        showMusicPickerSheet = true
+                    },
+                    onRemoveMusic = { selectedMusicTrack = null },
                     onCaptionChange = { if (it.length <= MAX_MEDIA_CAPTION_CHARS) photoCaption = it },
                     onCloseToGallery = { handleBackOrClose(fromCloseButton = true) },
                     onPublishClick = ::triggerPublishCurrent
@@ -642,6 +751,19 @@ fun StatusComposerScreen(
                     previewInfo = videoPreviewInfo,
                     caption = videoCaption,
                     isPublishing = isPublishing,
+                    selectedMusic = selectedMusicTrack,
+                    pauseMusicPreview = showMusicPickerSheet || isPublishing,
+                    onOpenMusicPicker = {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                        showMusicPickerSheet = true
+                    },
+                    onRemoveMusic = { selectedMusicTrack = null },
+                    onToggleMuteOriginalVideo = {
+                        selectedMusicTrack?.let { current ->
+                            selectedMusicTrack = current.copy(muteOriginalVideo = !current.muteOriginalVideo)
+                        }
+                    },
                     onCaptionChange = { if (it.length <= MAX_MEDIA_CAPTION_CHARS) videoCaption = it },
                     onCloseToGallery = { handleBackOrClose(fromCloseButton = true) },
                     onPublishClick = ::triggerPublishCurrent
@@ -654,6 +776,15 @@ fun StatusComposerScreen(
                     selectedHex = selectedHex,
                     isImeVisible = isImeVisible,
                     isPublishing = isPublishing,
+                    selectedMusic = selectedMusicTrack,
+                    isMusicPlaying = isNonVideoMusicPlaying,
+                    onToggleMusicPlayback = { isNonVideoMusicPlaying = !isNonVideoMusicPlaying },
+                    onOpenMusicPicker = {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                        showMusicPickerSheet = true
+                    },
+                    onRemoveMusic = { selectedMusicTrack = null },
                     onTextChange = { if (it.length <= MAX_TEXT_STATUS_CHARS) statusText = it },
                     onSelectColor = { selectedHex = it },
                     onSelectTab = { next ->
@@ -759,6 +890,26 @@ fun StatusComposerScreen(
                 onDismiss = onDismissPublishError
             )
         }
+
+        if (showMusicPickerSheet) {
+            StatusMusicPickerSheet(
+                selectedTrack = selectedMusicTrack,
+                favoriteTracks = favoriteMusicTracks,
+                onToggleFavorite = onToggleFavoriteMusicTrack,
+                onSelectTrack = { chosen ->
+                    val defaultMuteVideo = if (isInVideoPreview) {
+                        selectedMusicTrack?.muteOriginalVideo ?: true
+                    } else {
+                        false
+                    }
+                    selectedMusicTrack = chosen.copy(muteOriginalVideo = defaultMuteVideo)
+                    isNonVideoMusicPlaying = true
+                    showMusicPickerSheet = false
+                },
+                onDismiss = { showMusicPickerSheet = false },
+                searchCatalog = musicSearchCatalog
+            )
+        }
     }
 }
 
@@ -768,6 +919,11 @@ private fun TextStatusComposerPage(
     selectedHex: String,
     isImeVisible: Boolean,
     isPublishing: Boolean,
+    selectedMusic: StatusMusicTrack?,
+    isMusicPlaying: Boolean,
+    onToggleMusicPlayback: () -> Unit,
+    onOpenMusicPicker: () -> Unit,
+    onRemoveMusic: () -> Unit,
     onTextChange: (String) -> Unit,
     onSelectColor: (String) -> Unit,
     onSelectTab: (StatusComposerMode) -> Unit,
@@ -825,29 +981,55 @@ private fun TextStatusComposerPage(
                 )
             }
 
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = if (hasText && !isPublishing) Color.White else Color.White.copy(alpha = 0.22f),
-                modifier = Modifier
-                    .defaultMinSize(minHeight = 44.dp)
-                    .clip(RoundedCornerShape(50))
-                    .clickable(enabled = hasText && !isPublishing) { onPublishClick() }
-                    .testTag("publish_status_button")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                StatusMusicToolbarButton(
+                    hasSelectedMusic = selectedMusic != null,
+                    enabled = !isPublishing,
+                    onClick = onOpenMusicPicker
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (hasText && !isPublishing) Color.White else Color.White.copy(alpha = 0.22f),
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 44.dp)
+                        .clip(RoundedCornerShape(50))
+                        .clickable(enabled = hasText && !isPublishing) { onPublishClick() }
+                        .testTag("publish_status_button")
                 ) {
-                    Text(
-                        text = "Publicar",
-                        fontFamily = InterFontFamily,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (hasText && !isPublishing) Color(0xFF0B3D33) else Color.White.copy(alpha = 0.70f),
-                        maxLines = 1
-                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = "Publicar",
+                            fontFamily = InterFontFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (hasText && !isPublishing) Color(0xFF0B3D33) else Color.White.copy(alpha = 0.70f),
+                            maxLines = 1
+                        )
+                    }
                 }
             }
+        }
+
+        if (selectedMusic != null) {
+            SelectedStatusMusicPill(
+                track = selectedMusic,
+                isVideoMode = false,
+                isMusicPlaying = isMusicPlaying,
+                onTogglePlayback = onToggleMusicPlayback,
+                onChangeMusic = onOpenMusicPicker,
+                onToggleMuteOriginalVideo = {},
+                onRemoveMusic = onRemoveMusic,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            )
         }
 
         // Editable centered text directly on colored background
@@ -1518,6 +1700,11 @@ private fun PhotoStatusPreviewPage(
     photoUri: Uri,
     caption: String,
     isPublishing: Boolean,
+    selectedMusic: StatusMusicTrack?,
+    isMusicPlaying: Boolean,
+    onToggleMusicPlayback: () -> Unit,
+    onOpenMusicPicker: () -> Unit,
+    onRemoveMusic: () -> Unit,
     onCaptionChange: (String) -> Unit,
     onCloseToGallery: () -> Unit,
     onPublishClick: () -> Unit
@@ -1545,11 +1732,11 @@ private fun PhotoStatusPreviewPage(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(150.dp)
+                .height(170.dp)
                 .align(Alignment.TopCenter)
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(Color.Black.copy(alpha = 0.58f), Color.Transparent)
+                        colors = listOf(Color.Black.copy(alpha = 0.62f), Color.Transparent)
                     )
                 )
         )
@@ -1565,9 +1752,16 @@ private fun PhotoStatusPreviewPage(
                 )
         )
 
-        // Top controls
+        // Top controls + optional music pill
         PreviewTopBar(
             isPublishing = isPublishing,
+            selectedMusic = selectedMusic,
+            isVideoMode = false,
+            isMusicPlaying = isMusicPlaying,
+            onToggleMusicPlayback = onToggleMusicPlayback,
+            onOpenMusicPicker = onOpenMusicPicker,
+            onToggleMuteOriginalVideo = {},
+            onRemoveMusic = onRemoveMusic,
             onCloseClick = onCloseToGallery,
             onPublishClick = onPublishClick,
             modifier = Modifier.align(Alignment.TopCenter)
@@ -1593,18 +1787,92 @@ private fun VideoStatusPreviewPage(
     previewInfo: VideoPreviewInfo?,
     caption: String,
     isPublishing: Boolean,
+    selectedMusic: StatusMusicTrack?,
+    pauseMusicPreview: Boolean,
+    onOpenMusicPicker: () -> Unit,
+    onRemoveMusic: () -> Unit,
+    onToggleMuteOriginalVideo: () -> Unit,
     onCaptionChange: (String) -> Unit,
     onCloseToGallery: () -> Unit,
     onPublishClick: () -> Unit
 ) {
     var videoViewRef by remember(videoUri) { mutableStateOf<VideoView?>(null) }
-    var mediaPlayerRef by remember(videoUri) { mutableStateOf<android.media.MediaPlayer?>(null) }
+    var mediaPlayerRef by remember(videoUri) { mutableStateOf<MediaPlayer?>(null) }
     var userAudioPlaying by remember(videoUri) { mutableStateOf(false) }
     var hasStartedOnce by remember(videoUri) { mutableStateOf(false) }
     var pendingStartWithSound by remember(videoUri) { mutableStateOf(false) }
     var isPrepared by remember(videoUri) { mutableStateOf(false) }
     var durationMs by remember(videoUri) { mutableIntStateOf(0) }
     var positionMs by remember(videoUri) { mutableIntStateOf(0) }
+
+    var attachedMusicPlayer by remember(videoUri) { mutableStateOf<MediaPlayer?>(null) }
+    var attachedMusicPreparedUrl by remember(videoUri) { mutableStateOf<String?>(null) }
+
+    val effectiveMuteOriginalVideo = selectedMusic?.muteOriginalVideo == true
+    val shouldPlayAttachedMusic = selectedMusic != null && userAudioPlaying && !pauseMusicPreview
+
+    // Sync VideoView original audio volume with selectedMusic.muteOriginalVideo
+    LaunchedEffect(mediaPlayerRef, isPrepared, effectiveMuteOriginalVideo) {
+        val mp = mediaPlayerRef ?: return@LaunchedEffect
+        val vol = if (effectiveMuteOriginalVideo) 0f else 1f
+        runCatching { mp.setVolume(vol, vol) }
+    }
+
+    // Prepare attached music player when selectedMusic changes in Video preview
+    LaunchedEffect(selectedMusic?.previewUrl) {
+        val url = selectedMusic?.previewUrl
+        val prev = attachedMusicPlayer
+        if (url.isNullOrBlank()) {
+            attachedMusicPlayer = null
+            attachedMusicPreparedUrl = null
+            if (prev != null) {
+                runCatching { if (prev.isPlaying) prev.stop() }
+                runCatching { prev.reset() }
+                runCatching { prev.release() }
+            }
+            return@LaunchedEffect
+        }
+        if (attachedMusicPreparedUrl == url && prev != null) return@LaunchedEffect
+        if (prev != null) {
+            runCatching { if (prev.isPlaying) prev.stop() }
+            runCatching { prev.reset() }
+            runCatching { prev.release() }
+        }
+        attachedMusicPreparedUrl = url
+        val mp = MediaPlayer()
+        attachedMusicPlayer = mp
+        runCatching {
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .build()
+            )
+            mp.setDataSource(url)
+            mp.isLooping = true
+            mp.setOnPreparedListener { readyMp ->
+                if (attachedMusicPlayer === readyMp && shouldPlayAttachedMusic) {
+                    runCatching { readyMp.start() }
+                }
+            }
+            mp.setOnErrorListener { _, _, _ -> true }
+            mp.prepareAsync()
+        }.onFailure {
+            runCatching { mp.release() }
+            if (attachedMusicPlayer === mp) attachedMusicPlayer = null
+        }
+    }
+
+    LaunchedEffect(shouldPlayAttachedMusic, attachedMusicPlayer) {
+        val mp = attachedMusicPlayer ?: return@LaunchedEffect
+        runCatching {
+            if (shouldPlayAttachedMusic) {
+                if (!mp.isPlaying) mp.start()
+            } else {
+                if (mp.isPlaying) mp.pause()
+            }
+        }
+    }
 
     LaunchedEffect(videoUri, isPrepared, userAudioPlaying) {
         while (isPrepared) {
@@ -1629,12 +1897,20 @@ private fun VideoStatusPreviewPage(
             } catch (_: Exception) {
             }
             mediaPlayerRef = null
+            val amp = attachedMusicPlayer
+            attachedMusicPlayer = null
+            if (amp != null) {
+                runCatching { if (amp.isPlaying) amp.stop() }
+                runCatching { amp.reset() }
+                runCatching { amp.release() }
+            }
         }
     }
 
     fun toggleVideoPlaybackWithSound() {
         val vv = videoViewRef
         val mp = mediaPlayerRef
+        val vol = if (effectiveMuteOriginalVideo) 0f else 1f
         if (!userAudioPlaying) {
             userAudioPlaying = true
             if (isPrepared && vv != null) {
@@ -1642,7 +1918,7 @@ private fun VideoStatusPreviewPage(
                 pendingStartWithSound = false
                 try {
                     mp?.isLooping = true
-                    mp?.setVolume(1f, 1f)
+                    mp?.setVolume(vol, vol)
                     if (!vv.isPlaying) {
                         vv.start()
                     }
@@ -1685,7 +1961,8 @@ private fun VideoStatusPreviewPage(
                                 isPrepared = true
                                 durationMs = mp.duration.coerceAtLeast(1)
                                 mp.isLooping = true
-                                mp.setVolume(1f, 1f)
+                                val vol = if (effectiveMuteOriginalVideo) 0f else 1f
+                                mp.setVolume(vol, vol)
                                 if (pendingStartWithSound || userAudioPlaying) {
                                     hasStartedOnce = true
                                     pendingStartWithSound = false
@@ -1725,11 +2002,11 @@ private fun VideoStatusPreviewPage(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(150.dp)
+                .height(170.dp)
                 .align(Alignment.TopCenter)
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(Color.Black.copy(alpha = 0.58f), Color.Transparent)
+                        colors = listOf(Color.Black.copy(alpha = 0.62f), Color.Transparent)
                     )
                 )
         )
@@ -1745,9 +2022,16 @@ private fun VideoStatusPreviewPage(
                 )
         )
 
-        // Top controls
+        // Top controls + optional music pill
         PreviewTopBar(
             isPublishing = isPublishing,
+            selectedMusic = selectedMusic,
+            isVideoMode = true,
+            isMusicPlaying = userAudioPlaying,
+            onToggleMusicPlayback = ::toggleVideoPlaybackWithSound,
+            onOpenMusicPicker = onOpenMusicPicker,
+            onToggleMuteOriginalVideo = onToggleMuteOriginalVideo,
+            onRemoveMusic = onRemoveMusic,
             onCloseClick = onCloseToGallery,
             onPublishClick = onPublishClick,
             modifier = Modifier.align(Alignment.TopCenter)
@@ -1830,6 +2114,13 @@ private fun VideoStatusPreviewPage(
 @Composable
 private fun PreviewTopBar(
     isPublishing: Boolean,
+    selectedMusic: StatusMusicTrack?,
+    isVideoMode: Boolean,
+    isMusicPlaying: Boolean,
+    onToggleMusicPlayback: () -> Unit,
+    onOpenMusicPicker: () -> Unit,
+    onToggleMuteOriginalVideo: () -> Unit,
+    onRemoveMusic: () -> Unit,
     onCloseClick: () -> Unit,
     onPublishClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -1837,7 +2128,8 @@ private fun PreviewTopBar(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(
             modifier = Modifier
@@ -1860,31 +2152,217 @@ private fun PreviewTopBar(
                 )
             }
 
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = if (!isPublishing) Color.White else Color.White.copy(alpha = 0.35f),
-                modifier = Modifier
-                    .defaultMinSize(minHeight = 44.dp)
-                    .clip(RoundedCornerShape(50))
-                    .clickable(enabled = !isPublishing) { onPublishClick() }
-                    .testTag("publish_status_button")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                StatusMusicToolbarButton(
+                    hasSelectedMusic = selectedMusic != null,
+                    enabled = !isPublishing,
+                    onClick = onOpenMusicPicker
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (!isPublishing) Color.White else Color.White.copy(alpha = 0.35f),
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 44.dp)
+                        .clip(RoundedCornerShape(50))
+                        .clickable(enabled = !isPublishing) { onPublishClick() }
+                        .testTag("publish_status_button")
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = "Publicar",
+                            fontFamily = InterFontFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (!isPublishing) GalleryDarkBg else Color.White.copy(alpha = 0.7f),
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+
+        if (selectedMusic != null) {
+            SelectedStatusMusicPill(
+                track = selectedMusic,
+                isVideoMode = isVideoMode,
+                isMusicPlaying = isMusicPlaying,
+                onTogglePlayback = onToggleMusicPlayback,
+                onChangeMusic = onOpenMusicPicker,
+                onToggleMuteOriginalVideo = onToggleMuteOriginalVideo,
+                onRemoveMusic = onRemoveMusic,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusMusicToolbarButton(
+    hasSelectedMusic: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = CircleShape,
+        color = if (hasSelectedMusic) Color(0xFF143D2B).copy(alpha = 0.92f) else Color.Black.copy(alpha = 0.34f),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (hasSelectedMusic) Color(0xFF25D366) else Color.White.copy(alpha = 0.34f)
+        ),
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .clickable(enabled = enabled) { onClick() }
+            .testTag("status_music_button")
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = Icons.Filled.MusicNote,
+                contentDescription = if (hasSelectedMusic) "Cambiar música" else "Añadir música",
+                tint = if (hasSelectedMusic) Color(0xFF4ADE80) else Color.White,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectedStatusMusicPill(
+    track: StatusMusicTrack,
+    isVideoMode: Boolean,
+    isMusicPlaying: Boolean,
+    onTogglePlayback: () -> Unit,
+    onChangeMusic: () -> Unit,
+    onToggleMuteOriginalVideo: () -> Unit,
+    onRemoveMusic: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = modifier
+    ) {
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = Color.Black.copy(alpha = 0.56f),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .clip(RoundedCornerShape(50))
+                .clickable { onChangeMusic() }
+                .testTag("status_selected_music_pill")
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 5.dp, bottom = 5.dp)
             ) {
                 Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF1E293B))
+                        .clickable { onTogglePlayback() }
+                        .testTag("status_selected_music_play_toggle"),
+                    contentAlignment = Alignment.Center
                 ) {
+                    if (track.artworkUrl.isNotBlank()) {
+                        val req = remember(track.artworkUrl) {
+                            ImageRequest.Builder(context)
+                                .data(track.artworkUrl)
+                                .crossfade(false)
+                                .build()
+                        }
+                        AsyncImage(
+                            model = req,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.35f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isMusicPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = if (isMusicPlaying) "Pausar música" else "Escuchar música",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f, fill = false)) {
                     Text(
-                        text = "Publicar",
+                        text = "${track.title} · ${track.artist}",
                         fontFamily = InterFontFamily,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (!isPublishing) GalleryDarkBg else Color.White.copy(alpha = 0.7f),
-                        maxLines = 1
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable { onRemoveMusic() }
+                        .testTag("status_music_remove_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Quitar música",
+                        tint = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
         }
 
+        if (isVideoMode) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = Color.Black.copy(alpha = 0.52f),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable { onToggleMuteOriginalVideo() }
+                    .testTag("status_video_mute_toggle")
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                ) {
+                    Icon(
+                        imageVector = if (track.muteOriginalVideo) Icons.AutoMirrored.Filled.VolumeOff
+                        else Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = null,
+                        tint = if (track.muteOriginalVideo) Color(0xFFFCA5A5) else Color(0xFF4ADE80),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = if (track.muteOriginalVideo) "Audio original silenciado" else "Audio original activo",
+                        fontFamily = InterFontFamily,
+                        fontSize = 11.5.sp,
+                        color = Color.White.copy(alpha = 0.90f)
+                    )
+                }
+            }
+        }
     }
 }
 
