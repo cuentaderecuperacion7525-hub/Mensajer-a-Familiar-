@@ -513,6 +513,7 @@ fun FamiChatApp(
     val playingVoiceProgress by vm.playingVoiceProgress.collectAsStateWithLifecycle()
     val voicePlaybackSpeed by vm.voicePlaybackSpeed.collectAsStateWithLifecycle()
     val mediaTransferProgress by vm.mediaTransferProgress.collectAsStateWithLifecycle()
+    val statusPublishState by vm.statusPublishState.collectAsStateWithLifecycle()
     val activeUploadLabel by vm.activeUploadLabel.collectAsStateWithLifecycle()
     val activeUploadProgress by vm.activeUploadProgress.collectAsStateWithLifecycle()
     val fcmToken by vm.fcmToken.collectAsStateWithLifecycle()
@@ -732,6 +733,10 @@ fun FamiChatApp(
                         onPublishTextStatus = vm::publishTextStatus,
                         onPublishPhotoStatus = vm::publishPhotoStatus,
                         onPublishVideoStatus = vm::publishVideoStatus,
+                        statusPublishState = statusPublishState,
+                        onPublishStatus = vm::publishStatus,
+                        onCancelStatusPublish = vm::cancelStatusPublish,
+                        onDismissStatusPublishError = vm::dismissStatusPublishError,
                         onPrepareStatusVideo = vm::prepareStatusVideo,
                         onSaveStatusMediaToGallery = vm::saveStatusMediaToGallery,
                         mediaTransferProgress = mediaTransferProgress,

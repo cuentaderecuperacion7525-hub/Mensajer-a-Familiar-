@@ -1,0 +1,2110 @@
+package com.example.ui.components
+
+import android.Manifest
+import android.app.Activity
+import android.content.ContentUris
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.provider.MediaStore
+import android.widget.FrameLayout
+import android.widget.VideoView
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PriorityHigh
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.example.ui.theme.InterFontFamily
+import com.example.ui.theme.LocalDarkTheme
+import com.example.ui.viewmodel.StatusComposerMode
+import com.example.ui.viewmodel.StatusPublishRequest
+import com.example.ui.viewmodel.StatusPublishUiState
+import com.example.util.CameraCaptureHelper
+import com.example.util.TimeFormatters
+import com.example.util.VideoMediaHelper
+import com.example.util.VideoPreviewInfo
+import com.example.util.parseHexColor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+private const val MAX_TEXT_STATUS_CHARS = 280
+private const val MAX_MEDIA_CAPTION_CHARS = 200
+
+val StatusComposerTextColors = listOf(
+    "#0E7C66",
+    "#1A5FD4",
+    "#6B4FD8",
+    "#B0306A",
+    "#C94521",
+    "#3A4150"
+)
+
+private val GalleryDarkBg = Color(0xFF0E1219)
+private val GalleryTileBg = Color(0xFF171C26)
+private val DialogBluePrimary = Color(0xFF1A73E8)
+private val SoftRedDark = Color(0xFFF28B82)
+private val SoftRedLight = Color(0xFFD93025)
+private val AmberWarnColor = Color(0xFFE0A030)
+
+private data class LocalGalleryMediaItem(
+    val uri: Uri,
+    val dateAddedSec: Long,
+    val durationSec: Int = 0,
+    val sizeBytes: Long = 0L,
+    val isOverLimit: Boolean = false
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun StatusComposerScreen(
+    publishState: StatusPublishUiState,
+    onPublish: (StatusPublishRequest) -> Unit,
+    onCancelPublish: () -> Unit,
+    onDismissPublishError: () -> Unit,
+    onClose: () -> Unit
+) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val parentDarkTheme = LocalDarkTheme.current
+    val isImeVisible = WindowInsets.isImeVisible
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val coroutineScope = rememberCoroutineScope()
+
+    // Ensure status/nav bar icons remain crisp white over colored & dark fullscreen backgrounds
+    if (!view.isInEditMode) {
+        DisposableEffect(parentDarkTheme) {
+            val window = (view.context as? Activity)?.window
+            val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+            controller?.isAppearanceLightStatusBars = false
+            controller?.isAppearanceLightNavigationBars = false
+            onDispose {
+                controller?.isAppearanceLightStatusBars = !parentDarkTheme
+                controller?.isAppearanceLightNavigationBars = !parentDarkTheme
+            }
+        }
+    }
+
+    var currentMode by rememberSaveable { mutableStateOf(StatusComposerMode.TEXT) }
+    var statusText by rememberSaveable { mutableStateOf("") }
+    var selectedHex by rememberSaveable { mutableStateOf(StatusComposerTextColors.first()) }
+
+    var pickedPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var photoCaption by rememberSaveable { mutableStateOf("") }
+
+    var pickedVideoUri by remember { mutableStateOf<Uri?>(null) }
+    var videoCaption by rememberSaveable { mutableStateOf("") }
+    var videoPreviewInfo by remember { mutableStateOf<VideoPreviewInfo?>(null) }
+
+    var pendingCameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingCameraVideoUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingCameraType by remember { mutableIntStateOf(1) }
+
+    var sessionPhotoItems by remember { mutableStateOf<List<LocalGalleryMediaItem>>(emptyList()) }
+    var sessionVideoItems by remember { mutableStateOf<List<LocalGalleryMediaItem>>(emptyList()) }
+    var mediaStorePhotos by remember { mutableStateOf<List<LocalGalleryMediaItem>>(emptyList()) }
+    var mediaStoreVideos by remember { mutableStateOf<List<LocalGalleryMediaItem>>(emptyList()) }
+
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    var inlineWarningMsg by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(inlineWarningMsg) {
+        if (inlineWarningMsg != null) {
+            delay(2800L)
+            inlineWarningMsg = null
+        }
+    }
+
+    // Load real app-accessible gallery items without requesting any new storage permissions
+    LaunchedEffect(currentMode) {
+        when (currentMode) {
+            StatusComposerMode.PHOTO -> {
+                mediaStorePhotos = loadAppAccessiblePhotos(context)
+            }
+            StatusComposerMode.VIDEO -> {
+                mediaStoreVideos = loadAppAccessibleVideos(context)
+            }
+            StatusComposerMode.TEXT -> Unit
+        }
+    }
+
+    LaunchedEffect(pickedVideoUri) {
+        val uri = pickedVideoUri
+        videoPreviewInfo = if (uri == null) {
+            null
+        } else {
+            VideoMediaHelper.extractVideoPreview(context, uri)
+        }
+    }
+
+    fun selectVideoUriWithCheck(uri: Uri, knownSizeBytes: Long = -1L) {
+        coroutineScope.launch {
+            val info = VideoMediaHelper.extractVideoPreview(context, uri)
+            val effectiveSize = if (info.sizeBytes > 0L) info.sizeBytes else knownSizeBytes
+            if (effectiveSize > VideoMediaHelper.MAX_VIDEO_BYTES) {
+                inlineWarningMsg = "El video supera el límite de 5 MB. Elige uno más corto."
+                return@launch
+            }
+            val entry = LocalGalleryMediaItem(
+                uri = uri,
+                dateAddedSec = System.currentTimeMillis() / 1000L,
+                durationSec = info.durationSec,
+                sizeBytes = effectiveSize,
+                isOverLimit = false
+            )
+            sessionVideoItems = (listOf(entry) + sessionVideoItems.filterNot { it.uri == uri })
+            pickedVideoUri = uri
+            videoPreviewInfo = info
+        }
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri ->
+            if (uri != null) {
+                val entry = LocalGalleryMediaItem(uri, System.currentTimeMillis() / 1000L)
+                sessionPhotoItems = (listOf(entry) + sessionPhotoItems.filterNot { it.uri == uri })
+                pickedPhotoUri = uri
+            }
+        }
+    )
+
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri ->
+            if (uri != null) {
+                selectVideoUriWithCheck(uri)
+            }
+        }
+    )
+
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+        onResult = { success ->
+            val captured = pendingCameraPhotoUri
+            if (success && captured != null) {
+                val entry = LocalGalleryMediaItem(captured, System.currentTimeMillis() / 1000L)
+                sessionPhotoItems = (listOf(entry) + sessionPhotoItems.filterNot { it.uri == captured })
+                pickedPhotoUri = captured
+            }
+        }
+    )
+
+    val captureVideoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CaptureVideo(),
+        onResult = { success ->
+            val captured = pendingCameraVideoUri
+            if (success && captured != null) {
+                selectVideoUriWithCheck(captured)
+            }
+        }
+    )
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted ->
+            if (granted) {
+                if (pendingCameraType == 2) {
+                    val uri = CameraCaptureHelper.createTempVideoUri(context)
+                    if (uri != null) {
+                        pendingCameraVideoUri = uri
+                        captureVideoLauncher.launch(uri)
+                    }
+                } else {
+                    val uri = CameraCaptureHelper.createTempPhotoUri(context)
+                    if (uri != null) {
+                        pendingCameraPhotoUri = uri
+                        takePictureLauncher.launch(uri)
+                    }
+                }
+            } else {
+                inlineWarningMsg = "Permiso de cámara requerido para capturar."
+            }
+        }
+    )
+
+    fun launchSystemPhotoCamera() {
+        pendingCameraType = 1
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            val uri = CameraCaptureHelper.createTempPhotoUri(context)
+            if (uri != null) {
+                pendingCameraPhotoUri = uri
+                takePictureLauncher.launch(uri)
+            }
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    fun launchSystemVideoCamera() {
+        pendingCameraType = 2
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            val uri = CameraCaptureHelper.createTempVideoUri(context)
+            if (uri != null) {
+                pendingCameraVideoUri = uri
+                captureVideoLauncher.launch(uri)
+            }
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    val isInPhotoPreview = currentMode == StatusComposerMode.PHOTO && pickedPhotoUri != null
+    val isInVideoPreview = currentMode == StatusComposerMode.VIDEO && pickedVideoUri != null
+    val isPublishing = publishState is StatusPublishUiState.Publishing
+    val isErrorDialog = publishState is StatusPublishUiState.Error
+
+    fun hasUnsavedContent(): Boolean =
+        statusText.isNotBlank() || pickedPhotoUri != null || pickedVideoUri != null ||
+            photoCaption.isNotBlank() || videoCaption.isNotBlank()
+
+    fun triggerPublishCurrent() {
+        if (isPublishing) return
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        when {
+            isInPhotoPreview -> {
+                val uri = pickedPhotoUri ?: return
+                onPublish(
+                    StatusPublishRequest(
+                        mode = StatusComposerMode.PHOTO,
+                        photoUri = uri,
+                        photoCaption = photoCaption
+                    )
+                )
+            }
+            isInVideoPreview -> {
+                val uri = pickedVideoUri ?: return
+                onPublish(
+                    StatusPublishRequest(
+                        mode = StatusComposerMode.VIDEO,
+                        videoUri = uri,
+                        videoCaption = videoCaption
+                    )
+                )
+            }
+            currentMode == StatusComposerMode.TEXT && statusText.isNotBlank() -> {
+                onPublish(
+                    StatusPublishRequest(
+                        mode = StatusComposerMode.TEXT,
+                        text = statusText,
+                        backgroundHex = selectedHex
+                    )
+                )
+            }
+        }
+    }
+
+    fun handleBackOrClose(fromCloseButton: Boolean) {
+        if (isPublishing || isErrorDialog) return
+        if (isImeVisible && !fromCloseButton) {
+            keyboardController?.hide()
+            focusManager.clearFocus()
+            return
+        }
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        when {
+            isInPhotoPreview -> {
+                if (photoCaption.isBlank()) {
+                    pickedPhotoUri = null
+                } else {
+                    showDiscardDialog = true
+                }
+            }
+            isInVideoPreview -> {
+                if (videoCaption.isBlank()) {
+                    pickedVideoUri = null
+                } else {
+                    showDiscardDialog = true
+                }
+            }
+            hasUnsavedContent() -> showDiscardDialog = true
+            else -> onClose()
+        }
+    }
+
+    BackHandler(enabled = true) {
+        when {
+            showDiscardDialog -> showDiscardDialog = false
+            isPublishing -> Unit
+            isErrorDialog -> onDismissPublishError()
+            else -> handleBackOrClose(fromCloseButton = false)
+        }
+    }
+
+    val combinedPhotos = remember(sessionPhotoItems, mediaStorePhotos) {
+        (sessionPhotoItems + mediaStorePhotos)
+            .distinctBy { it.uri.toString() }
+            .sortedByDescending { it.dateAddedSec }
+    }
+    val combinedVideos = remember(sessionVideoItems, mediaStoreVideos) {
+        (sessionVideoItems + mediaStoreVideos)
+            .distinctBy { it.uri.toString() }
+            .sortedByDescending { it.dateAddedSec }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(35f)
+            .pointerInput(Unit) { detectTapGestures { } }
+            .testTag("status_composer_screen")
+    ) {
+        when {
+            isInPhotoPreview -> {
+                PhotoStatusPreviewPage(
+                    photoUri = pickedPhotoUri!!,
+                    caption = photoCaption,
+                    isPublishing = isPublishing,
+                    onCaptionChange = { if (it.length <= MAX_MEDIA_CAPTION_CHARS) photoCaption = it },
+                    onCloseToGallery = { handleBackOrClose(fromCloseButton = true) },
+                    onPublishClick = ::triggerPublishCurrent
+                )
+            }
+
+            isInVideoPreview -> {
+                VideoStatusPreviewPage(
+                    videoUri = pickedVideoUri!!,
+                    previewInfo = videoPreviewInfo,
+                    caption = videoCaption,
+                    isPublishing = isPublishing,
+                    onCaptionChange = { if (it.length <= MAX_MEDIA_CAPTION_CHARS) videoCaption = it },
+                    onCloseToGallery = { handleBackOrClose(fromCloseButton = true) },
+                    onPublishClick = ::triggerPublishCurrent
+                )
+            }
+
+            currentMode == StatusComposerMode.TEXT -> {
+                TextStatusComposerPage(
+                    text = statusText,
+                    selectedHex = selectedHex,
+                    isImeVisible = isImeVisible,
+                    isPublishing = isPublishing,
+                    onTextChange = { if (it.length <= MAX_TEXT_STATUS_CHARS) statusText = it },
+                    onSelectColor = { selectedHex = it },
+                    onSelectTab = { next ->
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                        currentMode = next
+                    },
+                    onCloseClick = { handleBackOrClose(fromCloseButton = true) },
+                    onPublishClick = ::triggerPublishCurrent
+                )
+            }
+
+            else -> {
+                val isVideoGallery = currentMode == StatusComposerMode.VIDEO
+                MediaGalleryComposerPage(
+                    isVideo = isVideoGallery,
+                    items = if (isVideoGallery) combinedVideos else combinedPhotos,
+                    onCloseClick = { handleBackOrClose(fromCloseButton = true) },
+                    onOpenPicker = {
+                        if (isVideoGallery) {
+                            videoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                            )
+                        } else {
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }
+                    },
+                    onOpenCamera = {
+                        if (isVideoGallery) launchSystemVideoCamera() else launchSystemPhotoCamera()
+                    },
+                    onItemClick = { item ->
+                        if (isVideoGallery) {
+                            if (item.isOverLimit) {
+                                inlineWarningMsg = "El video supera el límite de 5 MB y no se puede elegir."
+                            } else {
+                                selectVideoUriWithCheck(item.uri, item.sizeBytes)
+                            }
+                        } else {
+                            pickedPhotoUri = item.uri
+                        }
+                    },
+                    onSelectTab = { next -> currentMode = next }
+                )
+            }
+        }
+
+        // Brief floating notice for size limit or camera permission
+        val warning = inlineWarningMsg
+        if (!warning.isNullOrBlank()) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = Color(0xFF1E2532).copy(alpha = 0.94f),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 92.dp)
+                    .testTag("status_composer_warning_pill")
+            ) {
+                Text(
+                    text = warning,
+                    color = Color.White,
+                    fontFamily = InterFontFamily,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                )
+            }
+        }
+
+        // Centered Dialogs (Imagen 7): Discard / Uploading / Publish Error
+        if (showDiscardDialog) {
+            val subtitle = when {
+                isInPhotoPreview -> "Se perderá la foto elegida."
+                isInVideoPreview -> "Se perderá el video elegido."
+                pickedPhotoUri != null && currentMode == StatusComposerMode.PHOTO -> "Se perderá la foto elegida."
+                pickedVideoUri != null && currentMode == StatusComposerMode.VIDEO -> "Se perderá el video elegido."
+                else -> "Se perderá lo que escribiste."
+            }
+            StatusDiscardDialog(
+                subtitle = subtitle,
+                onKeepEditing = { showDiscardDialog = false },
+                onDiscard = {
+                    showDiscardDialog = false
+                    onClose()
+                }
+            )
+        } else if (publishState is StatusPublishUiState.Publishing) {
+            StatusUploadingDialog(
+                mode = publishState.mode,
+                progress = publishState.progress,
+                onCancel = onCancelPublish
+            )
+        } else if (publishState is StatusPublishUiState.Error) {
+            StatusPublishErrorDialog(
+                message = publishState.message,
+                onRetry = ::triggerPublishCurrent,
+                onDismiss = onDismissPublishError
+            )
+        }
+    }
+}
+
+@Composable
+private fun TextStatusComposerPage(
+    text: String,
+    selectedHex: String,
+    isImeVisible: Boolean,
+    isPublishing: Boolean,
+    onTextChange: (String) -> Unit,
+    onSelectColor: (String) -> Unit,
+    onSelectTab: (StatusComposerMode) -> Unit,
+    onCloseClick: () -> Unit,
+    onPublishClick: () -> Unit
+) {
+    val bgColor = parseHexColor(selectedHex, fallback = Color(0xFF0E7C66))
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val hasText = text.isNotBlank()
+
+    // Base font size smoothly adapts from 26sp down to 16sp as length grows
+    var overflowStep by remember { mutableIntStateOf(0) }
+    LaunchedEffect(text.length) {
+        if (overflowStep > 0 && text.length < 40) {
+            overflowStep = 0
+        }
+    }
+    val lengthBasedSp = when {
+        text.length <= 45 -> 26f
+        text.length <= 90 -> 23f
+        text.length <= 145 -> 20f
+        text.length <= 210 -> 18f
+        else -> 16f
+    }
+    val effectiveSp = (lengthBasedSp - overflowStep * 2f).coerceIn(16f, 26f)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(bgColor)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            .imePadding()
+            .navigationBarsPadding()
+    ) {
+        // Top Bar: X (left) + Publicar pill (right)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            IconButton(
+                onClick = onCloseClick,
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("status_close_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Cerrar",
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = if (hasText && !isPublishing) Color.White else Color.White.copy(alpha = 0.22f),
+                modifier = Modifier
+                    .defaultMinSize(minHeight = 44.dp)
+                    .clip(RoundedCornerShape(50))
+                    .clickable(enabled = hasText && !isPublishing) { onPublishClick() }
+                    .testTag("publish_status_button")
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = "Publicar",
+                        fontFamily = InterFontFamily,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (hasText && !isPublishing) Color(0xFF0B3D33) else Color.White.copy(alpha = 0.70f),
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+
+        // Centered 24h badge pill
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = Color.Black.copy(alpha = 0.24f)
+            ) {
+                Text(
+                    text = "Se borra en 24 horas",
+                    fontFamily = InterFontFamily,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
+                )
+            }
+        }
+
+        // Editable centered text directly on colored background
+        BoxWithConstraints(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                }
+                .padding(horizontal = 28.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            val maxLinesEstimate = ((maxHeight.value / (effectiveSp * 1.45f)).toInt()).coerceAtLeast(3)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                contentAlignment = Alignment.Center
+            ) {
+                BasicTextField(
+                    value = text,
+                    onValueChange = { next ->
+                        if (next.length <= MAX_TEXT_STATUS_CHARS) {
+                            if (next.length < text.length && overflowStep > 0) {
+                                overflowStep = (overflowStep - 1).coerceAtLeast(0)
+                            }
+                            onTextChange(next)
+                        }
+                    },
+                    textStyle = TextStyle(
+                        fontFamily = InterFontFamily,
+                        fontSize = effectiveSp.sp,
+                        lineHeight = (effectiveSp * 1.32f).sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White,
+                        textAlign = TextAlign.Center
+                    ),
+                    cursorBrush = SolidColor(Color.White),
+                    onTextLayout = { layoutResult ->
+                        if ((layoutResult.hasVisualOverflow || layoutResult.lineCount > maxLinesEstimate) &&
+                            effectiveSp > 16f
+                        ) {
+                            overflowStep += 1
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester)
+                        .testTag("status_text_input"),
+                    decorationBox = { innerTextField ->
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (text.isEmpty()) {
+                                Text(
+                                    text = "Escribe tu estado…",
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 26.sp,
+                                    lineHeight = 34.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White.copy(alpha = 0.65f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                            innerTextField()
+                        }
+                    }
+                )
+            }
+        }
+
+        // Character counter N/280 above color row, right-aligned
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 4.dp),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            Text(
+                text = "${text.length}/$MAX_TEXT_STATUS_CHARS",
+                fontFamily = InterFontFamily,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Normal,
+                color = Color.White.copy(alpha = 0.75f),
+                modifier = Modifier.testTag("status_text_counter")
+            )
+        }
+
+        // 6 color circles
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            StatusComposerTextColors.forEachIndexed { idx, hex ->
+                val isSelected = selectedHex.equals(hex, ignoreCase = true)
+                val swatchColor = parseHexColor(hex)
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .clickable { onSelectColor(hex) }
+                        .testTag("status_color_option_$idx"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSelected) {
+                        Box(
+                            modifier = Modifier
+                                .size(39.dp)
+                                .border(2.5.dp, Color.White, CircleShape)
+                                .padding(4.5.dp)
+                                .clip(CircleShape)
+                                .background(swatchColor)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(swatchColor)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Bottom selector pill (hidden while keyboard is open)
+        if (!isImeVisible) {
+            Spacer(modifier = Modifier.height(6.dp))
+            StatusComposerModePill(
+                currentMode = StatusComposerMode.TEXT,
+                containerColor = Color.Black.copy(alpha = 0.24f),
+                activeTextColor = Color(0xFF0B3D33),
+                onSelectTab = onSelectTab
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+        } else {
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun MediaGalleryComposerPage(
+    isVideo: Boolean,
+    items: List<LocalGalleryMediaItem>,
+    onCloseClick: () -> Unit,
+    onOpenPicker: () -> Unit,
+    onOpenCamera: () -> Unit,
+    onItemClick: (LocalGalleryMediaItem) -> Unit,
+    onSelectTab: (StatusComposerMode) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(GalleryDarkBg)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            .navigationBarsPadding()
+    ) {
+        // Header: X on left, centered title ("Recientes v" / "Videos")
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .heightIn(min = 48.dp)
+        ) {
+            IconButton(
+                onClick = onCloseClick,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .size(48.dp)
+                    .testTag("status_close_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Cerrar",
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .defaultMinSize(minHeight = 44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onOpenPicker() }
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .testTag(if (isVideo) "status_gallery_title_videos" else "status_gallery_title_recents")
+            ) {
+                Text(
+                    text = if (isVideo) "Videos" else "Recientes",
+                    fontFamily = InterFontFamily,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    maxLines = 1
+                )
+                if (!isVideo) {
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowDown,
+                        contentDescription = "Abrir galería del dispositivo",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+
+        // 3-column grid with 5dp gap & 12dp corners
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .testTag(if (isVideo) "status_video_gallery_grid" else "status_photo_gallery_grid")
+        ) {
+            // Cell 0: Camera / Record
+            item(key = "tile_camera") {
+                Box(
+                    modifier = Modifier
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(GalleryTileBg)
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                        .clickable { onOpenCamera() }
+                        .testTag(if (isVideo) "status_record_video_button" else "status_take_photo_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isVideo) Icons.Outlined.Videocam else Icons.Outlined.PhotoCamera,
+                            contentDescription = if (isVideo) "Grabar video" else "Tomar foto",
+                            tint = Color.White,
+                            modifier = Modifier.size(30.dp)
+                        )
+                        Text(
+                            text = if (isVideo) "Grabar" else "Cámara",
+                            fontFamily = InterFontFamily,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White.copy(alpha = 0.72f)
+                        )
+                    }
+                }
+            }
+
+            // Cell 1: Android System Photo Picker tile (zero storage permission)
+            item(key = "tile_system_picker") {
+                Box(
+                    modifier = Modifier
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(GalleryTileBg)
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                        .clickable { onOpenPicker() }
+                        .testTag(if (isVideo) "status_pick_video_button" else "status_pick_gallery_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(horizontal = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.PhotoLibrary,
+                            contentDescription = "Elegir de galería",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Text(
+                            text = if (isVideo) "Elegir video" else "Galería",
+                            fontFamily = InterFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White.copy(alpha = 0.72f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            // Real thumbnails (newest first)
+            items(items, key = { it.uri.toString() }) { item ->
+                GalleryRealMediaTile(
+                    item = item,
+                    isVideo = isVideo,
+                    onClick = { onItemClick(item) }
+                )
+            }
+
+            if (items.isEmpty()) {
+                item(key = "picker_hint", span = { GridItemSpan(3) }) {
+                    Text(
+                        text = if (isVideo) {
+                            "Toca «Elegir video» para abrir la galería del dispositivo o «Grabar» para capturar uno."
+                        } else {
+                            "Toca «Galería» o «Recientes» para elegir una foto del dispositivo."
+                        },
+                        fontFamily = InterFontFamily,
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp,
+                        color = Color.White.copy(alpha = 0.56f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 28.dp)
+                    )
+                }
+            }
+        }
+
+        // Bottom pill selector
+        Spacer(modifier = Modifier.height(6.dp))
+        StatusComposerModePill(
+            currentMode = if (isVideo) StatusComposerMode.VIDEO else StatusComposerMode.PHOTO,
+            containerColor = GalleryTileBg,
+            activeTextColor = GalleryDarkBg,
+            onSelectTab = onSelectTab
+        )
+        Spacer(modifier = Modifier.height(14.dp))
+    }
+}
+
+@Composable
+private fun GalleryRealMediaTile(
+    item: LocalGalleryMediaItem,
+    isVideo: Boolean,
+    onClick: () -> Unit
+) {
+    val context = LocalContext.current
+    var videoThumbBitmap by remember(item.uri, isVideo) { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(item.uri, isVideo) {
+        if (isVideo) {
+            videoThumbBitmap = loadVideoThumbnailBitmap(context, item.uri)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(12.dp))
+            .background(GalleryTileBg)
+            .alpha(if (item.isOverLimit) 0.42f else 1f)
+            .clickable { onClick() }
+    ) {
+        if (isVideo) {
+            val bmp = videoThumbBitmap
+            if (bmp != null && !bmp.isRecycled) {
+                val imgBmp = remember(bmp) { bmp.asImageBitmap() }
+                Image(
+                    bitmap = imgBmp,
+                    contentDescription = "Miniatura de video",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Videocam,
+                        contentDescription = "Video",
+                        tint = Color.White.copy(alpha = 0.45f),
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+
+            if (item.durationSec > 0) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color.Black.copy(alpha = 0.72f),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp)
+                ) {
+                    Text(
+                        text = TimeFormatters.formatDuration(item.durationSec),
+                        fontFamily = InterFontFamily,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        } else {
+            val photoReq = remember(item.uri) {
+                ImageRequest.Builder(context)
+                    .data(item.uri)
+                    .crossfade(false)
+                    .build()
+            }
+            AsyncImage(
+                model = photoReq,
+                contentDescription = "Miniatura de foto",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhotoStatusPreviewPage(
+    photoUri: Uri,
+    caption: String,
+    isPublishing: Boolean,
+    onCaptionChange: (String) -> Unit,
+    onCloseToGallery: () -> Unit,
+    onPublishClick: () -> Unit
+) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(GalleryDarkBg)
+    ) {
+        val req = remember(photoUri) {
+            ImageRequest.Builder(context)
+                .data(photoUri)
+                .crossfade(false)
+                .build()
+        }
+        AsyncImage(
+            model = req,
+            contentDescription = "Vista previa de foto",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Soft top & bottom gradient scrims for readability
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(150.dp)
+                .align(Alignment.TopCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Black.copy(alpha = 0.58f), Color.Transparent)
+                    )
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.70f))
+                    )
+                )
+        )
+
+        // Top controls
+        PreviewTopBar(
+            isPublishing = isPublishing,
+            onCloseClick = onCloseToGallery,
+            onPublishClick = onPublishClick,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
+
+        // Bottom caption pill field
+        PreviewCaptionBar(
+            caption = caption,
+            onCaptionChange = onCaptionChange,
+            inputTestTag = "status_photo_caption_input",
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .imePadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+        )
+    }
+}
+
+@Composable
+private fun VideoStatusPreviewPage(
+    videoUri: Uri,
+    previewInfo: VideoPreviewInfo?,
+    caption: String,
+    isPublishing: Boolean,
+    onCaptionChange: (String) -> Unit,
+    onCloseToGallery: () -> Unit,
+    onPublishClick: () -> Unit
+) {
+    var videoViewRef by remember(videoUri) { mutableStateOf<VideoView?>(null) }
+    var mediaPlayerRef by remember(videoUri) { mutableStateOf<android.media.MediaPlayer?>(null) }
+    var userAudioPlaying by remember(videoUri) { mutableStateOf(false) }
+    var isPrepared by remember(videoUri) { mutableStateOf(false) }
+    var durationMs by remember(videoUri) { mutableIntStateOf(0) }
+    var positionMs by remember(videoUri) { mutableIntStateOf(0) }
+
+    LaunchedEffect(videoUri, isPrepared, userAudioPlaying) {
+        while (isPrepared) {
+            val vv = videoViewRef
+            if (vv != null) {
+                try {
+                    val dur = vv.duration.coerceAtLeast(1)
+                    val pos = vv.currentPosition.coerceIn(0, dur)
+                    durationMs = dur
+                    positionMs = pos
+                } catch (_: Exception) {
+                }
+            }
+            delay(100L)
+        }
+    }
+
+    DisposableEffect(videoUri) {
+        onDispose {
+            try {
+                videoViewRef?.stopPlayback()
+            } catch (_: Exception) {
+            }
+            mediaPlayerRef = null
+        }
+    }
+
+    fun toggleVideoPlaybackWithSound() {
+        val vv = videoViewRef ?: return
+        val mp = mediaPlayerRef
+        if (!userAudioPlaying) {
+            userAudioPlaying = true
+            try {
+                mp?.isLooping = true
+                mp?.setVolume(1f, 1f)
+                if (!vv.isPlaying) {
+                    vv.start()
+                }
+            } catch (_: Exception) {
+            }
+        } else {
+            userAudioPlaying = false
+            try {
+                if (vv.isPlaying) {
+                    vv.pause()
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(GalleryDarkBg)
+    ) {
+        val thumbBmp = previewInfo?.thumbnailBitmap
+        if (thumbBmp != null && !thumbBmp.isRecycled) {
+            val imgBmp = remember(thumbBmp) { thumbBmp.asImageBitmap() }
+            Image(
+                bitmap = imgBmp,
+                contentDescription = "Miniatura de video",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        key(videoUri) {
+            AndroidView(
+                factory = { ctx ->
+                    FrameLayout(ctx).apply {
+                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        val vv = VideoView(ctx).apply {
+                            layoutParams = FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                android.view.Gravity.CENTER
+                            )
+                            setVideoURI(videoUri)
+                            setOnPreparedListener { mp ->
+                                mediaPlayerRef = mp
+                                isPrepared = true
+                                durationMs = mp.duration.coerceAtLeast(1)
+                                mp.isLooping = true
+                                // Auto-plays muted in loop until user taps center Play button
+                                mp.setVolume(0f, 0f)
+                                start()
+                            }
+                            setOnErrorListener { _, _, _ -> true }
+                        }
+                        videoViewRef = vv
+                        addView(vv)
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Top & bottom gradient overlays
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(150.dp)
+                .align(Alignment.TopCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Black.copy(alpha = 0.58f), Color.Transparent)
+                    )
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(220.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))
+                    )
+                )
+        )
+
+        // Top controls
+        PreviewTopBar(
+            isPublishing = isPublishing,
+            onCloseClick = onCloseToGallery,
+            onPublishClick = onPublishClick,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
+
+        // Center Play / Pause circle (64dp, 38% black fill, white border)
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(64.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.38f))
+                .border(1.5.dp, Color.White.copy(alpha = 0.90f), CircleShape)
+                .clickable { toggleVideoPlaybackWithSound() }
+                .testTag("status_video_preview_play_button"),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = if (userAudioPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = if (userAudioPlaying) "Pausar video" else "Reproducir con sonido",
+                tint = Color.White,
+                modifier = Modifier.size(34.dp)
+            )
+        }
+
+        // Bottom video progress bar + time labels + caption field
+        val totalSec = if (durationMs > 0) (durationMs / 1000).coerceAtLeast(1)
+        else (previewInfo?.durationSec ?: 0).coerceAtLeast(0)
+        val elapsedSec = if (durationMs > 0) (positionMs / 1000).coerceIn(0, totalSec) else 0
+        val progressFraction = if (durationMs > 0) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .imePadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+        ) {
+            LinearProgressIndicator(
+                progress = { progressFraction },
+                color = Color.White,
+                trackColor = Color.White.copy(alpha = 0.28f),
+                strokeCap = StrokeCap.Round,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .testTag("status_video_preview_progress")
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = TimeFormatters.formatDuration(elapsedSec),
+                    fontFamily = InterFontFamily,
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.90f)
+                )
+                Text(
+                    text = TimeFormatters.formatDuration(totalSec),
+                    fontFamily = InterFontFamily,
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.90f)
+                )
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            PreviewCaptionBar(
+                caption = caption,
+                onCaptionChange = onCaptionChange,
+                inputTestTag = "status_video_caption_input",
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun PreviewTopBar(
+    isPublishing: Boolean,
+    onCloseClick: () -> Unit,
+    onPublishClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            IconButton(
+                onClick = onCloseClick,
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("status_close_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Volver a la galería",
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = if (!isPublishing) Color.White else Color.White.copy(alpha = 0.35f),
+                modifier = Modifier
+                    .defaultMinSize(minHeight = 44.dp)
+                    .clip(RoundedCornerShape(50))
+                    .clickable(enabled = !isPublishing) { onPublishClick() }
+                    .testTag("publish_status_button")
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = "Publicar",
+                        fontFamily = InterFontFamily,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (!isPublishing) GalleryDarkBg else Color.White.copy(alpha = 0.7f),
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = Color.Black.copy(alpha = 0.38f)
+            ) {
+                Text(
+                    text = "Se borra en 24 horas",
+                    fontFamily = InterFontFamily,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreviewCaptionBar(
+    caption: String,
+    onCaptionChange: (String) -> Unit,
+    inputTestTag: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(22.dp),
+        color = Color.Black.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 11.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            if (caption.isEmpty()) {
+                Text(
+                    text = "Añade un texto…",
+                    fontFamily = InterFontFamily,
+                    fontSize = 15.sp,
+                    color = Color.White.copy(alpha = 0.68f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            BasicTextField(
+                value = caption,
+                onValueChange = { if (it.length <= MAX_MEDIA_CAPTION_CHARS) onCaptionChange(it) },
+                maxLines = 3,
+                textStyle = TextStyle(
+                    fontFamily = InterFontFamily,
+                    fontSize = 15.sp,
+                    color = Color.White
+                ),
+                cursorBrush = SolidColor(Color.White),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(inputTestTag)
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusComposerModePill(
+    currentMode: StatusComposerMode,
+    containerColor: Color,
+    activeTextColor: Color,
+    onSelectTab: (StatusComposerMode) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = containerColor,
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 360.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val tabs = listOf(
+                    Triple(StatusComposerMode.TEXT, "Texto", "status_tab_text"),
+                    Triple(StatusComposerMode.PHOTO, "Foto", "status_tab_photo"),
+                    Triple(StatusComposerMode.VIDEO, "Video", "status_tab_video")
+                )
+                tabs.forEach { (mode, label, tag) ->
+                    val active = currentMode == mode
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (active) Color.White else Color.Transparent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .defaultMinSize(minHeight = 44.dp)
+                            .clip(RoundedCornerShape(50))
+                            .clickable { onSelectTab(mode) }
+                            .testTag(tag)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = label,
+                                fontFamily = InterFontFamily,
+                                fontSize = 14.sp,
+                                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                                color = if (active) activeTextColor else Color.White.copy(alpha = 0.86f),
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusDiscardDialog(
+    subtitle: String,
+    onKeepEditing: () -> Unit,
+    onDiscard: () -> Unit
+) {
+    val isDark = LocalDarkTheme.current
+    val cardBg = if (isDark) Color(0xFF1E2430) else MaterialTheme.colorScheme.surface
+    val titleColor = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+    val bodyColor = if (isDark) Color(0xFFB6C0D1) else MaterialTheme.colorScheme.onSurfaceVariant
+    val discardColor = if (isDark) SoftRedDark else SoftRedLight
+    val buttonBlue = if (isDark) DialogBluePrimary else MaterialTheme.colorScheme.primary
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.58f))
+            .pointerInput(Unit) { detectTapGestures { } }
+            .testTag("status_discard_dialog"),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = cardBg,
+            tonalElevation = 0.dp,
+            shadowElevation = 12.dp,
+            modifier = Modifier
+                .widthIn(min = 260.dp, max = 280.dp)
+                .padding(vertical = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 22.dp, vertical = 22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "¿Descartar este estado?",
+                    fontFamily = InterFontFamily,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = titleColor,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = subtitle,
+                    fontFamily = InterFontFamily,
+                    fontSize = 14.sp,
+                    color = bodyColor,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(18.dp))
+                Button(
+                    onClick = onKeepEditing,
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = buttonBlue,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 46.dp)
+                        .testTag("status_discard_keep_editing")
+                ) {
+                    Text(
+                        text = "Seguir editando",
+                        fontFamily = InterFontFamily,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                TextButton(
+                    onClick = onDiscard,
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 44.dp)
+                        .testTag("status_discard_confirm")
+                ) {
+                    Text(
+                        text = "Descartar",
+                        fontFamily = InterFontFamily,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = discardColor
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusUploadingDialog(
+    mode: StatusComposerMode,
+    progress: Float,
+    onCancel: () -> Unit
+) {
+    val isDark = LocalDarkTheme.current
+    val cardBg = if (isDark) Color(0xFF1E2430) else MaterialTheme.colorScheme.surface
+    val titleColor = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+    val bodyColor = if (isDark) Color(0xFFB6C0D1) else MaterialTheme.colorScheme.onSurfaceVariant
+    val cancelColor = if (isDark) SoftRedDark else SoftRedLight
+    val trackColor = if (isDark) Color(0xFF2D3648) else Color(0xFFE3E6EC)
+    val barColor = if (isDark) Color(0xFF5A9BFF) else DialogBluePrimary
+
+    val title = when (mode) {
+        StatusComposerMode.VIDEO -> "Subiendo video…"
+        StatusComposerMode.PHOTO -> "Subiendo foto…"
+        StatusComposerMode.TEXT -> "Publicando…"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.58f))
+            .pointerInput(Unit) { detectTapGestures { } }
+            .testTag("status_uploading_dialog"),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = cardBg,
+            tonalElevation = 0.dp,
+            shadowElevation = 12.dp,
+            modifier = Modifier
+                .widthIn(min = 260.dp, max = 280.dp)
+                .padding(vertical = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 22.dp, vertical = 22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = title,
+                    fontFamily = InterFontFamily,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = titleColor,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (mode == StatusComposerMode.TEXT) {
+                    CircularProgressIndicator(
+                        color = barColor,
+                        strokeWidth = 3.dp,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    TextButton(
+                        onClick = onCancel,
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 44.dp)
+                            .testTag("status_upload_cancel_button")
+                    ) {
+                        Text(
+                            text = "Cancelar",
+                            fontFamily = InterFontFamily,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = cancelColor
+                        )
+                    }
+                } else {
+                    val pct = (progress * 100f).toInt().coerceIn(0, 100)
+                    LinearProgressIndicator(
+                        progress = { progress.coerceIn(0.02f, 1f) },
+                        color = barColor,
+                        trackColor = trackColor,
+                        strokeCap = StrokeCap.Round,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "$pct %",
+                            fontFamily = InterFontFamily,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = bodyColor
+                        )
+                        TextButton(
+                            onClick = onCancel,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 44.dp)
+                                .testTag("status_upload_cancel_button")
+                        ) {
+                            Text(
+                                text = "Cancelar",
+                                fontFamily = InterFontFamily,
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = cancelColor
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusPublishErrorDialog(
+    message: String,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val isDark = LocalDarkTheme.current
+    val cardBg = if (isDark) Color(0xFF1E2430) else MaterialTheme.colorScheme.surface
+    val titleColor = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+    val bodyColor = if (isDark) Color(0xFFB6C0D1) else MaterialTheme.colorScheme.onSurfaceVariant
+    val buttonBlue = if (isDark) DialogBluePrimary else MaterialTheme.colorScheme.primary
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.58f))
+            .pointerInput(Unit) { detectTapGestures { } }
+            .testTag("status_publish_error_dialog"),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = cardBg,
+            tonalElevation = 0.dp,
+            shadowElevation = 12.dp,
+            modifier = Modifier
+                .widthIn(min = 260.dp, max = 280.dp)
+                .padding(vertical = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 22.dp, vertical = 22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(CircleShape)
+                        .background(AmberWarnColor.copy(alpha = 0.22f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(AmberWarnColor),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PriorityHigh,
+                            contentDescription = "Advertencia",
+                            tint = Color(0xFF1A1D24),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "No se pudo publicar",
+                    fontFamily = InterFontFamily,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = titleColor,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = message,
+                    fontFamily = InterFontFamily,
+                    fontSize = 14.sp,
+                    color = bodyColor,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(18.dp))
+                Button(
+                    onClick = onRetry,
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = buttonBlue,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 46.dp)
+                        .testTag("status_publish_retry_button")
+                ) {
+                    Text(
+                        text = "Reintentar",
+                        fontFamily = InterFontFamily,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 44.dp)
+                        .testTag("status_publish_error_close_button")
+                ) {
+                    Text(
+                        text = "Cerrar",
+                        fontFamily = InterFontFamily,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = bodyColor
+                    )
+                }
+            }
+        }
+    }
+}
+
+private suspend fun loadAppAccessiblePhotos(context: Context): List<LocalGalleryMediaItem> =
+    withContext(Dispatchers.IO) {
+        val result = mutableListOf<LocalGalleryMediaItem>()
+        val seen = HashSet<String>()
+
+        // 1. App-accessible MediaStore photos (zero permission)
+        runCatching {
+            val projection = arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DATE_ADDED,
+                MediaStore.Images.Media.SIZE
+            )
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                "${MediaStore.Images.Media.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val dateCol = cursor.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
+                val sizeCol = cursor.getColumnIndex(MediaStore.Images.Media.SIZE)
+                while (cursor.moveToNext() && result.size < 60) {
+                    val id = cursor.getLong(idCol)
+                    val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                    val dateAdded = if (dateCol >= 0) cursor.getLong(dateCol) else 0L
+                    val size = if (sizeCol >= 0) cursor.getLong(sizeCol) else 0L
+                    if (seen.add(uri.toString())) {
+                        result.add(LocalGalleryMediaItem(uri = uri, dateAddedSec = dateAdded, sizeBytes = size))
+                    }
+                }
+            }
+        }
+
+        // 2. App's camera photo cache (recently captured photos)
+        runCatching {
+            val dir = File(context.cacheDir, "camera_photos")
+            if (dir.exists()) {
+                dir.listFiles()
+                    ?.filter { it.isFile && it.length() > 0L }
+                    ?.sortedByDescending { it.lastModified() }
+                    ?.take(20)
+                    ?.forEach { file ->
+                        val uri = Uri.fromFile(file)
+                        if (seen.add(uri.toString())) {
+                            result.add(
+                                LocalGalleryMediaItem(
+                                    uri = uri,
+                                    dateAddedSec = file.lastModified() / 1000L,
+                                    sizeBytes = file.length()
+                                )
+                            )
+                        }
+                    }
+            }
+        }
+
+        result.sortedByDescending { it.dateAddedSec }
+    }
+
+private suspend fun loadAppAccessibleVideos(context: Context): List<LocalGalleryMediaItem> =
+    withContext(Dispatchers.IO) {
+        val result = mutableListOf<LocalGalleryMediaItem>()
+        val seen = HashSet<String>()
+
+        runCatching {
+            val projection = arrayOf(
+                MediaStore.Video.Media._ID,
+                MediaStore.Video.Media.DATE_ADDED,
+                MediaStore.Video.Media.DURATION,
+                MediaStore.Video.Media.SIZE
+            )
+            context.contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                null,
+                null,
+                "${MediaStore.Video.Media.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                val dateCol = cursor.getColumnIndex(MediaStore.Video.Media.DATE_ADDED)
+                val durCol = cursor.getColumnIndex(MediaStore.Video.Media.DURATION)
+                val sizeCol = cursor.getColumnIndex(MediaStore.Video.Media.SIZE)
+                while (cursor.moveToNext() && result.size < 45) {
+                    val id = cursor.getLong(idCol)
+                    val uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                    val dateAdded = if (dateCol >= 0) cursor.getLong(dateCol) else 0L
+                    val durMs = if (durCol >= 0) cursor.getLong(durCol) else 0L
+                    val size = if (sizeCol >= 0) cursor.getLong(sizeCol) else 0L
+                    val durSec = (durMs / 1000L).toInt().coerceAtLeast(1)
+                    if (seen.add(uri.toString())) {
+                        result.add(
+                            LocalGalleryMediaItem(
+                                uri = uri,
+                                dateAddedSec = dateAdded,
+                                durationSec = durSec,
+                                sizeBytes = size,
+                                isOverLimit = size > VideoMediaHelper.MAX_VIDEO_BYTES
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // App's recorded camera videos cache (excluding assembled playback cache entries)
+        runCatching {
+            val dir = File(context.cacheDir, "videos_cache")
+            if (dir.exists()) {
+                dir.listFiles()
+                    ?.filter { it.isFile && it.length() > 0L && it.name.startsWith("vid_cam_") }
+                    ?.sortedByDescending { it.lastModified() }
+                    ?.take(15)
+                    ?.forEach { file ->
+                        val uri = Uri.fromFile(file)
+                        if (seen.add(uri.toString())) {
+                            val durSec = extractVideoDurationSec(context, uri)
+                            result.add(
+                                LocalGalleryMediaItem(
+                                    uri = uri,
+                                    dateAddedSec = file.lastModified() / 1000L,
+                                    durationSec = durSec,
+                                    sizeBytes = file.length(),
+                                    isOverLimit = file.length() > VideoMediaHelper.MAX_VIDEO_BYTES
+                                )
+                            )
+                        }
+                    }
+            }
+        }
+
+        result.sortedByDescending { it.dateAddedSec }
+    }
+
+private suspend fun extractVideoDurationSec(context: Context, uri: Uri): Int =
+    withContext(Dispatchers.IO) {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, uri)
+            val durMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 1000L
+            (durMs / 1000L).toInt().coerceAtLeast(1)
+        } catch (_: Exception) {
+            1
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+private suspend fun loadVideoThumbnailBitmap(context: Context, uri: Uri): Bitmap? =
+    withContext(Dispatchers.IO) {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, uri)
+            val frame = retriever.getFrameAtTime(200_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: retriever.getFrameAtTime()
+            if (frame != null) {
+                val maxSide = maxOf(frame.width, frame.height).coerceAtLeast(1)
+                val scale = (320f / maxSide).coerceAtMost(1f)
+                if (scale < 1f) {
+                    Bitmap.createScaledBitmap(
+                        frame,
+                        (frame.width * scale).toInt().coerceAtLeast(1),
+                        (frame.height * scale).toInt().coerceAtLeast(1),
+                        true
+                    ).also { if (it != frame) frame.recycle() }
+                } else {
+                    frame
+                }
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }

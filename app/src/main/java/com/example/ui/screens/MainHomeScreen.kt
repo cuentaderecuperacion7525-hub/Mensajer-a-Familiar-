@@ -136,18 +136,21 @@ import com.example.data.model.FamilyNoteEntity
 import com.example.data.model.FamilyStatusEntity
 import com.example.data.model.ShoppingItemEntity
 import androidx.compose.material.icons.filled.NotificationsActive
-import com.example.ui.components.CreateStatusDialog
 import com.example.ui.components.FamilyStatusStrip
 import com.example.ui.components.HomeOverflowMenuPopup
 import com.example.ui.components.MemberAvatar
 import com.example.ui.components.MemberStatusGroup
 import com.example.ui.components.MessageStatusIcon
+import com.example.ui.components.StatusComposerScreen
 import com.example.ui.components.StatusViewerDialog
 import com.example.ui.components.UserProfileOptionsDialog
 import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.OnlineGreen
 import com.example.ui.viewmodel.ChatThreadUi
 import com.example.ui.viewmodel.MainTab
+import com.example.ui.viewmodel.StatusComposerMode
+import com.example.ui.viewmodel.StatusPublishRequest
+import com.example.ui.viewmodel.StatusPublishUiState
 import com.example.util.AppReleaseInfo
 import com.example.util.AppUpdateUiState
 import com.example.util.FamiChatNotificationHelper
@@ -180,6 +183,10 @@ fun MainHomeScreen(
     onPublishTextStatus: (text: String, backgroundHex: String) -> Unit,
     onPublishPhotoStatus: (uri: Uri, caption: String) -> Unit,
     onPublishVideoStatus: (uri: Uri, caption: String) -> Unit = { _, _ -> },
+    statusPublishState: StatusPublishUiState = StatusPublishUiState.Idle,
+    onPublishStatus: ((StatusPublishRequest, () -> Unit) -> Unit)? = null,
+    onCancelStatusPublish: () -> Unit = {},
+    onDismissStatusPublishError: () -> Unit = {},
     onPrepareStatusVideo: (status: FamilyStatusEntity, onReady: (java.io.File) -> Unit, onError: (String) -> Unit) -> Unit = { _, _, _ -> },
     onSaveStatusMediaToGallery: (status: FamilyStatusEntity) -> Unit = {},
     mediaTransferProgress: Map<String, Float> = emptyMap(),
@@ -264,7 +271,7 @@ fun MainHomeScreen(
         viewingStatusMemberId == null &&
         !isImeVisible
 
-    BackHandler(enabled = !canExitDirectly) {
+    BackHandler(enabled = !canExitDirectly && !showCreateStatusDialog && viewingStatusMemberId == null) {
         when {
             isImeVisible -> {
                 keyboardController?.hide()
@@ -704,6 +711,32 @@ fun MainHomeScreen(
                 onDismiss = { showProfileOptionsDialog = false }
             )
         }
+
+        if (showCreateStatusDialog) {
+            StatusComposerScreen(
+                publishState = statusPublishState,
+                onPublish = { req ->
+                    if (onPublishStatus != null) {
+                        onPublishStatus(req) {
+                            showCreateStatusDialog = false
+                        }
+                    } else {
+                        when (req.mode) {
+                            StatusComposerMode.TEXT -> onPublishTextStatus(req.text, req.backgroundHex)
+                            StatusComposerMode.PHOTO -> req.photoUri?.let { onPublishPhotoStatus(it, req.photoCaption) }
+                            StatusComposerMode.VIDEO -> req.videoUri?.let { onPublishVideoStatus(it, req.videoCaption) }
+                        }
+                        showCreateStatusDialog = false
+                    }
+                },
+                onCancelPublish = onCancelStatusPublish,
+                onDismissPublishError = onDismissStatusPublishError,
+                onClose = {
+                    onDismissStatusPublishError()
+                    showCreateStatusDialog = false
+                }
+            )
+        }
     }
 
     if (showNewChatDialog) {
@@ -760,24 +793,6 @@ fun MainHomeScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showNewChatDialog = false }) { Text("Cerrar") }
-            }
-        )
-    }
-
-    if (showCreateStatusDialog) {
-        CreateStatusDialog(
-            onDismiss = { showCreateStatusDialog = false },
-            onPublishText = { text, bgHex ->
-                onPublishTextStatus(text, bgHex)
-                showCreateStatusDialog = false
-            },
-            onPublishPhoto = { uri, caption ->
-                onPublishPhotoStatus(uri, caption)
-                showCreateStatusDialog = false
-            },
-            onPublishVideo = { uri, caption ->
-                onPublishVideoStatus(uri, caption)
-                showCreateStatusDialog = false
             }
         )
     }

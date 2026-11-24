@@ -3295,6 +3295,130 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithText("Tila del Carmen").assertIsDisplayed()
     composeTestRule.onNodeWithTag("contact_info_status_pill").assertIsDisplayed()
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `status composer opens on text tab preserves text across tabs asks discard only with content and respects photo video gallery`() {
+    var closedCount = 0
+    val publishCalls = mutableListOf<com.example.ui.viewmodel.StatusPublishRequest>()
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = false) {
+        com.example.ui.components.StatusComposerScreen(
+          publishState = com.example.ui.viewmodel.StatusPublishUiState.Idle,
+          onPublish = { publishCalls.add(it) },
+          onCancelPublish = {},
+          onDismissPublishError = {},
+          onClose = { closedCount++ }
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Starts on Texto tab with empty prompt, 0/280, 24h badge, disabled Publicar
+    composeTestRule.onNodeWithTag("status_composer_screen").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Se borra en 24 horas").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Escribe tu estado…").assertIsDisplayed()
+    composeTestRule.onNodeWithText("0/280").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("publish_status_button").assertIsNotEnabled()
+
+    // Empty close button closes immediately without discard confirmation
+    composeTestRule.onNodeWithTag("status_close_button").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(1, closedCount)
+    composeTestRule.onNodeWithTag("status_discard_dialog").assertDoesNotExist()
+
+    // Select a different color, enter text, verify counter and enabled publish button
+    composeTestRule.onNodeWithTag("status_color_option_1").performClick()
+    composeTestRule.onNodeWithTag("status_text_input").performTextInput("Hoy cenamos en casa")
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("19/280").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("publish_status_button").assertIsEnabled()
+
+    // Switch to Foto and Video galleries and verify titles/tiles, then return to Texto with preserved text
+    composeTestRule.onNodeWithTag("status_tab_photo").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Recientes").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_take_photo_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_pick_gallery_button").assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("status_tab_video").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Videos").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_record_video_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_pick_video_button").assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("status_tab_text").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Hoy cenamos en casa").assertIsDisplayed()
+
+    // Closing with text shows discard confirmation; Keep Editing keeps state, Discard closes
+    composeTestRule.onNodeWithTag("status_close_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_discard_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithText("¿Descartar este estado?").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Se perderá lo que escribiste.").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_discard_keep_editing").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_discard_dialog").assertDoesNotExist()
+
+    // Publish invokes callback with entered text and chosen color (#1A5FD4)
+    composeTestRule.onNodeWithTag("publish_status_button").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(1, publishCalls.size)
+    assertEquals("Hoy cenamos en casa", publishCalls.first().text)
+    assertEquals("#1A5FD4", publishCalls.first().backgroundHex)
+
+    // Confirm Discard closes composer
+    composeTestRule.onNodeWithTag("status_close_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_discard_confirm").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(2, closedCount)
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `status composer uploading cancel and offline retry dialogs follow theme without losing text`() {
+    val publishState = androidx.compose.runtime.mutableStateOf<com.example.ui.viewmodel.StatusPublishUiState>(
+      com.example.ui.viewmodel.StatusPublishUiState.Publishing(
+        mode = com.example.ui.viewmodel.StatusComposerMode.VIDEO,
+        progress = 0.62f
+      )
+    )
+    var cancelCalls = 0
+    var dismissErrorCalls = 0
+    var retryCount = 0
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = true) {
+        com.example.ui.components.StatusComposerScreen(
+          publishState = publishState.value,
+          onPublish = { retryCount++ },
+          onCancelPublish = { cancelCalls++ },
+          onDismissPublishError = { dismissErrorCalls++ },
+          onClose = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Uploading dialog displays title, percentage, and Cancel
+    composeTestRule.onNodeWithTag("status_uploading_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Subiendo video…").assertIsDisplayed()
+    composeTestRule.onNodeWithText("62 %").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_upload_cancel_button").performClick()
+    assertEquals(1, cancelCalls)
+
+    // Switch to error state -> shows offline message, Retry & Close
+    publishState.value = com.example.ui.viewmodel.StatusPublishUiState.Error("Sin conexión. Tu estado no se perdió.")
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_publish_error_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithText("No se pudo publicar").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Sin conexión. Tu estado no se perdió.").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_publish_error_close_button").performClick()
+    assertEquals(1, dismissErrorCalls)
+  }
 }
 
 

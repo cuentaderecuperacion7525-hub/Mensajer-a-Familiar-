@@ -1,5 +1,11 @@
 # Novedades de FamiChat
 
+## 2.8.56
+- Rediseño completo de «Publicar estado» a pantalla completa (Texto, Foto y Video):
+  - En Texto: escritura centrada directa sobre el color elegido, 6 colores con selector en anillo, contador en tiempo real, ajuste automático del tamaño de letra y botón «Publicar» integrado arriba.
+  - En Foto y Video: galerías en cuadrícula oscura de 3 columnas con acceso rápido a cámara/grabación y selector del sistema, vistas previas a pantalla completa con campo tipo píldora «Añade un texto…» y reproductor de video en bucle silenciado con botón central para activar sonido o pausar.
+  - Cuadros centrados adaptables al tema claro, oscuro o automático para descartar borrador, mostrar progreso real de subida con opción «Cancelar» y reintentar sin perder contenido si no hay conexión.
+
 ## 2.8.55
 - Eliminación del destello blanco al navegar o dar retroceso en Modo oscuro: se sincronizó en vivo el fondo de la ventana Android con el tema aplicado (Modo claro, Modo oscuro o Sistema) y se reemplazó el fundido transparente de navegación por transiciones limpias sobre fondo sólido adaptable.
 - Adaptación completa de «Info del contacto / grupo» (y sus hojas de fondo de chat, fotos compartidas y tonos) tanto al Modo oscuro como al Modo claro.

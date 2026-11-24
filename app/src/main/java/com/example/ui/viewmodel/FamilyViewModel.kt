@@ -1,6 +1,8 @@
 package com.example.ui.viewmodel
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -53,6 +55,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -74,6 +77,24 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
 enum class MainTab { CHATS, GROUPS, CALLS, UPDATES }
+
+enum class StatusComposerMode { TEXT, PHOTO, VIDEO }
+
+data class StatusPublishRequest(
+    val mode: StatusComposerMode,
+    val text: String = "",
+    val backgroundHex: String = "#0E7C66",
+    val photoUri: Uri? = null,
+    val photoCaption: String = "",
+    val videoUri: Uri? = null,
+    val videoCaption: String = ""
+)
+
+sealed interface StatusPublishUiState {
+    data object Idle : StatusPublishUiState
+    data class Publishing(val mode: StatusComposerMode, val progress: Float = 0f) : StatusPublishUiState
+    data class Error(val message: String) : StatusPublishUiState
+}
 
 data class ChatThreadUi(
     val chat: ChatThreadEntity,
@@ -3924,123 +3945,307 @@ class FamilyViewModel(
 
     // --- 24h Family Statuses / Stories & Forwarding ---
 
-    fun publishTextStatus(text: String, backgroundHex: String) {
-        val famId = _activeFamilyId.value ?: return
-        val currentId = _activeMemberId.value ?: return
-        val clean = text.trim()
-        if (clean.isEmpty()) return
-        val now = System.currentTimeMillis()
-        val status = FamilyStatusEntity(
-            id = "st_${UUID.randomUUID().toString().replace("-", "").take(10)}",
-            memberId = currentId,
-            text = clean.take(400),
-            mediaUri = null,
-            mediaType = "TEXT",
-            backgroundHex = backgroundHex,
-            createdAt = now,
-            expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
-            viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
-            authorUid = currentUserId
-        )
-        viewModelScope.launch {
-            val res = cloudRepo.createStatus(famId, status, currentMemberUids(), currentUserId)
-            showMessage(if (res.isSuccess) "Estado publicado por 24 horas" else "No se pudo publicar el estado")
+    private val _statusPublishState = MutableStateFlow<StatusPublishUiState>(StatusPublishUiState.Idle)
+    val statusPublishState: StateFlow<StatusPublishUiState> = _statusPublishState.asStateFlow()
+    private var activeStatusPublishJob: Job? = null
+    private var activeStatusPublishId: String? = null
+
+    private fun isNetworkConnected(): Boolean {
+        return try {
+            val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return true
+            val net = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(net) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } catch (_: Exception) {
+            true
         }
+    }
+
+    private fun friendlyPublishError(err: Throwable?, isTimeout: Boolean): String {
+        if (isTimeout || !isNetworkConnected()) {
+            return "Sin conexión. Tu estado no se perdió."
+        }
+        val fsCode = err?.unwrapFirestoreException()?.code
+        if (fsCode == com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAVAILABLE ||
+            fsCode == com.google.firebase.firestore.FirebaseFirestoreException.Code.DEADLINE_EXCEEDED
+        ) {
+            return "Sin conexión. Tu estado no se perdió."
+        }
+        val raw = err?.localizedMessage?.trim().orEmpty()
+        return if (raw.contains("network", ignoreCase = true) ||
+            raw.contains("offline", ignoreCase = true) ||
+            raw.contains("unable to resolve", ignoreCase = true)
+        ) {
+            "Sin conexión. Tu estado no se perdió."
+        } else {
+            raw.takeIf { it.isNotBlank() && it.length <= 120 }
+                ?: "No se pudo subir. Tu estado no se perdió."
+        }
+    }
+
+    fun dismissStatusPublishError() {
+        if (_statusPublishState.value is StatusPublishUiState.Error) {
+            _statusPublishState.value = StatusPublishUiState.Idle
+        }
+    }
+
+    fun cancelStatusPublish() {
+        val idToClear = activeStatusPublishId
+        activeStatusPublishJob?.cancel()
+        activeStatusPublishJob = null
+        activeStatusPublishId = null
+        if (idToClear != null) {
+            _mediaTransferProgress.value = _mediaTransferProgress.value - idToClear
+        }
+        _statusPublishState.value = StatusPublishUiState.Idle
+    }
+
+    fun publishStatus(request: StatusPublishRequest, onSuccess: () -> Unit) {
+        if (activeStatusPublishJob?.isActive == true) return
+        val famId = _activeFamilyId.value
+        val currentId = _activeMemberId.value
+        if (famId.isNullOrBlank() || currentId.isNullOrBlank()) {
+            _statusPublishState.value = StatusPublishUiState.Error("No hay un perfil activo.")
+            return
+        }
+        val statusId = "st_${UUID.randomUUID().toString().replace("-", "").take(10)}"
+        activeStatusPublishId = statusId
+        activeStatusPublishJob = viewModelScope.launch {
+            try {
+                when (request.mode) {
+                    StatusComposerMode.TEXT -> {
+                        val clean = request.text.trim()
+                        if (clean.isEmpty()) {
+                            _statusPublishState.value = StatusPublishUiState.Idle
+                            return@launch
+                        }
+                        _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.TEXT, 0f)
+                        if (!isNetworkConnected()) {
+                            _statusPublishState.value = StatusPublishUiState.Error("Sin conexión. Tu estado no se perdió.")
+                            return@launch
+                        }
+                        val now = System.currentTimeMillis()
+                        val status = FamilyStatusEntity(
+                            id = statusId,
+                            memberId = currentId,
+                            text = clean.take(400),
+                            mediaUri = null,
+                            mediaType = "TEXT",
+                            backgroundHex = request.backgroundHex,
+                            createdAt = now,
+                            expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
+                            viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
+                            authorUid = currentUserId
+                        )
+                        val res = withTimeoutOrNull(18_000L) {
+                            cloudRepo.createStatus(famId, status, currentMemberUids(), currentUserId)
+                        }
+                        coroutineContext.ensureActive()
+                        if (res != null && res.isSuccess) {
+                            _statusPublishState.value = StatusPublishUiState.Idle
+                            showMessage("Estado publicado")
+                            onSuccess()
+                        } else {
+                            _statusPublishState.value = StatusPublishUiState.Error(
+                                friendlyPublishError(res?.exceptionOrNull(), isTimeout = res == null)
+                            )
+                        }
+                    }
+
+                    StatusComposerMode.PHOTO -> {
+                        val pickedUri = request.photoUri ?: run {
+                            _statusPublishState.value = StatusPublishUiState.Idle
+                            return@launch
+                        }
+                        _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.PHOTO, 0.14f)
+                        val dataUri = ImageCompressionHelper.compressToDataUri(appContext, pickedUri)
+                        coroutineContext.ensureActive()
+                        if (dataUri == null) {
+                            _statusPublishState.value = StatusPublishUiState.Error("No se pudo procesar la foto elegida.")
+                            return@launch
+                        }
+                        _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.PHOTO, 0.48f)
+                        if (!isNetworkConnected()) {
+                            _statusPublishState.value = StatusPublishUiState.Error("Sin conexión. Tu estado no se perdió.")
+                            return@launch
+                        }
+                        val now = System.currentTimeMillis()
+                        val status = FamilyStatusEntity(
+                            id = statusId,
+                            memberId = currentId,
+                            text = request.photoCaption.trim().take(200),
+                            mediaUri = dataUri,
+                            mediaType = "IMAGE",
+                            backgroundHex = "#0B141A",
+                            createdAt = now,
+                            expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
+                            viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
+                            authorUid = currentUserId
+                        )
+                        _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.PHOTO, 0.72f)
+                        val res = withTimeoutOrNull(22_000L) {
+                            cloudRepo.createStatus(famId, status, currentMemberUids(), currentUserId)
+                        }
+                        coroutineContext.ensureActive()
+                        if (res != null && res.isSuccess) {
+                            _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.PHOTO, 1f)
+                            _statusPublishState.value = StatusPublishUiState.Idle
+                            showMessage("Estado publicado")
+                            onSuccess()
+                        } else {
+                            _statusPublishState.value = StatusPublishUiState.Error(
+                                friendlyPublishError(res?.exceptionOrNull(), isTimeout = res == null)
+                            )
+                        }
+                    }
+
+                    StatusComposerMode.VIDEO -> {
+                        val pickedUri = request.videoUri ?: run {
+                            _statusPublishState.value = StatusPublishUiState.Idle
+                            return@launch
+                        }
+                        _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.VIDEO, 0.06f)
+                        _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to 0.06f)
+                        val encodedRes = VideoMediaHelper.readAndEncodeVideo(appContext, pickedUri)
+                        coroutineContext.ensureActive()
+                        val payload = encodedRes.getOrElse { err ->
+                            _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
+                            _statusPublishState.value = StatusPublishUiState.Error(
+                                err.localizedMessage?.takeIf { it.isNotBlank() }
+                                    ?: "No se pudo procesar el video del estado."
+                            )
+                            return@launch
+                        }
+
+                        VideoMediaHelper.writeAssembledVideoToCache(
+                            context = appContext,
+                            messageId = statusId,
+                            fileName = "estado_${statusId}.mp4",
+                            fullDataUri = payload.dataUri
+                        )
+
+                        _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.VIDEO, 0.14f)
+                        _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to 0.14f)
+                        if (!isNetworkConnected()) {
+                            _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
+                            _statusPublishState.value = StatusPublishUiState.Error("Sin conexión. Tu estado no se perdió.")
+                            return@launch
+                        }
+
+                        val uids = currentMemberUids()
+                        val chunks = payload.chunks
+                        if (chunks.isNotEmpty()) {
+                            for ((idx, chunkData) in chunks.withIndex()) {
+                                coroutineContext.ensureActive()
+                                val pct = 0.15f + (idx + 1).toFloat() / chunks.size.toFloat() * 0.75f
+                                _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to pct)
+                                _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.VIDEO, pct)
+                                val chunkEntity = MediaChunkEntity(
+                                    id = "${statusId}_c$idx",
+                                    messageId = statusId,
+                                    chunkIndex = idx,
+                                    totalChunks = chunks.size,
+                                    data = chunkData,
+                                    authorUid = currentUserId
+                                )
+                                val chunkRes = withTimeoutOrNull(25_000L) {
+                                    cloudRepo.uploadMediaChunk(famId, chunkEntity, uids, currentUserId)
+                                }
+                                coroutineContext.ensureActive()
+                                if (chunkRes == null || chunkRes.isFailure) {
+                                    _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
+                                    _statusPublishState.value = StatusPublishUiState.Error(
+                                        friendlyPublishError(chunkRes?.exceptionOrNull(), isTimeout = chunkRes == null)
+                                    )
+                                    return@launch
+                                }
+                            }
+                        } else {
+                            _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to 0.85f)
+                            _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.VIDEO, 0.85f)
+                        }
+
+                        coroutineContext.ensureActive()
+                        _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.VIDEO, 0.92f)
+                        val now = System.currentTimeMillis()
+                        val status = FamilyStatusEntity(
+                            id = statusId,
+                            memberId = currentId,
+                            text = request.videoCaption.trim().take(200),
+                            mediaUri = if (chunks.isEmpty()) payload.dataUri else "chunked:${payload.mimeType}",
+                            mediaType = "VIDEO",
+                            videoThumbnailData = payload.thumbnailDataUri,
+                            videoDurationSec = payload.durationSec,
+                            chunkCount = chunks.size,
+                            backgroundHex = "#0B141A",
+                            createdAt = now,
+                            expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
+                            viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
+                            authorUid = currentUserId
+                        )
+                        val res = withTimeoutOrNull(22_000L) {
+                            cloudRepo.createStatus(famId, status, uids, currentUserId)
+                        }
+                        coroutineContext.ensureActive()
+                        _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
+                        if (res != null && res.isSuccess) {
+                            _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.VIDEO, 1f)
+                            _statusPublishState.value = StatusPublishUiState.Idle
+                            showMessage("Estado publicado")
+                            onSuccess()
+                        } else {
+                            _statusPublishState.value = StatusPublishUiState.Error(
+                                friendlyPublishError(res?.exceptionOrNull(), isTimeout = res == null)
+                            )
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
+                _statusPublishState.value = StatusPublishUiState.Idle
+                throw e
+            } finally {
+                _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
+                if (activeStatusPublishId == statusId) {
+                    activeStatusPublishJob = null
+                    activeStatusPublishId = null
+                }
+            }
+        }
+    }
+
+    fun publishTextStatus(text: String, backgroundHex: String) {
+        publishStatus(
+            StatusPublishRequest(
+                mode = StatusComposerMode.TEXT,
+                text = text,
+                backgroundHex = backgroundHex
+            ),
+            onSuccess = {}
+        )
     }
 
     fun publishPhotoStatus(pickedUri: Uri, caption: String) {
-        val famId = _activeFamilyId.value ?: return
-        val currentId = _activeMemberId.value ?: return
-        viewModelScope.launch {
-            val dataUri = ImageCompressionHelper.compressToDataUri(appContext, pickedUri)
-            if (dataUri == null) {
-                showMessage("No se pudo procesar la foto del estado")
-                return@launch
-            }
-            val now = System.currentTimeMillis()
-            val status = FamilyStatusEntity(
-                id = "st_${UUID.randomUUID().toString().replace("-", "").take(10)}",
-                memberId = currentId,
-                text = caption.trim().take(200),
-                mediaUri = dataUri,
-                mediaType = "IMAGE",
-                backgroundHex = "#0B141A",
-                createdAt = now,
-                expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
-                viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
-                authorUid = currentUserId
-            )
-            val res = cloudRepo.createStatus(famId, status, currentMemberUids(), currentUserId)
-            showMessage(if (res.isSuccess) "Foto de estado publicada por 24h" else "No se pudo subir el estado")
-        }
+        publishStatus(
+            StatusPublishRequest(
+                mode = StatusComposerMode.PHOTO,
+                photoUri = pickedUri,
+                photoCaption = caption
+            ),
+            onSuccess = {}
+        )
     }
 
     fun publishVideoStatus(pickedUri: Uri, caption: String) {
-        val famId = _activeFamilyId.value ?: return
-        val currentId = _activeMemberId.value ?: return
-        val statusId = "st_${UUID.randomUUID().toString().replace("-", "").take(10)}"
-        viewModelScope.launch {
-            _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to 0.08f)
-            val encodedRes = VideoMediaHelper.readAndEncodeVideo(appContext, pickedUri)
-            val payload = encodedRes.getOrElse { err ->
-                _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
-                showMessage(err.localizedMessage ?: "No se pudo procesar el video del estado")
-                return@launch
-            }
-
-            // Cache assembled video locally for instant playback on this device
-            VideoMediaHelper.writeAssembledVideoToCache(
-                context = appContext,
-                messageId = statusId,
-                fileName = "estado_${statusId}.mp4",
-                fullDataUri = payload.dataUri
-            )
-
-            val uids = currentMemberUids()
-            val chunks = payload.chunks
-            if (chunks.isNotEmpty()) {
-                for ((idx, chunkData) in chunks.withIndex()) {
-                    val pct = 0.15f + (idx + 1).toFloat() / chunks.size.toFloat() * 0.75f
-                    _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to pct)
-                    val chunkEntity = MediaChunkEntity(
-                        id = "${statusId}_c$idx",
-                        messageId = statusId,
-                        chunkIndex = idx,
-                        totalChunks = chunks.size,
-                        data = chunkData,
-                        authorUid = currentUserId
-                    )
-                    val chunkRes = cloudRepo.uploadMediaChunk(famId, chunkEntity, uids, currentUserId)
-                    if (chunkRes.isFailure) {
-                        _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
-                        showMessage("Error al subir fragmento de video (${idx + 1}/${chunks.size})")
-                        return@launch
-                    }
-                }
-            } else {
-                _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to 0.85f)
-            }
-
-            val now = System.currentTimeMillis()
-            val status = FamilyStatusEntity(
-                id = statusId,
-                memberId = currentId,
-                text = caption.trim().take(200),
-                mediaUri = if (chunks.isEmpty()) payload.dataUri else "chunked:${payload.mimeType}",
-                mediaType = "VIDEO",
-                videoThumbnailData = payload.thumbnailDataUri,
-                videoDurationSec = payload.durationSec,
-                chunkCount = chunks.size,
-                backgroundHex = "#0B141A",
-                createdAt = now,
-                expiresAt = now + FamilyStatusEntity.STATUS_TTL_MS,
-                viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
-                authorUid = currentUserId
-            )
-            val res = cloudRepo.createStatus(famId, status, uids, currentUserId)
-            _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
-            showMessage(if (res.isSuccess) "Video de estado publicado por 24h" else "No se pudo subir el video de estado")
-        }
+        publishStatus(
+            StatusPublishRequest(
+                mode = StatusComposerMode.VIDEO,
+                videoUri = pickedUri,
+                videoCaption = caption
+            ),
+            onSuccess = {}
+        )
     }
 
     fun prepareStatusVideo(
