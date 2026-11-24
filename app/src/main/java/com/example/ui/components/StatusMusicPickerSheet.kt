@@ -1,27 +1,42 @@
 package com.example.ui.components
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.view.inputmethod.InputMethodManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -44,18 +59,16 @@ import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,20 +76,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.ui.theme.InterFontFamily
@@ -84,6 +105,7 @@ import com.example.util.MusicBrowseCategory
 import com.example.util.StatusMusicCatalog
 import com.example.util.StatusMusicTrack
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 private val SheetBgDark = Color(0xFF0E1219)
 private val SheetCardDark = Color(0xFF171C26)
@@ -93,7 +115,7 @@ private val ActiveChipBorder = Color(0xFF25D366)
 private val ActiveChipText = Color(0xFF4ADE80)
 private val FavoriteGold = Color(0xFFFBBF24)
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StatusMusicPickerSheet(
     selectedTrack: StatusMusicTrack?,
@@ -103,8 +125,13 @@ fun StatusMusicPickerSheet(
     onDismiss: () -> Unit,
     searchCatalog: suspend (String) -> Result<List<StatusMusicTrack>> = StatusMusicCatalog::searchTracks
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val context = LocalContext.current
+    val view = LocalView.current
+    val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val isImeVisible = WindowInsets.isImeVisible
+    val searchFocusRequester = remember { FocusRequester() }
+    val resultsListState = rememberLazyListState()
 
     var searchQuery by remember { mutableStateOf("") }
     var activeCategory by remember { mutableStateOf(MusicBrowseCategory.SUGGESTIONS) }
@@ -112,6 +139,22 @@ fun StatusMusicPickerSheet(
     var isLoading by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var retryNonce by remember { mutableIntStateOf(0) }
+    var skipNextDebounce by remember { mutableStateOf(false) }
+    var isSearchFocused by remember { mutableStateOf(false) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+
+    fun dismissKeyboardAndFocus() {
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.hideSoftInputFromWindow(view.windowToken, 0)
+    }
+
+    fun submitImmediateSearch() {
+        dismissKeyboardAndFocus()
+        skipNextDebounce = true
+        retryNonce++
+    }
 
     // Audio preview state
     var previewPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
@@ -188,19 +231,36 @@ fun StatusMusicPickerSheet(
         }
     }
 
+    LaunchedEffect(resultsListState.isScrollInProgress) {
+        if (resultsListState.isScrollInProgress && (isImeVisible || isSearchFocused)) {
+            dismissKeyboardAndFocus()
+        }
+    }
+
+    BackHandler(enabled = true) {
+        if (isImeVisible || isSearchFocused) {
+            dismissKeyboardAndFocus()
+        } else {
+            stopAndReleasePreview()
+            onDismiss()
+        }
+    }
+
     // Load online catalog or local favorites
     LaunchedEffect(searchQuery, activeCategory, retryNonce, favoriteTracks) {
         val trimmed = searchQuery.trim()
         if (activeCategory == MusicBrowseCategory.FAVORITES && trimmed.isEmpty()) {
+            skipNextDebounce = false
             tracks = favoriteTracks
             isLoading = false
             loadError = null
             return@LaunchedEffect
         }
 
-        if (trimmed.isNotEmpty()) {
+        if (trimmed.isNotEmpty() && !skipNextDebounce) {
             delay(360L)
         }
+        skipNextDebounce = false
         val queryToRun = trimmed.ifBlank { activeCategory.defaultQuery }
         isLoading = true
         loadError = null
@@ -228,137 +288,192 @@ fun StatusMusicPickerSheet(
         if (showFeaturedCarousel) tracks.drop(4) else tracks
     }
 
-    ModalBottomSheet(
-        onDismissRequest = {
-            stopAndReleasePreview()
-            onDismiss()
-        },
-        sheetState = sheetState,
-        containerColor = SheetBgDark,
-        contentColor = Color.White,
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(top = 10.dp, bottom = 8.dp)
-                    .width(38.dp)
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color.White.copy(alpha = 0.28f))
-            )
-        },
-        modifier = Modifier.testTag("status_music_picker_sheet")
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(50f)
     ) {
-        Column(
+        Box(
             modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.60f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    dismissKeyboardAndFocus()
+                    stopAndReleasePreview()
+                    onDismiss()
+                }
+        )
+        Surface(
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            color = SheetBgDark,
+            contentColor = Color.White,
+            shadowElevation = 18.dp,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .fillMaxHeight(0.88f)
-                .navigationBarsPadding()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                .offset { IntOffset(0, dragOffsetY.roundToInt().coerceAtLeast(0)) }
+                .pointerInput(Unit) { detectTapGestures { } }
+                .testTag("status_music_picker_sheet")
         ) {
-            // Search Bar Pill ("Buscar canciones")
-            Surface(
-                shape = RoundedCornerShape(26.dp),
-                color = SheetCardDark,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .heightIn(min = 48.dp)
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+                    .imePadding()
             ) {
-                Row(
+                // Drag handle + swipe-down gesture zone
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Search,
-                        contentDescription = "Buscar",
-                        tint = Color.White.copy(alpha = 0.72f),
-                        modifier = Modifier.size(21.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Box(
-                        modifier = Modifier.weight(1f),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        if (searchQuery.isEmpty()) {
-                            Text(
-                                text = "Buscar canciones",
-                                fontFamily = InterFontFamily,
-                                fontSize = 15.5.sp,
-                                color = Color.White.copy(alpha = 0.56f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures(
+                                onDragEnd = {
+                                    if (dragOffsetY > 220f) {
+                                        dismissKeyboardAndFocus()
+                                        stopAndReleasePreview()
+                                        onDismiss()
+                                    } else {
+                                        dragOffsetY = 0f
+                                    }
+                                },
+                                onDragCancel = { dragOffsetY = 0f },
+                                onVerticalDrag = { _, dragAmount ->
+                                    dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                                }
                             )
-                        }
-                        BasicTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            singleLine = true,
-                            textStyle = TextStyle(
-                                fontFamily = InterFontFamily,
-                                fontSize = 15.5.sp,
-                                color = Color.White
-                            ),
-                            cursorBrush = SolidColor(ActiveChipText),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = {
-                                keyboardController?.hide()
-                                retryNonce++
-                            }),
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 12.dp, bottom = 10.dp)
+                            .width(40.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color.White.copy(alpha = 0.28f))
+                    )
+                }
+
+                // Search Bar Pill ("Buscar canciones")
+                Surface(
+                    shape = RoundedCornerShape(26.dp),
+                    color = SheetCardDark,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .heightIn(min = 48.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 6.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("status_music_search_input")
-                        )
-                    }
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(
-                            onClick = { searchQuery = "" },
-                            modifier = Modifier
-                                .size(32.dp)
-                                .testTag("status_music_search_clear")
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .clickable { submitImmediateSearch() }
+                                .testTag("status_music_search_button"),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "Limpiar búsqueda",
-                                tint = Color.White.copy(alpha = 0.72f),
-                                modifier = Modifier.size(18.dp)
+                                imageVector = Icons.Filled.Search,
+                                contentDescription = "Buscar canciones",
+                                tint = Color.White.copy(alpha = 0.78f),
+                                modifier = Modifier.size(21.dp)
                             )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Box(
+                            modifier = Modifier.weight(1f),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = "Buscar canciones",
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 15.5.sp,
+                                    color = Color.White.copy(alpha = 0.56f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            BasicTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                singleLine = true,
+                                textStyle = TextStyle(
+                                    fontFamily = InterFontFamily,
+                                    fontSize = 15.5.sp,
+                                    color = Color.White
+                                ),
+                                cursorBrush = SolidColor(ActiveChipText),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = {
+                                    submitImmediateSearch()
+                                }),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(searchFocusRequester)
+                                    .onFocusChanged { isSearchFocused = it.isFocused }
+                                    .testTag("status_music_search_input")
+                            )
+                        }
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { searchQuery = "" },
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .testTag("status_music_search_clear")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = "Limpiar búsqueda",
+                                    tint = Color.White.copy(alpha = 0.72f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            // Category Chips Row
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(MusicBrowseCategory.entries, key = { it.name }) { category ->
-                    val isSelected = activeCategory == category && searchQuery.isBlank()
-                    val label = if (category == MusicBrowseCategory.FAVORITES && favoriteTracks.isNotEmpty()) {
-                        "${category.label} (${favoriteTracks.size})"
-                    } else {
-                        category.label
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = if (isSelected) ActiveChipBg else SheetCardDark,
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = if (isSelected) ActiveChipBorder.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.14f)
-                        ),
-                        modifier = Modifier
-                            .defaultMinSize(minHeight = 36.dp)
-                            .clip(RoundedCornerShape(50))
-                            .clickable {
-                                searchQuery = ""
-                                activeCategory = category
-                                keyboardController?.hide()
-                            }
-                            .testTag("music_category_${category.name.lowercase()}")
-                    ) {
+                // Category Chips Row
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(MusicBrowseCategory.entries, key = { it.name }) { category ->
+                        val isSelected = activeCategory == category && searchQuery.isBlank()
+                        val label = if (category == MusicBrowseCategory.FAVORITES && favoriteTracks.isNotEmpty()) {
+                            "${category.label} (${favoriteTracks.size})"
+                        } else {
+                            category.label
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = if (isSelected) ActiveChipBg else SheetCardDark,
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isSelected) ActiveChipBorder.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.14f)
+                            ),
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 36.dp)
+                                .clip(RoundedCornerShape(50))
+                                .clickable {
+                                    searchQuery = ""
+                                    activeCategory = category
+                                    dismissKeyboardAndFocus()
+                                }
+                                .testTag("music_category_${category.name.lowercase()}")
+                        ) {
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
@@ -513,6 +628,7 @@ fun StatusMusicPickerSheet(
 
                 else -> {
                     LazyColumn(
+                        state = resultsListState,
                         contentPadding = PaddingValues(bottom = 24.dp),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -527,9 +643,13 @@ fun StatusMusicPickerSheet(
                                     selectedTrackId = selectedTrack?.trackId,
                                     previewingTrackId = previewingTrackId,
                                     isBufferingPreview = isBufferingPreview,
-                                    onTogglePreview = ::toggleTrackPreview,
+                                    onTogglePreview = {
+                                        dismissKeyboardAndFocus()
+                                        toggleTrackPreview(it)
+                                    },
                                     onToggleFavorite = onToggleFavorite,
                                     onSelectTrack = { chosen ->
+                                        dismissKeyboardAndFocus()
                                         stopAndReleasePreview()
                                         onSelectTrack(chosen)
                                     }
@@ -544,9 +664,13 @@ fun StatusMusicPickerSheet(
                                 isSelected = selectedTrack?.trackId == track.trackId,
                                 isPreviewing = previewingTrackId == track.trackId,
                                 isBuffering = previewingTrackId == track.trackId && isBufferingPreview,
-                                onTogglePreview = { toggleTrackPreview(track) },
+                                onTogglePreview = {
+                                    dismissKeyboardAndFocus()
+                                    toggleTrackPreview(track)
+                                },
                                 onToggleFavorite = { onToggleFavorite(track) },
                                 onSelect = {
+                                    dismissKeyboardAndFocus()
                                     stopAndReleasePreview()
                                     onSelectTrack(track)
                                 }
@@ -554,6 +678,7 @@ fun StatusMusicPickerSheet(
                         }
                     }
                 }
+            }
             }
         }
     }

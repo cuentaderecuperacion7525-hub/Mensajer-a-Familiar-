@@ -1,5 +1,10 @@
 # Novedades de FamiChat
 
+## 2.8.61
+- Corrección en la búsqueda de música para estados:
+  - Al tocar la lupa superior, presionar buscar en el teclado o empezar a deslizar la lista, se ejecuta la búsqueda de inmediato, se libera el foco y se oculta el teclado automáticamente.
+  - Al presionar el botón Atrás mientras el teclado está abierto dentro del selector de música, primero se oculta el teclado manteniéndote en la lista de canciones, y en el siguiente toque de Atrás se cierra el selector de música.
+
 ## 2.8.60
 - Música en línea para tus estados (Texto, Foto y Video):
   - Nuevo botón musical (♪) al crear un estado que abre un selector con búsqueda en tiempo real («Buscar canciones»), categorías («Sugerencias», «Estado de ánimo», «Género», «Cumpleaños y familia» y «Favoritas»), carrusel destacado con portadas, vista previa de audio en vivo y estrellas de favoritos.

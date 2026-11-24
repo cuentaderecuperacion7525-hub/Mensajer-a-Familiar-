@@ -3740,6 +3740,73 @@ class ExampleRobolectricTest {
     assertEquals("888", tracks[1].trackId)
     assertEquals("KAROL G", tracks[1].artist)
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `status music picker back clears search focus before dismissing and search button submits cleanly`() {
+    val queriedTerms = mutableListOf<String>()
+    var closedComposerCount = 0
+    val sampleTracks = listOf(
+      com.example.util.StatusMusicTrack(
+        trackId = "t_back",
+        title = "Desde Que Te Tengo",
+        artist = "Carín León",
+        previewUrl = "https://example.com/1.m4a"
+      )
+    )
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = false) {
+        com.example.ui.components.StatusComposerScreen(
+          publishState = com.example.ui.viewmodel.StatusPublishUiState.Idle,
+          onPublish = {},
+          onCancelPublish = {},
+          onDismissPublishError = {},
+          onClose = { closedComposerCount++ },
+          musicSearchCatalog = { term ->
+            queriedTerms.add(term)
+            Result.success(sampleTracks)
+          }
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Open music picker
+    composeTestRule.onNodeWithTag("status_music_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_music_picker_sheet").assertIsDisplayed()
+
+    // Focus search input and type query
+    composeTestRule.onNodeWithTag("status_music_search_input").performClick()
+    composeTestRule.onNodeWithTag("status_music_search_input").performTextInput("carin")
+    composeTestRule.waitForIdle()
+
+    // First Back press clears search focus without closing the music picker or the status composer
+    composeTestRule.runOnIdle {
+      composeTestRule.activity.onBackPressedDispatcher.onBackPressed()
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_music_picker_sheet").assertIsDisplayed()
+    assertEquals(0, closedComposerCount)
+
+    // Focus again, tap magnifying glass search button -> triggers immediate search & stays in picker
+    composeTestRule.onNodeWithTag("status_music_search_input").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_music_search_button").performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(queriedTerms.contains("carin"))
+    composeTestRule.onNodeWithTag("status_music_picker_sheet").assertIsDisplayed()
+
+    // Second Back press (when search is no longer focused) dismisses only the music picker
+    composeTestRule.runOnIdle {
+      composeTestRule.activity.onBackPressedDispatcher.onBackPressed()
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_music_picker_sheet").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("status_composer_screen").assertIsDisplayed()
+    assertEquals(0, closedComposerCount)
+  }
 }
 
 

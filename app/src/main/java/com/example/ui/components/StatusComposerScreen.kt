@@ -697,7 +697,7 @@ fun StatusComposerScreen(
         }
     }
 
-    BackHandler(enabled = true) {
+    BackHandler(enabled = !showMusicPickerSheet) {
         when {
             showDiscardDialog -> showDiscardDialog = false
             isPublishing -> Unit
