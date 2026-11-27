@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.media.AudioAttributes
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
@@ -24,12 +23,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -41,8 +37,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -55,33 +49,23 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeOff
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PriorityHigh
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -90,8 +74,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -102,12 +84,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -116,13 +93,11 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -145,16 +120,12 @@ import com.example.util.StatusOverlayBundle
 import com.example.util.StatusStudioDraftItem
 import com.example.util.TimeFormatters
 import com.example.util.VideoMediaHelper
-import com.example.util.parseHexColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
-
-private const val MAX_TEXT_STATUS_CHARS = 280
-private const val MAX_MEDIA_CAPTION_CHARS = 200
 
 val StatusComposerTextColors = listOf(
     "#0E7C66",
@@ -170,7 +141,6 @@ private val GalleryTileBg = Color(0xFF171C26)
 private val DialogBluePrimary = Color(0xFF1A73E8)
 private val SoftRedDark = Color(0xFFF28B82)
 private val SoftRedLight = Color(0xFFD93025)
-private val AmberWarnColor = Color(0xFFE0A030)
 
 private data class LocalGalleryMediaItem(
     val uri: Uri,
@@ -241,7 +211,6 @@ private fun primaryGalleryPermission(isVideo: Boolean): String = when {
         Manifest.permission.READ_EXTERNAL_STORAGE
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StatusComposerScreen(
     publishState: StatusPublishUiState,
@@ -259,7 +228,6 @@ fun StatusComposerScreen(
     val context = LocalContext.current
     val view = LocalView.current
     val parentDarkTheme = LocalDarkTheme.current
-    val isImeVisible = WindowInsets.isImeVisible
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
@@ -279,16 +247,20 @@ fun StatusComposerScreen(
     }
 
     var currentMode by rememberSaveable { mutableStateOf(StatusComposerMode.TEXT) }
-    var statusText by rememberSaveable { mutableStateOf("") }
-    var selectedHex by rememberSaveable { mutableStateOf(StatusComposerTextColors.first()) }
+    var textStudioDraft by remember {
+        mutableStateOf(
+            StatusStudioDraftItem(
+                id = "text_studio_draft",
+                isVideo = false,
+                isTextStatus = true,
+                backgroundHex = StatusComposerTextColors.first()
+            )
+        )
+    }
 
     var mediaDrafts by remember { mutableStateOf<List<StatusStudioDraftItem>>(emptyList()) }
     var activeDraftIndex by remember { mutableIntStateOf(0) }
     var appendMediaOnReturn by remember { mutableStateOf(false) }
-
-    var selectedMusicTrack by remember { mutableStateOf<StatusMusicTrack?>(null) }
-    var showMusicPickerSheet by remember { mutableStateOf(false) }
-    var isNonVideoMusicPlaying by remember { mutableStateOf(true) }
 
     var pendingCameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
     var pendingCameraVideoUri by remember { mutableStateOf<Uri?>(null) }
@@ -412,11 +384,15 @@ fun StatusComposerScreen(
     }
 
     fun addOrOpenPhotoDraft(uri: Uri, append: Boolean) {
+        val fromTextStudio = mediaDrafts.isEmpty() && append
         val sharedAudience = mediaDrafts.firstOrNull()?.overlays?.audienceMemberIds
+            ?: textStudioDraft.overlays.audienceMemberIds
         val entry = StatusStudioDraftItem(
             id = "draft_${UUID.randomUUID().toString().take(8)}",
             uri = uri,
             isVideo = false,
+            caption = if (fromTextStudio) textStudioDraft.caption else "",
+            musicTrack = if (fromTextStudio) textStudioDraft.musicTrack else null,
             overlays = StatusOverlayBundle(audienceMemberIds = sharedAudience)
         )
         if (append && mediaDrafts.isNotEmpty()) {
@@ -445,12 +421,16 @@ fun StatusComposerScreen(
                 isOverLimit = false
             )
             sessionVideoItems = (listOf(entry) + sessionVideoItems.filterNot { it.uri == uri })
+            val fromTextStudio = mediaDrafts.isEmpty() && append
             val sharedAudience = mediaDrafts.firstOrNull()?.overlays?.audienceMemberIds
+                ?: textStudioDraft.overlays.audienceMemberIds
             val draft = StatusStudioDraftItem(
                 id = "draft_${UUID.randomUUID().toString().take(8)}",
                 uri = uri,
                 isVideo = true,
                 videoPreviewInfo = info,
+                caption = if (fromTextStudio) textStudioDraft.caption else "",
+                musicTrack = if (fromTextStudio) textStudioDraft.musicTrack else null,
                 overlays = StatusOverlayBundle(audienceMemberIds = sharedAudience)
             )
             if (append && mediaDrafts.isNotEmpty()) {
@@ -577,120 +557,37 @@ fun StatusComposerScreen(
     }
 
     val isInMediaStudio = mediaDrafts.isNotEmpty()
+    val isInTextStudio = !isInMediaStudio && currentMode == StatusComposerMode.TEXT
+    val isStudioShown = isInMediaStudio || isInTextStudio
     val isPublishing = publishState is StatusPublishUiState.Publishing
-    val isErrorDialog = publishState is StatusPublishUiState.Error
-
-    // Preview attached music automatically for Text composer (Media Studio manages its own trimmed player)
-    var nonVideoMusicPlayer by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
-    var nonVideoPreparedUrl by remember { mutableStateOf<String?>(null) }
-    val activeNonVideoMusicUrl = if (
-        !isInMediaStudio &&
-        currentMode == StatusComposerMode.TEXT &&
-        !showMusicPickerSheet &&
-        !isPublishing
-    ) {
-        selectedMusicTrack?.previewUrl
-    } else {
-        null
-    }
-
-    LaunchedEffect(activeNonVideoMusicUrl) {
-        val prev = nonVideoMusicPlayer
-        if (activeNonVideoMusicUrl.isNullOrBlank()) {
-            nonVideoMusicPlayer = null
-            nonVideoPreparedUrl = null
-            if (prev != null) {
-                runCatching { if (prev.isPlaying) prev.stop() }
-                runCatching { prev.reset() }
-                runCatching { prev.release() }
-            }
-            return@LaunchedEffect
-        }
-        if (nonVideoPreparedUrl == activeNonVideoMusicUrl && prev != null) {
-            return@LaunchedEffect
-        }
-        if (prev != null) {
-            runCatching { if (prev.isPlaying) prev.stop() }
-            runCatching { prev.reset() }
-            runCatching { prev.release() }
-        }
-        nonVideoPreparedUrl = activeNonVideoMusicUrl
-        val mp = android.media.MediaPlayer()
-        nonVideoMusicPlayer = mp
-        runCatching {
-            mp.setAudioAttributes(
-                android.media.AudioAttributes.Builder()
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                    .build()
-            )
-            mp.setDataSource(activeNonVideoMusicUrl)
-            mp.isLooping = true
-            mp.setOnPreparedListener { readyMp ->
-                if (nonVideoMusicPlayer === readyMp && isNonVideoMusicPlaying) {
-                    runCatching { readyMp.start() }
-                }
-            }
-            mp.setOnErrorListener { _, _, _ -> true }
-            mp.prepareAsync()
-        }.onFailure {
-            runCatching { mp.release() }
-            if (nonVideoMusicPlayer === mp) nonVideoMusicPlayer = null
-        }
-    }
-
-    LaunchedEffect(isNonVideoMusicPlaying, nonVideoMusicPlayer, activeNonVideoMusicUrl) {
-        val mp = nonVideoMusicPlayer ?: return@LaunchedEffect
-        if (activeNonVideoMusicUrl.isNullOrBlank()) return@LaunchedEffect
-        runCatching {
-            if (isNonVideoMusicPlaying) {
-                if (!mp.isPlaying) mp.start()
-            } else {
-                if (mp.isPlaying) mp.pause()
-            }
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            val mp = nonVideoMusicPlayer
-            nonVideoMusicPlayer = null
-            if (mp != null) {
-                runCatching { if (mp.isPlaying) mp.stop() }
-                runCatching { mp.reset() }
-                runCatching { mp.release() }
-            }
-        }
-    }
 
     fun hasUnsavedContent(): Boolean =
-        statusText.isNotBlank() ||
+        textStudioDraft.hasEdits() ||
             mediaDrafts.any { it.hasEdits() } ||
-            mediaDrafts.size > 1 ||
-            selectedMusicTrack != null
+            mediaDrafts.size > 1
 
-    fun triggerPublishTextCurrent() {
+    fun triggerPublishTextStudio() {
         if (isPublishing) return
+        val hasContent = textStudioDraft.caption.trim().isNotEmpty() || !textStudioDraft.overlays.isEmptyEdits()
+        if (!hasContent) return
         keyboardController?.hide()
         focusManager.clearFocus()
-        isNonVideoMusicPlaying = false
-        if (currentMode == StatusComposerMode.TEXT && statusText.isNotBlank()) {
-            onPublish(
-                StatusPublishRequest(
-                    mode = StatusComposerMode.TEXT,
-                    text = statusText,
-                    backgroundHex = selectedHex,
-                    musicTrack = selectedMusicTrack
-                )
+        onPublish(
+            StatusPublishRequest(
+                mode = StatusComposerMode.TEXT,
+                text = textStudioDraft.caption.trim(),
+                backgroundHex = textStudioDraft.backgroundHex,
+                musicTrack = textStudioDraft.musicTrack,
+                overlayBundle = textStudioDraft.overlays,
+                visibleToMemberIds = textStudioDraft.overlays.audienceMemberIds
             )
-        }
+        )
     }
 
     fun triggerPublishMediaDrafts() {
         if (isPublishing || mediaDrafts.isEmpty()) return
         keyboardController?.hide()
         focusManager.clearFocus()
-        isNonVideoMusicPlaying = false
         val requests = mediaDrafts.map { draft ->
             if (draft.isVideo) {
                 StatusPublishRequest(
@@ -719,20 +616,8 @@ fun StatusComposerScreen(
         }
     }
 
-    fun handleBackOrClose(fromCloseButton: Boolean) {
+    fun handleBackOrClose() {
         if (isPublishing) return
-        if (isErrorDialog) {
-            if (isInMediaStudio) {
-                onDismissPublishError()
-            } else {
-                return
-            }
-        }
-        if (isImeVisible && !fromCloseButton) {
-            keyboardController?.hide()
-            focusManager.clearFocus()
-            return
-        }
         keyboardController?.hide()
         focusManager.clearFocus()
         when {
@@ -749,12 +634,11 @@ fun StatusComposerScreen(
         }
     }
 
-    BackHandler(enabled = !showMusicPickerSheet && !isInMediaStudio) {
+    BackHandler(enabled = !isStudioShown) {
         when {
             showDiscardDialog -> showDiscardDialog = false
             isPublishing -> Unit
-            isErrorDialog -> onDismissPublishError()
-            else -> handleBackOrClose(fromCloseButton = false)
+            else -> handleBackOrClose()
         }
     }
 
@@ -824,36 +708,57 @@ fun StatusComposerScreen(
                             )
                         }
                     },
-                    onRequestClose = { handleBackOrClose(fromCloseButton = true) },
+                    onRequestClose = { handleBackOrClose() },
                     onDismissPublishError = onDismissPublishError,
                     onPublishDrafts = ::triggerPublishMediaDrafts
                 )
             }
 
             currentMode == StatusComposerMode.TEXT -> {
-                TextStatusComposerPage(
-                    text = statusText,
-                    selectedHex = selectedHex,
-                    isImeVisible = isImeVisible,
-                    isPublishing = isPublishing,
-                    selectedMusic = selectedMusicTrack,
-                    isMusicPlaying = isNonVideoMusicPlaying,
-                    onToggleMusicPlayback = { isNonVideoMusicPlaying = !isNonVideoMusicPlaying },
-                    onOpenMusicPicker = {
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                        showMusicPickerSheet = true
+                StatusMediaStudioScreen(
+                    drafts = listOf(textStudioDraft),
+                    activeIndex = 0,
+                    activeDraft = textStudioDraft,
+                    publishState = publishState,
+                    allMembers = allMembers,
+                    activeMemberId = activeMemberId,
+                    favoriteMusicTracks = favoriteMusicTracks,
+                    onToggleFavoriteMusicTrack = onToggleFavoriteMusicTrack,
+                    musicSearchCatalog = musicSearchCatalog,
+                    onSelectDraftIndex = {},
+                    onRemoveDraftAt = {},
+                    onUpdateActiveDraft = { transform ->
+                        val prevAudience = textStudioDraft.overlays.audienceMemberIds
+                        val updated = transform(textStudioDraft)
+                        textStudioDraft = updated
+                        val nextAudience = updated.overlays.audienceMemberIds
+                        if (prevAudience != nextAudience && mediaDrafts.isNotEmpty()) {
+                            mediaDrafts = mediaDrafts.map { item ->
+                                item.copy(overlays = item.overlays.copy(audienceMemberIds = nextAudience))
+                            }
+                        }
                     },
-                    onRemoveMusic = { selectedMusicTrack = null },
-                    onTextChange = { if (it.length <= MAX_TEXT_STATUS_CHARS) statusText = it },
-                    onSelectColor = { selectedHex = it },
-                    onSelectTab = { next ->
+                    onRequestAddMedia = { isVideo, fromCamera ->
+                        appendMediaOnReturn = true
+                        when {
+                            isVideo && fromCamera -> launchSystemVideoCamera()
+                            isVideo && !fromCamera -> videoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                            )
+                            !isVideo && fromCamera -> launchSystemPhotoCamera()
+                            else -> photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }
+                    },
+                    onRequestClose = { handleBackOrClose() },
+                    onDismissPublishError = onDismissPublishError,
+                    onPublishDrafts = ::triggerPublishTextStudio,
+                    onSelectComposerMode = { next ->
                         keyboardController?.hide()
                         focusManager.clearFocus()
                         currentMode = next
-                    },
-                    onCloseClick = { handleBackOrClose(fromCloseButton = true) },
-                    onPublishClick = ::triggerPublishTextCurrent
+                    }
                 )
             }
 
@@ -864,7 +769,7 @@ fun StatusComposerScreen(
                     items = if (isVideoGallery) combinedVideos else combinedPhotos,
                     hasGalleryPermission = if (isVideoGallery) videoAccessGranted else photoAccessGranted,
                     hasPartialAccess = if (isVideoGallery) partialVideoAccess else partialPhotoAccess,
-                    onCloseClick = { handleBackOrClose(fromCloseButton = true) },
+                    onCloseClick = { handleBackOrClose() },
                     onRequestPermission = { requestGalleryAccess(isVideo = isVideoGallery, userInitiated = true) },
                     onOpenPicker = {
                         appendMediaOnReturn = false
@@ -922,17 +827,12 @@ fun StatusComposerScreen(
             }
         }
 
-        // Centered Dialogs: Discard (both modes) / Uploading & Error (Text mode only; Studio handles its own Send spinner & inline banner)
+        // Centered Discard Dialog (shared across Text, Photo, and Video Studio)
         if (showDiscardDialog) {
             BackHandler(enabled = true) { showDiscardDialog = false }
-            val dialogTitle = if (isInMediaStudio) "¿Descartar el estado?" else "¿Descartar este estado?"
-            val subtitle = when {
-                isInMediaStudio -> "Se perderán los cambios sin publicar."
-                else -> "Se perderá lo que escribiste."
-            }
             StatusDiscardDialog(
-                title = dialogTitle,
-                subtitle = subtitle,
+                title = "¿Descartar el estado?",
+                subtitle = "Se perderán los cambios sin publicar.",
                 onKeepEditing = { showDiscardDialog = false },
                 onDiscard = {
                     showDiscardDialog = false
@@ -941,303 +841,11 @@ fun StatusComposerScreen(
                     onClose()
                 }
             )
-        } else if (!isInMediaStudio && publishState is StatusPublishUiState.Publishing) {
-            StatusUploadingDialog(
-                mode = publishState.mode,
-                progress = publishState.progress,
-                onCancel = onCancelPublish
-            )
-        } else if (!isInMediaStudio && publishState is StatusPublishUiState.Error) {
-            StatusPublishErrorDialog(
-                message = publishState.message,
-                onRetry = ::triggerPublishTextCurrent,
-                onDismiss = onDismissPublishError
-            )
-        }
-
-        if (showMusicPickerSheet && !isInMediaStudio) {
-            StatusMusicPickerSheet(
-                selectedTrack = selectedMusicTrack,
-                favoriteTracks = favoriteMusicTracks,
-                onToggleFavorite = onToggleFavoriteMusicTrack,
-                onSelectTrack = { chosen ->
-                    selectedMusicTrack = chosen.copy(muteOriginalVideo = false)
-                    isNonVideoMusicPlaying = true
-                    showMusicPickerSheet = false
-                },
-                onDismiss = { showMusicPickerSheet = false },
-                searchCatalog = musicSearchCatalog
-            )
         }
     }
 }
 
-@Composable
-private fun TextStatusComposerPage(
-    text: String,
-    selectedHex: String,
-    isImeVisible: Boolean,
-    isPublishing: Boolean,
-    selectedMusic: StatusMusicTrack?,
-    isMusicPlaying: Boolean,
-    onToggleMusicPlayback: () -> Unit,
-    onOpenMusicPicker: () -> Unit,
-    onRemoveMusic: () -> Unit,
-    onTextChange: (String) -> Unit,
-    onSelectColor: (String) -> Unit,
-    onSelectTab: (StatusComposerMode) -> Unit,
-    onCloseClick: () -> Unit,
-    onPublishClick: () -> Unit
-) {
-    val bgColor = parseHexColor(selectedHex, fallback = Color(0xFF0E7C66))
-    val focusRequester = remember { FocusRequester() }
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val hasText = text.isNotBlank()
 
-    // Base font size smoothly adapts from 26sp down to 16sp as length grows
-    var overflowStep by remember { mutableIntStateOf(0) }
-    LaunchedEffect(text.length) {
-        if (overflowStep > 0 && text.length < 40) {
-            overflowStep = 0
-        }
-    }
-    val lengthBasedSp = when {
-        text.length <= 45 -> 26f
-        text.length <= 90 -> 23f
-        text.length <= 145 -> 20f
-        text.length <= 210 -> 18f
-        else -> 16f
-    }
-    val effectiveSp = (lengthBasedSp - overflowStep * 2f).coerceIn(16f, 26f)
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(bgColor)
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-            .imePadding()
-            .navigationBarsPadding()
-    ) {
-        // Top Bar: X (left) + Publicar pill (right)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            IconButton(
-                onClick = onCloseClick,
-                modifier = Modifier
-                    .size(48.dp)
-                    .testTag("status_close_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = "Cerrar",
-                    tint = Color.White,
-                    modifier = Modifier.size(26.dp)
-                )
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                StatusMusicToolbarButton(
-                    hasSelectedMusic = selectedMusic != null,
-                    enabled = !isPublishing,
-                    onClick = onOpenMusicPicker
-                )
-
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = if (hasText && !isPublishing) Color.White else Color.White.copy(alpha = 0.22f),
-                    modifier = Modifier
-                        .defaultMinSize(minHeight = 44.dp)
-                        .clip(RoundedCornerShape(50))
-                        .clickable(enabled = hasText && !isPublishing) { onPublishClick() }
-                        .testTag("publish_status_button")
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-                    ) {
-                        Text(
-                            text = "Publicar",
-                            fontFamily = InterFontFamily,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (hasText && !isPublishing) Color(0xFF0B3D33) else Color.White.copy(alpha = 0.70f),
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-        }
-
-        if (selectedMusic != null) {
-            SelectedStatusMusicPill(
-                track = selectedMusic,
-                isVideoMode = false,
-                isMusicPlaying = isMusicPlaying,
-                onTogglePlayback = onToggleMusicPlayback,
-                onChangeMusic = onOpenMusicPicker,
-                onToggleMuteOriginalVideo = {},
-                onRemoveMusic = onRemoveMusic,
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-            )
-        }
-
-        // Editable centered text directly on colored background
-        BoxWithConstraints(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    focusRequester.requestFocus()
-                    keyboardController?.show()
-                }
-                .padding(horizontal = 28.dp, vertical = 12.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            val maxLinesEstimate = ((maxHeight.value / (effectiveSp * 1.45f)).toInt()).coerceAtLeast(3)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                contentAlignment = Alignment.Center
-            ) {
-                BasicTextField(
-                    value = text,
-                    onValueChange = { next ->
-                        if (next.length <= MAX_TEXT_STATUS_CHARS) {
-                            if (next.length < text.length && overflowStep > 0) {
-                                overflowStep = (overflowStep - 1).coerceAtLeast(0)
-                            }
-                            onTextChange(next)
-                        }
-                    },
-                    textStyle = TextStyle(
-                        fontFamily = InterFontFamily,
-                        fontSize = effectiveSp.sp,
-                        lineHeight = (effectiveSp * 1.32f).sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White,
-                        textAlign = TextAlign.Center
-                    ),
-                    cursorBrush = SolidColor(Color.White),
-                    onTextLayout = { layoutResult ->
-                        if ((layoutResult.hasVisualOverflow || layoutResult.lineCount > maxLinesEstimate) &&
-                            effectiveSp > 16f
-                        ) {
-                            overflowStep += 1
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(focusRequester)
-                        .testTag("status_text_input"),
-                    decorationBox = { innerTextField ->
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (text.isEmpty()) {
-                                Text(
-                                    text = "Escribe tu estado…",
-                                    fontFamily = InterFontFamily,
-                                    fontSize = 26.sp,
-                                    lineHeight = 34.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color.White.copy(alpha = 0.65f),
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                            innerTextField()
-                        }
-                    }
-                )
-            }
-        }
-
-        // Character counter N/280 above color row, right-aligned
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 4.dp),
-            contentAlignment = Alignment.CenterEnd
-        ) {
-            Text(
-                text = "${text.length}/$MAX_TEXT_STATUS_CHARS",
-                fontFamily = InterFontFamily,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Normal,
-                color = Color.White.copy(alpha = 0.75f),
-                modifier = Modifier.testTag("status_text_counter")
-            )
-        }
-
-        // 6 color circles
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            StatusComposerTextColors.forEachIndexed { idx, hex ->
-                val isSelected = selectedHex.equals(hex, ignoreCase = true)
-                val swatchColor = parseHexColor(hex)
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .clickable { onSelectColor(hex) }
-                        .testTag("status_color_option_$idx"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isSelected) {
-                        Box(
-                            modifier = Modifier
-                                .size(39.dp)
-                                .border(2.5.dp, Color.White, CircleShape)
-                                .padding(4.5.dp)
-                                .clip(CircleShape)
-                                .background(swatchColor)
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .background(swatchColor)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Bottom selector pill (hidden while keyboard is open)
-        if (!isImeVisible) {
-            Spacer(modifier = Modifier.height(6.dp))
-            StatusComposerModePill(
-                currentMode = StatusComposerMode.TEXT,
-                containerColor = Color.Black.copy(alpha = 0.24f),
-                activeTextColor = Color(0xFF0B3D33),
-                onSelectTab = onSelectTab
-            )
-            Spacer(modifier = Modifier.height(14.dp))
-        } else {
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-    }
-}
 
 @Composable
 private fun MediaGalleryComposerPage(
@@ -1756,171 +1364,7 @@ private fun GalleryRealMediaTile(
 
 
 @Composable
-private fun StatusMusicToolbarButton(
-    hasSelectedMusic: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    Surface(
-        shape = CircleShape,
-        color = if (hasSelectedMusic) Color(0xFF143D2B).copy(alpha = 0.92f) else Color.Black.copy(alpha = 0.34f),
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (hasSelectedMusic) Color(0xFF25D366) else Color.White.copy(alpha = 0.34f)
-        ),
-        modifier = Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .clickable(enabled = enabled) { onClick() }
-            .testTag("status_music_button")
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = Icons.Filled.MusicNote,
-                contentDescription = if (hasSelectedMusic) "Cambiar música" else "Añadir música",
-                tint = if (hasSelectedMusic) Color(0xFF4ADE80) else Color.White,
-                modifier = Modifier.size(22.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun SelectedStatusMusicPill(
-    track: StatusMusicTrack,
-    isVideoMode: Boolean,
-    isMusicPlaying: Boolean,
-    onTogglePlayback: () -> Unit,
-    onChangeMusic: () -> Unit,
-    onToggleMuteOriginalVideo: () -> Unit,
-    onRemoveMusic: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        modifier = modifier
-    ) {
-        Surface(
-            shape = RoundedCornerShape(50),
-            color = Color.Black.copy(alpha = 0.56f),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
-            modifier = Modifier
-                .widthIn(max = 320.dp)
-                .clip(RoundedCornerShape(50))
-                .clickable { onChangeMusic() }
-                .testTag("status_selected_music_pill")
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 5.dp, bottom = 5.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(30.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF1E293B))
-                        .clickable { onTogglePlayback() }
-                        .testTag("status_selected_music_play_toggle"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (track.artworkUrl.isNotBlank()) {
-                        val req = remember(track.artworkUrl) {
-                            ImageRequest.Builder(context)
-                                .data(track.artworkUrl)
-                                .crossfade(false)
-                                .build()
-                        }
-                        AsyncImage(
-                            model = req,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.35f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (isMusicPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = if (isMusicPlaying) "Pausar música" else "Escuchar música",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f, fill = false)) {
-                    Text(
-                        text = "${track.title} · ${track.artist}",
-                        fontFamily = InterFontFamily,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Spacer(modifier = Modifier.width(6.dp))
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .clickable { onRemoveMusic() }
-                        .testTag("status_music_remove_button"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = "Quitar música",
-                        tint = Color.White.copy(alpha = 0.85f),
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-
-        if (isVideoMode) {
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = Color.Black.copy(alpha = 0.52f),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .clickable { onToggleMuteOriginalVideo() }
-                    .testTag("status_video_mute_toggle")
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                ) {
-                    Icon(
-                        imageVector = if (track.muteOriginalVideo) Icons.AutoMirrored.Filled.VolumeOff
-                        else Icons.AutoMirrored.Filled.VolumeUp,
-                        contentDescription = null,
-                        tint = if (track.muteOriginalVideo) Color(0xFFFCA5A5) else Color(0xFF4ADE80),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = if (track.muteOriginalVideo) "Audio original silenciado" else "Audio original activo",
-                        fontFamily = InterFontFamily,
-                        fontSize = 11.5.sp,
-                        color = Color.White.copy(alpha = 0.90f)
-                    )
-                }
-            }
-        }
-    }
-}
-
-
-@Composable
-private fun StatusComposerModePill(
+internal fun StatusComposerModePill(
     currentMode: StatusComposerMode,
     containerColor: Color,
     activeTextColor: Color,
@@ -2070,236 +1514,7 @@ private fun StatusDiscardDialog(
     }
 }
 
-@Composable
-private fun StatusUploadingDialog(
-    mode: StatusComposerMode,
-    progress: Float,
-    onCancel: () -> Unit
-) {
-    val isDark = LocalDarkTheme.current
-    val cardBg = if (isDark) Color(0xFF1E2430) else MaterialTheme.colorScheme.surface
-    val titleColor = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
-    val bodyColor = if (isDark) Color(0xFFB6C0D1) else MaterialTheme.colorScheme.onSurfaceVariant
-    val cancelColor = if (isDark) SoftRedDark else SoftRedLight
-    val trackColor = if (isDark) Color(0xFF2D3648) else Color(0xFFE3E6EC)
-    val barColor = if (isDark) Color(0xFF5A9BFF) else DialogBluePrimary
 
-    val title = when (mode) {
-        StatusComposerMode.VIDEO -> "Subiendo video…"
-        StatusComposerMode.PHOTO -> "Subiendo foto…"
-        StatusComposerMode.TEXT -> "Publicando…"
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.58f))
-            .pointerInput(Unit) { detectTapGestures { } }
-            .testTag("status_uploading_dialog"),
-        contentAlignment = Alignment.Center
-    ) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = cardBg,
-            tonalElevation = 0.dp,
-            shadowElevation = 12.dp,
-            modifier = Modifier
-                .widthIn(min = 260.dp, max = 280.dp)
-                .padding(vertical = 8.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 22.dp, vertical = 22.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = title,
-                    fontFamily = InterFontFamily,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = titleColor,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-
-                if (mode == StatusComposerMode.TEXT) {
-                    CircularProgressIndicator(
-                        color = barColor,
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    TextButton(
-                        onClick = onCancel,
-                        modifier = Modifier
-                            .defaultMinSize(minHeight = 44.dp)
-                            .testTag("status_upload_cancel_button")
-                    ) {
-                        Text(
-                            text = "Cancelar",
-                            fontFamily = InterFontFamily,
-                            fontSize = 14.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = cancelColor
-                        )
-                    }
-                } else {
-                    val pct = (progress * 100f).toInt().coerceIn(0, 100)
-                    LinearProgressIndicator(
-                        progress = { progress.coerceIn(0.02f, 1f) },
-                        color = barColor,
-                        trackColor = trackColor,
-                        strokeCap = StrokeCap.Round,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "$pct %",
-                            fontFamily = InterFontFamily,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = bodyColor
-                        )
-                        TextButton(
-                            onClick = onCancel,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier
-                                .defaultMinSize(minHeight = 44.dp)
-                                .testTag("status_upload_cancel_button")
-                        ) {
-                            Text(
-                                text = "Cancelar",
-                                fontFamily = InterFontFamily,
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = cancelColor
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatusPublishErrorDialog(
-    message: String,
-    onRetry: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    val isDark = LocalDarkTheme.current
-    val cardBg = if (isDark) Color(0xFF1E2430) else MaterialTheme.colorScheme.surface
-    val titleColor = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
-    val bodyColor = if (isDark) Color(0xFFB6C0D1) else MaterialTheme.colorScheme.onSurfaceVariant
-    val buttonBlue = if (isDark) DialogBluePrimary else MaterialTheme.colorScheme.primary
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.58f))
-            .pointerInput(Unit) { detectTapGestures { } }
-            .testTag("status_publish_error_dialog"),
-        contentAlignment = Alignment.Center
-    ) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = cardBg,
-            tonalElevation = 0.dp,
-            shadowElevation = 12.dp,
-            modifier = Modifier
-                .widthIn(min = 260.dp, max = 280.dp)
-                .padding(vertical = 8.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 22.dp, vertical = 22.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(CircleShape)
-                        .background(AmberWarnColor.copy(alpha = 0.22f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(AmberWarnColor),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.PriorityHigh,
-                            contentDescription = "Advertencia",
-                            tint = Color(0xFF1A1D24),
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(14.dp))
-                Text(
-                    text = "No se pudo publicar",
-                    fontFamily = InterFontFamily,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = titleColor,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = message,
-                    fontFamily = InterFontFamily,
-                    fontSize = 14.sp,
-                    color = bodyColor,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(18.dp))
-                Button(
-                    onClick = onRetry,
-                    shape = RoundedCornerShape(50),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = buttonBlue,
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .defaultMinSize(minHeight = 46.dp)
-                        .testTag("status_publish_retry_button")
-                ) {
-                    Text(
-                        text = "Reintentar",
-                        fontFamily = InterFontFamily,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                TextButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .defaultMinSize(minHeight = 44.dp)
-                        .testTag("status_publish_error_close_button")
-                ) {
-                    Text(
-                        text = "Cerrar",
-                        fontFamily = InterFontFamily,
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = bodyColor
-                    )
-                }
-            }
-        }
-    }
-}
 
 private suspend fun loadAppAccessiblePhotos(context: Context): List<LocalGalleryMediaItem> =
     withContext(Dispatchers.IO) {

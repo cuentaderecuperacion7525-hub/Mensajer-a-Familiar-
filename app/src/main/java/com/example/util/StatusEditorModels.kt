@@ -80,7 +80,9 @@ data class StatusOverlayBundle(
 data class StatusStudioDraftItem(
     val id: String,
     val isVideo: Boolean,
-    val uri: Uri,
+    val uri: Uri = Uri.EMPTY,
+    val isTextStatus: Boolean = false,
+    val backgroundHex: String = "#0E7C66",
     val caption: String = "",
     val overlays: StatusOverlayBundle = StatusOverlayBundle(),
     val musicTrack: StatusMusicTrack? = null,

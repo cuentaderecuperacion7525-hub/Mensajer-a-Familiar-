@@ -1,5 +1,10 @@
 # Novedades de FamiChat
 
+## 2.8.66
+- Unificación completa para crear estados de Texto, Foto y Video con el mismo estudio creativo:
+  - Los estados de Texto ahora comparten el mismo botón circular de cierre, herramientas laterales (Texto, Sticker, Música con recortador de 30 s y Dibujo), selección de color de fondo, barra inferior compacta de una línea con menciones `@`, selector de audiencia («Toda la familia» o «Personas concretas») y botón azul de envío.
+  - Al ver un estado de texto se muestran sus textos con estilo, stickers, dibujos, música recortada y comentarios.
+
 ## 2.8.65
 - Ajuste visual en la barra inferior de publicar estado: el campo «Añade un comentario…» ahora es una píldora compacta de una sola línea (`46 dp`) con márgenes más estilizados.
 

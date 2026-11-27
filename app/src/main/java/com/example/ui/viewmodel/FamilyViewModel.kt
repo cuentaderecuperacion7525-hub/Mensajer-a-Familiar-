@@ -4027,7 +4027,8 @@ class FamilyViewModel(
         if (activeStatusPublishJob?.isActive == true) return
         val nonEmpty = requests.filter {
             when (it.mode) {
-                StatusComposerMode.TEXT -> it.text.trim().isNotEmpty()
+                StatusComposerMode.TEXT ->
+                    it.text.trim().isNotEmpty() || it.overlayBundle?.isEmptyEdits() == false
                 StatusComposerMode.PHOTO -> it.photoUri != null
                 StatusComposerMode.VIDEO -> it.videoUri != null
             }
@@ -4073,7 +4074,8 @@ class FamilyViewModel(
             when (request.mode) {
                 StatusComposerMode.TEXT -> {
                     val clean = request.text.trim()
-                    if (clean.isEmpty()) {
+                    val hasOverlayEdits = request.overlayBundle?.isEmptyEdits() == false
+                    if (clean.isEmpty() && !hasOverlayEdits) {
                         _statusPublishState.value = StatusPublishUiState.Idle
                         return false
                     }
@@ -4095,6 +4097,7 @@ class FamilyViewModel(
                         viewedByMemberIdsJson = JsonHelpers.encodeStringList(listOf(currentId)),
                         authorUid = currentUserId,
                         musicTrack = request.musicTrack,
+                        overlayBundle = request.overlayBundle?.takeIf { !it.isEmptyEdits() },
                         visibleToMemberIds = request.visibleToMemberIds
                     )
                     val res = withTimeoutOrNull(18_000L) {

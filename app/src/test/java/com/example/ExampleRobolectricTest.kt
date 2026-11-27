@@ -3316,11 +3316,16 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
 
-    // Starts on Texto tab with empty prompt, 0/280, hidden 24h badge, disabled Publicar
+    // Starts on unified Text Studio with tap prompt, 4 right tools, audience pill, disabled Send button
     composeTestRule.onNodeWithTag("status_composer_screen").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_media_studio").assertIsDisplayed()
     composeTestRule.onNodeWithText("Se borra en 24 horas").assertDoesNotExist()
-    composeTestRule.onNodeWithText("Escribe tu estado…").assertIsDisplayed()
-    composeTestRule.onNodeWithText("0/280").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Toca para escribir…").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("studio_tool_text").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("studio_tool_sticker").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_music_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("studio_tool_draw").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("studio_audience_pill").assertIsDisplayed()
     composeTestRule.onNodeWithTag("publish_status_button").assertIsNotEnabled()
 
     // Empty close button closes immediately without discard confirmation
@@ -3329,14 +3334,20 @@ class ExampleRobolectricTest {
     assertEquals(1, closedCount)
     composeTestRule.onNodeWithTag("status_discard_dialog").assertDoesNotExist()
 
-    // Select a different color, enter text, verify counter and enabled publish button
+    // Select a different color, enter text in compact bottom comment pill, and verify enabled Send button
     composeTestRule.onNodeWithTag("status_color_option_1").performClick()
     composeTestRule.onNodeWithTag("status_text_input").performTextInput("Hoy cenamos en casa")
     composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithText("19/280").assertIsDisplayed()
     composeTestRule.onNodeWithTag("publish_status_button").assertIsEnabled()
 
-    // Switch to Foto and Video galleries and verify titles/tiles, then return to Texto with preserved text
+    // Also open Text tool in Text Studio to add a styled canvas layer
+    composeTestRule.onNodeWithTag("studio_tool_text").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("tool_text_input").performTextInput("Familia")
+    composeTestRule.onNodeWithTag("tool_text_done").performClick()
+    composeTestRule.waitForIdle()
+
+    // Switch to Foto and Video galleries and verify titles/tiles, then return to Texto with preserved state
     composeTestRule.onNodeWithTag("status_tab_photo").performClick()
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithText("Recientes").assertIsDisplayed()
@@ -3353,22 +3364,23 @@ class ExampleRobolectricTest {
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithText("Hoy cenamos en casa").assertIsDisplayed()
 
-    // Closing with text shows discard confirmation; Keep Editing keeps state, Discard closes
+    // Closing with content shows unified discard confirmation; Keep Editing keeps state, Discard closes
     composeTestRule.onNodeWithTag("status_close_button").performClick()
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("status_discard_dialog").assertIsDisplayed()
-    composeTestRule.onNodeWithText("¿Descartar este estado?").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Se perderá lo que escribiste.").assertIsDisplayed()
+    composeTestRule.onNodeWithText("¿Descartar el estado?").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Se perderán los cambios sin publicar.").assertIsDisplayed()
     composeTestRule.onNodeWithTag("status_discard_keep_editing").performClick()
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("status_discard_dialog").assertDoesNotExist()
 
-    // Publish invokes callback with entered text and chosen color (#1A5FD4)
+    // Publish invokes callback with entered text, chosen color (#1A5FD4), and overlayBundle
     composeTestRule.onNodeWithTag("publish_status_button").performClick()
     composeTestRule.waitForIdle()
     assertEquals(1, publishCalls.size)
     assertEquals("Hoy cenamos en casa", publishCalls.first().text)
     assertEquals("#1A5FD4", publishCalls.first().backgroundHex)
+    assertEquals("Familia", publishCalls.first().overlayBundle?.texts?.firstOrNull()?.text)
 
     // Confirm Discard closes composer
     composeTestRule.onNodeWithTag("status_close_button").performClick()
@@ -3382,21 +3394,16 @@ class ExampleRobolectricTest {
   @Config(qualifiers = "w411dp-h891dp")
   fun `status composer uploading cancel and offline retry dialogs follow theme without losing text`() {
     val publishState = androidx.compose.runtime.mutableStateOf<com.example.ui.viewmodel.StatusPublishUiState>(
-      com.example.ui.viewmodel.StatusPublishUiState.Publishing(
-        mode = com.example.ui.viewmodel.StatusComposerMode.VIDEO,
-        progress = 0.62f
-      )
+      com.example.ui.viewmodel.StatusPublishUiState.Idle
     )
-    var cancelCalls = 0
     var dismissErrorCalls = 0
-    var retryCount = 0
 
     composeTestRule.setContent {
       com.example.ui.theme.FamiChatTheme(darkTheme = true) {
         com.example.ui.components.StatusComposerScreen(
           publishState = publishState.value,
-          onPublish = { retryCount++ },
-          onCancelPublish = { cancelCalls++ },
+          onPublish = {},
+          onCancelPublish = {},
           onDismissPublishError = { dismissErrorCalls++ },
           onClose = {}
         )
@@ -3404,20 +3411,26 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
 
-    // Uploading dialog displays title, percentage, and Cancel
-    composeTestRule.onNodeWithTag("status_uploading_dialog").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Subiendo video…").assertIsDisplayed()
-    composeTestRule.onNodeWithText("62 %").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("status_upload_cancel_button").performClick()
-    assertEquals(1, cancelCalls)
+    // Type text, then move into Publishing state -> disables Send button without clearing text
+    composeTestRule.onNodeWithTag("status_text_input").performTextInput("Estado en camino")
+    composeTestRule.waitForIdle()
 
-    // Switch to error state -> shows offline message, Retry & Close
+    publishState.value = com.example.ui.viewmodel.StatusPublishUiState.Publishing(
+      mode = com.example.ui.viewmodel.StatusComposerMode.TEXT,
+      progress = 0.62f
+    )
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("publish_status_button").assertIsNotEnabled()
+    composeTestRule.onNodeWithText("Estado en camino").assertIsDisplayed()
+
+    // Switch to error state -> displays inline retry banner, re-enables Send button, preserves text
     publishState.value = com.example.ui.viewmodel.StatusPublishUiState.Error("Sin conexión. Tu estado no se perdió.")
     composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithTag("status_publish_error_dialog").assertIsDisplayed()
-    composeTestRule.onNodeWithText("No se pudo publicar").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Sin conexión. Tu estado no se perdió.").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("status_publish_error_close_button").performClick()
+    composeTestRule.onNodeWithTag("studio_publish_error_banner").assertIsDisplayed()
+    composeTestRule.onNodeWithText("No se pudo publicar. Inténtalo de nuevo").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("publish_status_button").assertIsEnabled()
+    composeTestRule.onNodeWithText("Estado en camino").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("studio_publish_error_banner").performClick()
     assertEquals(1, dismissErrorCalls)
   }
 
@@ -3563,6 +3576,9 @@ class ExampleRobolectricTest {
     assertEquals("t1", toggledFavs.first().trackId)
 
     composeTestRule.onNodeWithTag("music_select_t1").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_music_trimmer_sheet").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("music_trimmer_confirm").performClick()
     composeTestRule.waitForIdle()
 
     // Pill is shown and publish request includes selected musicTrack
@@ -4112,6 +4128,76 @@ class ExampleRobolectricTest {
     composeTestRule.waitForIdle()
 
     composeTestRule.onNodeWithText("Resultado Buscado 1").assertIsDisplayed()
+  }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `status viewer renders overlay stickers and styled texts for TEXT statuses`() {
+    val member = com.example.data.model.FamilyMemberEntity(
+      id = "m_mama",
+      name = "Mamá",
+      roleLabel = "Mamá",
+      isAdmin = true,
+      avatarColorHex = "#1A73E8",
+      avatarEmoji = "👩"
+    )
+    val now = System.currentTimeMillis()
+    val bundle = com.example.util.StatusOverlayBundle(
+      texts = listOf(
+        com.example.util.StatusTextOverlay(
+          id = "txt_1",
+          text = "Feliz viernes",
+          xNorm = 0.5f,
+          yNorm = 0.45f,
+          colorArgb = 0xFFFFFFFFL,
+          style = com.example.util.StatusTextStyle.BOLD
+        )
+      ),
+      stickers = listOf(
+        com.example.util.StatusStickerOverlay(
+          id = "stk_1",
+          kind = com.example.util.StatusStickerKind.FAMILY_BADGE,
+          value = "Familia",
+          xNorm = 0.5f,
+          yNorm = 0.62f
+        )
+      )
+    )
+    val status = com.example.data.model.FamilyStatusEntity(
+      id = "st_text_overlay",
+      memberId = "m_mama",
+      text = "Con cariño",
+      mediaUri = null,
+      mediaType = "TEXT",
+      backgroundHex = "#1A5FD4",
+      createdAt = now,
+      expiresAt = now + 86_400_000L,
+      overlayBundle = bundle
+    )
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = true) {
+        com.example.ui.components.StatusViewerDialog(
+          group = com.example.ui.components.MemberStatusGroup(
+            member = member,
+            items = listOf(status),
+            hasUnviewed = false
+          ),
+          activeMemberId = "m_papa",
+          allMembers = listOf(member),
+          onMarkViewed = {},
+          onDeleteStatus = {},
+          onReplyStatus = { _, _ -> },
+          onDismiss = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("status_viewer_text_overlays").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Feliz viernes").assertIsDisplayed()
+    composeTestRule.onNodeWithText("👨‍👩‍👧‍👦 Familia").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Con cariño").assertIsDisplayed()
   }
 }
 

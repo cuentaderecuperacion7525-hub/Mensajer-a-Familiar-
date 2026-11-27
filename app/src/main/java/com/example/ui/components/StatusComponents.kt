@@ -918,7 +918,9 @@ fun StatusViewerDialog(
                     .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (hasMedia && currentStatus.text.isNotBlank()) {
+                val showBottomComment = (hasMedia || currentStatus.overlayBundle?.texts?.isNotEmpty() == true) &&
+                    currentStatus.text.isNotBlank()
+                if (showBottomComment) {
                     Text(
                         text = currentStatus.text,
                         color = Color.White,
@@ -1201,20 +1203,32 @@ fun StatusViewerDialog(
                 }
 
                 else -> {
+                    val layers = currentStatus.overlayBundle
+                    val hasOverlayContent = layers != null && !layers.isEmptyEdits()
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 28.dp),
+                        modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = currentStatus.text,
-                            color = Color.White,
-                            fontSize = 26.sp,
-                            lineHeight = 34.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            textAlign = TextAlign.Center
-                        )
+                        if (hasOverlayContent) {
+                            StatusOverlayRenderBox(
+                                bundle = layers!!,
+                                interactive = false,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .testTag("status_viewer_text_overlays")
+                            )
+                        }
+                        if ((!hasOverlayContent || layers!!.texts.isEmpty()) && currentStatus.text.isNotBlank()) {
+                            Text(
+                                text = currentStatus.text,
+                                color = Color.White,
+                                fontSize = 26.sp,
+                                lineHeight = 34.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 28.dp)
+                            )
+                        }
                     }
                 }
             }

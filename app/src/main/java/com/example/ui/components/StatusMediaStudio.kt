@@ -21,10 +21,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -36,6 +38,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -137,6 +140,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.model.FamilyMemberEntity
 import com.example.ui.theme.InterFontFamily
+import com.example.ui.viewmodel.StatusComposerMode
 import com.example.ui.viewmodel.StatusPublishUiState
 import com.example.util.StatusDrawingPoint
 import com.example.util.StatusDrawingStroke
@@ -151,6 +155,7 @@ import com.example.util.StatusTextAlign
 import com.example.util.StatusTextOverlay
 import com.example.util.StatusTextStyle
 import com.example.util.VideoPreviewInfo
+import com.example.util.parseHexColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -171,6 +176,7 @@ private val StudioCircleBorder = Color.White.copy(alpha = 0.28f)
 private val StudioToolbarPillBg = Color.White.copy(alpha = 0.14f)
 private const val MAX_STUDIO_COMMENT_CHARS = 200
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StatusMediaStudioScreen(
     drafts: List<StatusStudioDraftItem>,
@@ -188,11 +194,13 @@ fun StatusMediaStudioScreen(
     onRequestAddMedia: (isVideo: Boolean, fromCamera: Boolean) -> Unit,
     onRequestClose: () -> Unit,
     onDismissPublishError: () -> Unit,
-    onPublishDrafts: () -> Unit
+    onPublishDrafts: () -> Unit,
+    onSelectComposerMode: ((StatusComposerMode) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val isImeVisible = WindowInsets.isImeVisible
 
     val isPublishing = publishState is StatusPublishUiState.Publishing
     val publishError = (publishState as? StatusPublishUiState.Error)?.message
@@ -242,11 +250,14 @@ fun StatusMediaStudioScreen(
         showAudienceSheet || showAddMediaMenu
 
     // Measure photo aspect ratio cleanly (off-UI) so we automatically switch between cover & contain+blur
-    var photoAspectRatio by remember(activeDraft.uri, activeDraft.isVideo) { mutableFloatStateOf(0f) }
-    var blurFallbackBitmap by remember(activeDraft.uri, activeDraft.isVideo) { mutableStateOf<Bitmap?>(null) }
+    var photoAspectRatio by remember(activeDraft.uri, activeDraft.isVideo, activeDraft.isTextStatus) { mutableFloatStateOf(0f) }
+    var blurFallbackBitmap by remember(activeDraft.uri, activeDraft.isVideo, activeDraft.isTextStatus) { mutableStateOf<Bitmap?>(null) }
 
-    LaunchedEffect(activeDraft.uri, activeDraft.isVideo) {
-        if (!activeDraft.isVideo) {
+    LaunchedEffect(activeDraft.uri, activeDraft.isVideo, activeDraft.isTextStatus) {
+        if (activeDraft.isTextStatus) {
+            photoAspectRatio = 0f
+            blurFallbackBitmap = null
+        } else if (!activeDraft.isVideo && activeDraft.uri != Uri.EMPTY) {
             val measured = withContext(Dispatchers.IO) {
                 runCatching {
                     val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -276,7 +287,7 @@ fun StatusMediaStudioScreen(
         }
     }
 
-    DisposableEffect(activeDraft.uri) {
+    DisposableEffect(activeDraft.uri, activeDraft.isTextStatus) {
         onDispose {
             val bmp = blurFallbackBitmap
             blurFallbackBitmap = null
@@ -515,8 +526,43 @@ fun StatusMediaStudioScreen(
                 }
                 val useContainWithBlur = ratioDiff > 1.42f
 
-                // Media Background + Main Layer
-                if (activeDraft.isVideo) {
+                // Media Background + Main Layer (Solid Color Canvas for Text, VideoView for Video, AsyncImage for Photo)
+                if (activeDraft.isTextStatus) {
+                    val solidBg = parseHexColor(activeDraft.backgroundHex, fallback = Color(0xFF0E7C66))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(solidBg)
+                            .clickable(
+                                enabled = activeTool == ActiveStudioTool.NONE,
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() }
+                            ) {
+                                if (activeDraft.overlays.texts.isEmpty()) {
+                                    openTextEditor(null)
+                                }
+                            }
+                    ) {
+                        if (activeDraft.overlays.texts.isEmpty() &&
+                            activeDraft.overlays.stickers.isEmpty() &&
+                            activeDraft.overlays.strokes.isEmpty() &&
+                            activeTool == ActiveStudioTool.NONE
+                        ) {
+                            Text(
+                                text = "Toca para escribir…",
+                                fontFamily = InterFontFamily,
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White.copy(alpha = 0.65f),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(horizontal = 32.dp)
+                                    .testTag("status_text_tap_prompt")
+                            )
+                        }
+                    }
+                } else if (activeDraft.isVideo) {
                     val vThumb = activeDraft.videoPreviewInfo?.thumbnailBitmap
                     if (useContainWithBlur && vThumb != null && !vThumb.isRecycled) {
                         BlurredMediaBackground(
@@ -555,7 +601,7 @@ fun StatusMediaStudioScreen(
                                 .clickable(
                                     enabled = activeTool == ActiveStudioTool.NONE,
                                     indication = null,
-                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                                    interactionSource = remember { MutableInteractionSource() }
                                 ) {
                                     val vv = videoViewRef ?: return@clickable
                                     if (isVideoPlaying) {
@@ -870,6 +916,78 @@ fun StatusMediaStudioScreen(
                                 tint = Color.White,
                                 modifier = Modifier.size(34.dp)
                             )
+                        }
+                    }
+
+                    // Text status controls at viewport bottom: 6 color swatches + Texto|Foto|Video mode switcher
+                    if (activeDraft.isTextStatus && !isDraggingOverlay) {
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .padding(bottom = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = Color.Black.copy(alpha = 0.28f),
+                                modifier = Modifier.padding(horizontal = 20.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    StatusComposerTextColors.forEachIndexed { idx, hex ->
+                                        val isSelected = activeDraft.backgroundHex.equals(hex, ignoreCase = true)
+                                        val swatchColor = parseHexColor(hex)
+                                        Box(
+                                            modifier = Modifier
+                                                .size(38.dp)
+                                                .clip(CircleShape)
+                                                .clickable {
+                                                    onUpdateActiveDraft { it.copy(backgroundHex = hex) }
+                                                }
+                                                .semantics { contentDescription = "Color de fondo ${idx + 1}" }
+                                                .testTag("status_color_option_$idx"),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isSelected) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(32.dp)
+                                                        .border(2.dp, Color.White, CircleShape)
+                                                        .padding(3.5.dp)
+                                                        .clip(CircleShape)
+                                                        .background(swatchColor)
+                                                )
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(25.dp)
+                                                        .clip(CircleShape)
+                                                        .background(swatchColor)
+                                                        .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!isImeVisible && onSelectComposerMode != null) {
+                                StatusComposerModePill(
+                                    currentMode = StatusComposerMode.TEXT,
+                                    containerColor = Color.Black.copy(alpha = 0.34f),
+                                    activeTextColor = Color(0xFF0B3D33),
+                                    onSelectTab = { next ->
+                                        focusManager.clearFocus()
+                                        keyboardController?.hide()
+                                        onSelectComposerMode(next)
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -1241,8 +1359,11 @@ fun StatusMediaStudioScreen(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .testTag(
-                                                if (activeDraft.isVideo) "status_video_caption_input"
-                                                else "status_photo_caption_input"
+                                                when {
+                                                    activeDraft.isTextStatus -> "status_text_input"
+                                                    activeDraft.isVideo -> "status_video_caption_input"
+                                                    else -> "status_photo_caption_input"
+                                                }
                                             )
                                     )
                                 }
@@ -1317,14 +1438,23 @@ fun StatusMediaStudioScreen(
                         }
 
                         // Right: 48.dp blue circle (#2F7FE0) with white paper plane ("Publicar")
+                        val canPublish = !isPublishing && (
+                            !activeDraft.isTextStatus ||
+                                activeDraft.caption.isNotBlank() ||
+                                !activeDraft.overlays.isEmptyEdits()
+                        )
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (isPublishing) StudioSendBlue.copy(alpha = 0.65f) else StudioSendBlue
+                                    when {
+                                        isPublishing -> StudioSendBlue.copy(alpha = 0.65f)
+                                        !canPublish -> StudioSendBlue.copy(alpha = 0.42f)
+                                        else -> StudioSendBlue
+                                    }
                                 )
-                                .clickable(enabled = !isPublishing) {
+                                .clickable(enabled = canPublish) {
                                     focusManager.clearFocus()
                                     keyboardController?.hide()
                                     onPublishDrafts()
@@ -1343,7 +1473,7 @@ fun StatusMediaStudioScreen(
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.Send,
                                     contentDescription = "Publicar",
-                                    tint = Color.White,
+                                    tint = if (canPublish) Color.White else Color.White.copy(alpha = 0.62f),
                                     modifier = Modifier.size(21.dp)
                                 )
                             }
