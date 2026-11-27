@@ -91,7 +91,10 @@ data class StatusPublishRequest(
     val videoCaption: String = "",
     val musicTrack: StatusMusicTrack? = null,
     val overlayBundle: com.example.util.StatusOverlayBundle? = null,
-    val visibleToMemberIds: List<String>? = null
+    val visibleToMemberIds: List<String>? = null,
+    val draftId: String = "",
+    val viewportAspectRatio: Float = 0f,
+    val useContainWithBlur: Boolean = false
 )
 
 sealed interface StatusPublishUiState {
@@ -3967,6 +3970,7 @@ class FamilyViewModel(
     val statusPublishState: StateFlow<StatusPublishUiState> = _statusPublishState.asStateFlow()
     private var activeStatusPublishJob: Job? = null
     private var activeStatusPublishId: String? = null
+    private val publishedDraftIdsInSession = mutableSetOf<String>()
 
     private fun isNetworkConnected(): Boolean {
         return try {
@@ -4019,6 +4023,11 @@ class FamilyViewModel(
         _statusPublishState.value = StatusPublishUiState.Idle
     }
 
+    fun resetStatusPublishSession() {
+        cancelStatusPublish()
+        publishedDraftIdsInSession.clear()
+    }
+
     fun publishStatus(request: StatusPublishRequest, onSuccess: () -> Unit) {
         publishStatusBatch(listOf(request), onSuccess)
     }
@@ -4037,6 +4046,14 @@ class FamilyViewModel(
             _statusPublishState.value = StatusPublishUiState.Idle
             return
         }
+        val pendingRequests = filterPendingStatusBatchRequests(nonEmpty, publishedDraftIdsInSession)
+        if (pendingRequests.isEmpty()) {
+            publishedDraftIdsInSession.clear()
+            _statusPublishState.value = StatusPublishUiState.Idle
+            showMessage("Estado publicado")
+            onSuccess()
+            return
+        }
         val famId = _activeFamilyId.value
         val currentId = _activeMemberId.value
         if (famId.isNullOrBlank() || currentId.isNullOrBlank()) {
@@ -4045,11 +4062,15 @@ class FamilyViewModel(
         }
         activeStatusPublishJob = viewModelScope.launch {
             try {
-                for (req in nonEmpty) {
+                for (req in pendingRequests) {
                     coroutineContext.ensureActive()
                     val ok = publishSingleStatusInternal(req, famId, currentId)
                     if (!ok) return@launch
+                    if (req.draftId.isNotBlank()) {
+                        publishedDraftIdsInSession.add(req.draftId)
+                    }
                 }
+                publishedDraftIdsInSession.clear()
                 _statusPublishState.value = StatusPublishUiState.Idle
                 showMessage("Estado publicado")
                 onSuccess()
@@ -4123,7 +4144,9 @@ class FamilyViewModel(
                     val dataUri = com.example.util.StatusPhotoCanvasRenderer.renderAndCompressPhoto(
                         context = appContext,
                         photoUri = pickedUri,
-                        overlayBundle = request.overlayBundle
+                        overlayBundle = request.overlayBundle,
+                        viewportAspectRatio = request.viewportAspectRatio,
+                        useContainWithBlur = request.useContainWithBlur
                     )
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     if (dataUri == null) {
@@ -4523,6 +4546,14 @@ class FamilyViewModel(
     companion object {
         fun matchesSwitchKey(entered: String, activeSwitchPin: String): Boolean =
             activeSwitchPin.length == 4 && entered == activeSwitchPin
+
+        fun filterPendingStatusBatchRequests(
+            requests: List<StatusPublishRequest>,
+            alreadyPublishedDraftIds: Set<String>
+        ): List<StatusPublishRequest> =
+            requests.filter { req ->
+                req.draftId.isBlank() || req.draftId !in alreadyPublishedDraftIds
+            }
 
         fun isMessageVisibleForMember(
             msg: ChatMessageEntity,

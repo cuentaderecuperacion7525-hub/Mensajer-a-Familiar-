@@ -265,7 +265,7 @@ service cloud.firestore {
              (!('videoThumbnailData' in data) || data.videoThumbnailData == null || (data.videoThumbnailData is string && data.videoThumbnailData.size() <= 150000)) &&
              (!('videoDurationSec' in data) || data.videoDurationSec == null || (data.videoDurationSec is int && data.videoDurationSec >= 0 && data.videoDurationSec <= 600)) &&
              (!('chunkCount' in data) || data.chunkCount == null || (data.chunkCount is int && data.chunkCount >= 0 && data.chunkCount <= 25)) &&
-             (data.text.size() > 0 || ('mediaData' in data && data.mediaData is string && data.mediaData.size() > 0) || ('chunkCount' in data && data.chunkCount is int && data.chunkCount > 0)) &&
+             (data.text.size() > 0 || ('mediaData' in data && data.mediaData is string && data.mediaData.size() > 0) || ('videoThumbnailData' in data && data.videoThumbnailData is string && data.videoThumbnailData.size() > 0) || ('chunkCount' in data && data.chunkCount is int && data.chunkCount > 0)) &&
              data.backgroundHex is string && data.backgroundHex.size() >= 1 && data.backgroundHex.size() <= 16 &&
              data.timestamp is int && data.timestamp > 0 &&
              data.expiresAt is int && data.expiresAt > data.timestamp &&

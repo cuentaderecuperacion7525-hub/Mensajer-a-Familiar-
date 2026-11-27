@@ -579,5 +579,100 @@ class ExampleUnitTest {
     assertFalse(com.example.ui.viewmodel.FamilyViewModel.matchesSwitchKey(entered = "", activeSwitchPin = "2802"))
     assertFalse(com.example.ui.viewmodel.FamilyViewModel.matchesSwitchKey(entered = "2802", activeSwitchPin = ""))
   }
+
+  @Test
+  fun `status photo viewport mapping preserves overlay position and scale across Fit and Crop`() {
+    val bundle = com.example.util.StatusOverlayBundle(
+      texts = listOf(
+        com.example.util.StatusTextOverlay(
+          id = "t1",
+          text = "Familia",
+          xNorm = 0.5f,
+          yNorm = 0.3f,
+          scale = 1.0f
+        )
+      ),
+      strokes = listOf(
+        com.example.util.StatusDrawingStroke(
+          id = "s1",
+          points = listOf(com.example.util.StatusDrawingPoint(0.5f, 0.35f)),
+          strokeWidthNorm = 0.012f
+        )
+      )
+    )
+
+    // 16:9 landscape photo inside 9:16 portrait viewport (ContentScale.Fit with blur)
+    val mappedFit = com.example.util.StatusPhotoCanvasRenderer.mapViewportOverlayToPhoto(
+      bundle = bundle,
+      photoWidth = 1600,
+      photoHeight = 900,
+      viewportAspectRatio = 9f / 16f,
+      useContainWithBlur = true
+    )
+    // y=0.3 in viewport is near top of letterboxed 16:9 image -> clamped near top (~0.03), scale scaled up (~1.778x)
+    assertTrue(mappedFit.texts.first().yNorm < 0.1f)
+    assertTrue(mappedFit.texts.first().scale > 1.5f)
+    assertTrue(mappedFit.strokes.first().strokeWidthNorm > 0.018f)
+
+    // 3:4 portrait photo inside 9:16 portrait viewport (ContentScale.Crop)
+    val mappedCrop = com.example.util.StatusPhotoCanvasRenderer.mapViewportOverlayToPhoto(
+      bundle = bundle.copy(
+        texts = listOf(
+          com.example.util.StatusTextOverlay(
+            id = "t2",
+            text = "Borde",
+            xNorm = 0.9f,
+            yNorm = 0.5f,
+            scale = 1.0f
+          )
+        )
+      ),
+      photoWidth = 1200,
+      photoHeight = 1600,
+      viewportAspectRatio = 9f / 16f,
+      useContainWithBlur = false
+    )
+    // x=0.9 in viewport maps inward to 0.8 on uncropped 3:4 image and scale shrinks to 0.75
+    assertEquals(0.8f, mappedCrop.texts.first().xNorm, 0.02f)
+    assertEquals(0.75f, mappedCrop.texts.first().scale, 0.02f)
+  }
+
+  @Test
+  fun `status batch retry deduplication skips already published draftIds and keeps failed items`() {
+    val req1 = com.example.ui.viewmodel.StatusPublishRequest(
+      mode = com.example.ui.viewmodel.StatusComposerMode.PHOTO,
+      draftId = "draft_a"
+    )
+    val req2 = com.example.ui.viewmodel.StatusPublishRequest(
+      mode = com.example.ui.viewmodel.StatusComposerMode.VIDEO,
+      draftId = "draft_b"
+    )
+    val reqBlank = com.example.ui.viewmodel.StatusPublishRequest(
+      mode = com.example.ui.viewmodel.StatusComposerMode.TEXT,
+      text = "Hola",
+      draftId = ""
+    )
+    val pending = com.example.ui.viewmodel.FamilyViewModel.filterPendingStatusBatchRequests(
+      requests = listOf(req1, req2, reqBlank),
+      alreadyPublishedDraftIds = setOf("draft_a")
+    )
+    assertEquals(listOf(req2, reqBlank), pending)
+  }
+
+  @Test
+  fun `non video music status duration follows trimmed track length while silent or video keeps default`() {
+    val track22s = com.example.util.StatusMusicTrack(
+      trackId = "m1",
+      title = "Canción",
+      artist = "Artista",
+      previewUrl = "https://example.com/a.m4a",
+      trimDurationSec = 22
+    )
+    val trackShort = track22s.copy(trimDurationSec = 2)
+    assertEquals(22_000L, com.example.ui.components.resolveStatusDisplayDurationMs(isVideo = false, attachedMusic = track22s))
+    assertEquals(6_000L, com.example.ui.components.resolveStatusDisplayDurationMs(isVideo = false, attachedMusic = trackShort))
+    assertEquals(6_000L, com.example.ui.components.resolveStatusDisplayDurationMs(isVideo = false, attachedMusic = null))
+    assertEquals(6_000L, com.example.ui.components.resolveStatusDisplayDurationMs(isVideo = true, attachedMusic = track22s))
+  }
 }
 

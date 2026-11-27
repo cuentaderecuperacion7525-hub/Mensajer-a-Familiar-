@@ -264,8 +264,29 @@ fun StatusMediaStudioScreen(
                     context.contentResolver.openInputStream(activeDraft.uri)?.use {
                         BitmapFactory.decodeStream(it, null, opts)
                     }
-                    val ratio = if (opts.outWidth > 0 && opts.outHeight > 0) {
-                        opts.outWidth.toFloat() / opts.outHeight.toFloat()
+                    var measuredW = opts.outWidth
+                    var measuredH = opts.outHeight
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && measuredW > 0 && measuredH > 0) {
+                        runCatching {
+                            context.contentResolver.openInputStream(activeDraft.uri)?.use { exifStream ->
+                                val orient = android.media.ExifInterface(exifStream).getAttributeInt(
+                                    android.media.ExifInterface.TAG_ORIENTATION,
+                                    android.media.ExifInterface.ORIENTATION_NORMAL
+                                )
+                                if (orient == android.media.ExifInterface.ORIENTATION_ROTATE_90 ||
+                                    orient == android.media.ExifInterface.ORIENTATION_ROTATE_270 ||
+                                    orient == android.media.ExifInterface.ORIENTATION_TRANSPOSE ||
+                                    orient == android.media.ExifInterface.ORIENTATION_TRANSVERSE
+                                ) {
+                                    val tmp = measuredW
+                                    measuredW = measuredH
+                                    measuredH = tmp
+                                }
+                            }
+                        }
+                    }
+                    val ratio = if (measuredW > 0 && measuredH > 0) {
+                        measuredW.toFloat() / measuredH.toFloat()
                     } else {
                         0f
                     }
@@ -525,6 +546,21 @@ fun StatusMediaStudioScreen(
                     1f
                 }
                 val useContainWithBlur = ratioDiff > 1.42f
+
+                LaunchedEffect(activeDraft.id, vpRatio, useContainWithBlur) {
+                    if (!activeDraft.isTextStatus && !activeDraft.isVideo) {
+                        val ratioChanged = kotlin.math.abs(activeDraft.viewportAspectRatio - vpRatio) > 0.002f
+                        val modeChanged = activeDraft.useContainWithBlur != useContainWithBlur
+                        if (ratioChanged || modeChanged) {
+                            onUpdateActiveDraft { cur ->
+                                cur.copy(
+                                    viewportAspectRatio = vpRatio,
+                                    useContainWithBlur = useContainWithBlur
+                                )
+                            }
+                        }
+                    }
+                }
 
                 // Media Background + Main Layer (Solid Color Canvas for Text, VideoView for Video, AsyncImage for Photo)
                 if (activeDraft.isTextStatus) {

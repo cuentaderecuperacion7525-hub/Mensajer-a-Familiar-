@@ -343,6 +343,25 @@ test("Family statuses enforce member access, non-empty content, and viewer track
     })
   );
 
+  // Valid text status with overlay layers in videoThumbnailData and empty caption succeeds
+  const overlayStatusRef = aliceDb.collection("families").doc("fam_1").collection("statuses").doc("st_layers_only");
+  await assertSucceeds(
+    overlayStatusRef.set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      memberId: "member_papa",
+      text: "",
+      mediaType: "TEXT",
+      videoThumbnailData: "__FCLAYER__{\"t\":[{\"id\":\"txt_1\",\"tx\":\"Hola\",\"x\":0.5,\"y\":0.44}]}",
+      backgroundHex: "#0E7C66",
+      timestamp: now,
+      expiresAt: now + 86400000,
+      viewedByMemberIds: ["member_papa"],
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
   // Valid text status succeeds
   await assertSucceeds(
     statusRef.set({

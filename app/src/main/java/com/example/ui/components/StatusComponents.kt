@@ -359,6 +359,14 @@ fun FamilyStatusStrip(
     }
 }
 
+internal fun resolveStatusDisplayDurationMs(
+    isVideo: Boolean,
+    attachedMusic: com.example.util.StatusMusicTrack?
+): Long {
+    if (isVideo || attachedMusic == null) return 6000L
+    return attachedMusic.trimDurationSec.coerceIn(6, 30) * 1000L
+}
+
 @Composable
 private fun StatusSegmentedProgressRow(
     itemCount: Int,
@@ -367,13 +375,14 @@ private fun StatusSegmentedProgressRow(
     isVideo: Boolean,
     videoProgress: Float,
     isPaused: Boolean,
+    displayDurationMs: Long = 6000L,
     onAutoAdvance: () -> Unit
 ) {
     var timerProgress by remember(currentStatusId) { mutableFloatStateOf(0f) }
 
-    LaunchedEffect(currentStatusId, isVideo, isPaused) {
+    LaunchedEffect(currentStatusId, isVideo, isPaused, displayDurationMs) {
         if (isVideo || isPaused) return@LaunchedEffect
-        val totalMs = 6000L
+        val totalMs = displayDurationMs.coerceIn(3000L, 35000L)
         val stepMs = 50L
         val steps = (totalMs / stepMs).toInt()
         val startStep = (timerProgress * steps).toInt()
@@ -702,6 +711,10 @@ fun StatusViewerDialog(
                     isVideo = currentStatus.isVideo,
                     videoProgress = videoProgress,
                     isPaused = isOverlayPaused,
+                    displayDurationMs = resolveStatusDisplayDurationMs(
+                        isVideo = currentStatus.isVideo,
+                        attachedMusic = attachedMusic
+                    ),
                     onAutoAdvance = ::advanceNextOrDismiss
                 )
                 Spacer(modifier = Modifier.height(8.dp))

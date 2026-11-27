@@ -36,7 +36,9 @@ object StatusPhotoCanvasRenderer {
     suspend fun renderAndCompressPhoto(
         context: Context,
         photoUri: Uri,
-        overlayBundle: StatusOverlayBundle?
+        overlayBundle: StatusOverlayBundle?,
+        viewportAspectRatio: Float = 0f,
+        useContainWithBlur: Boolean = false
     ): String? = withContext(Dispatchers.IO) {
         if (overlayBundle == null || overlayBundle.isEmptyEdits()) {
             return@withContext ImageCompressionHelper.compressToDataUri(context, photoUri)
@@ -52,6 +54,14 @@ object StatusPhotoCanvasRenderer {
             val w = orientedBitmap.width.coerceAtLeast(1)
             val h = orientedBitmap.height.coerceAtLeast(1)
 
+            val mappedBundle = mapViewportOverlayToPhoto(
+                bundle = overlayBundle,
+                photoWidth = w,
+                photoHeight = h,
+                viewportAspectRatio = viewportAspectRatio,
+                useContainWithBlur = useContainWithBlur
+            )
+
             workingBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val mainCanvas = Canvas(workingBitmap)
             mainCanvas.drawBitmap(orientedBitmap, 0f, 0f, null)
@@ -61,7 +71,7 @@ object StatusPhotoCanvasRenderer {
             val minDim = min(w, h).toFloat()
 
             // 1. Freehand strokes (drawn on an isolated transparent layer so erasers only clear ink)
-            if (overlayBundle.strokes.isNotEmpty()) {
+            if (mappedBundle.strokes.isNotEmpty()) {
                 strokeBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                 val strokeCanvas = Canvas(strokeBitmap)
                 val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -76,7 +86,7 @@ object StatusPhotoCanvasRenderer {
                     strokeJoin = Paint.Join.ROUND
                 }
 
-                overlayBundle.strokes.forEach { stroke ->
+                mappedBundle.strokes.forEach { stroke ->
                     if (stroke.points.isEmpty()) return@forEach
                     val p = if (stroke.isEraser) clearPaint else drawPaint
                     if (!stroke.isEraser) {
@@ -104,8 +114,8 @@ object StatusPhotoCanvasRenderer {
 
             // 2. Merged z-ordered stickers and texts
             val orderedLayers = buildList<OrderedPhotoLayer> {
-                overlayBundle.stickers.forEach { add(OrderedPhotoLayer.Sticker(it)) }
-                overlayBundle.texts.forEach { add(OrderedPhotoLayer.Text(it)) }
+                mappedBundle.stickers.forEach { add(OrderedPhotoLayer.Sticker(it)) }
+                mappedBundle.texts.forEach { add(OrderedPhotoLayer.Text(it)) }
             }.sortedBy { it.z }
 
             orderedLayers.forEach { layer ->
@@ -385,6 +395,80 @@ object StatusPhotoCanvasRenderer {
         } else {
             oriented
         }
+    }
+
+    /**
+     * Converts overlay coordinates normalized in the Studio viewport (`0..1`) into coordinates
+     * normalized in the oriented photo bitmap (`0..1`), accounting for `ContentScale.Crop` vs
+     * letterboxed `ContentScale.Fit` and relative min-dimension scaling.
+     */
+    internal fun mapViewportOverlayToPhoto(
+        bundle: StatusOverlayBundle,
+        photoWidth: Int,
+        photoHeight: Int,
+        viewportAspectRatio: Float,
+        useContainWithBlur: Boolean
+    ): StatusOverlayBundle {
+        if (photoWidth <= 0 || photoHeight <= 0 || viewportAspectRatio <= 0.05f || viewportAspectRatio.isNaN()) {
+            return bundle
+        }
+        val imgRatio = photoWidth.toFloat() / photoHeight.toFloat()
+        val vpRatio = viewportAspectRatio
+
+        val dispW: Float
+        val dispH: Float
+        if (useContainWithBlur) {
+            if (imgRatio > vpRatio) {
+                dispW = 1f
+                dispH = (vpRatio / imgRatio).coerceAtLeast(0.05f)
+            } else {
+                dispW = (imgRatio / vpRatio).coerceAtLeast(0.05f)
+                dispH = 1f
+            }
+        } else {
+            if (imgRatio > vpRatio) {
+                dispW = (imgRatio / vpRatio).coerceAtLeast(0.05f)
+                dispH = 1f
+            } else {
+                dispW = 1f
+                dispH = (vpRatio / imgRatio).coerceAtLeast(0.05f)
+            }
+        }
+
+        val vpMinRatio = min(vpRatio, 1f)
+        val renderedMinRatio = min(dispW * vpRatio, dispH).coerceAtLeast(0.05f)
+        val scaleFactor = (vpMinRatio / renderedMinRatio).coerceIn(0.35f, 3.5f)
+
+        fun mapPointX(vx: Float): Float = 0.5f + (vx - 0.5f) / dispW
+        fun mapPointY(vy: Float): Float = 0.5f + (vy - 0.5f) / dispH
+
+        return bundle.copy(
+            texts = bundle.texts.map { t ->
+                t.copy(
+                    xNorm = mapPointX(t.xNorm).coerceIn(0.03f, 0.97f),
+                    yNorm = mapPointY(t.yNorm).coerceIn(0.03f, 0.97f),
+                    scale = (t.scale * scaleFactor).coerceIn(0.25f, 6.0f)
+                )
+            },
+            stickers = bundle.stickers.map { st ->
+                st.copy(
+                    xNorm = mapPointX(st.xNorm).coerceIn(0.03f, 0.97f),
+                    yNorm = mapPointY(st.yNorm).coerceIn(0.03f, 0.97f),
+                    scale = (st.scale * scaleFactor).coerceIn(0.25f, 6.0f)
+                )
+            },
+            strokes = bundle.strokes.map { stroke ->
+                stroke.copy(
+                    strokeWidthNorm = (stroke.strokeWidthNorm * scaleFactor).coerceIn(0.002f, 0.08f),
+                    points = stroke.points.map { pt ->
+                        StatusDrawingPoint(
+                            xNorm = mapPointX(pt.xNorm).coerceIn(-0.5f, 1.5f),
+                            yNorm = mapPointY(pt.yNorm).coerceIn(-0.5f, 1.5f)
+                        )
+                    }
+                )
+            }
+        )
     }
 }
 

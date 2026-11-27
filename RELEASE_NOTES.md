@@ -1,5 +1,13 @@
 # Novedades de FamiChat
 
+## 2.8.68
+- Mejoras de estabilidad y precisión al publicar y ver estados:
+  - Los estados de Texto creados solo con capas de texto, stickers o dibujo libre (sin comentario inferior) ahora se publican correctamente sin errores de permiso.
+  - Los textos, stickers y trazos sobre fotos horizontales o recortadas se guardan exactamente en la posición y tamaño que ves al editarlos.
+  - Al reintentar el envío de varias fotos o videos tras una falla de red, los elementos que ya se subieron no se vuelven a duplicar.
+  - Si el permiso de cámara fue denegado de forma permanente, aparece un botón directo «Abrir Ajustes» para habilitarlo al instante.
+  - Los estados de foto o texto con música ajustan automáticamente su duración en pantalla al fragmento musical elegido.
+
 ## 2.8.67
 - Corrección al buscar actualizaciones con la aplicación minimizada:
   - Al presionar manualmente «Buscar actualizaciones», ahora siempre se realiza una consulta en tiempo real sin reutilizar resultados recientes en memoria, permitiendo detectar nuevas versiones al instante sin necesidad de cerrar y volver a abrir la aplicación.

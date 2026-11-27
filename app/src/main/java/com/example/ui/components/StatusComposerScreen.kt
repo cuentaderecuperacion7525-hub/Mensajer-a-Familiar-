@@ -279,7 +279,12 @@ fun StatusComposerScreen(
     var hasPromptedVideoPermission by rememberSaveable { mutableStateOf(false) }
     var manualPermissionIsVideo by remember { mutableStateOf<Boolean?>(null) }
     var hadRationaleBeforeManualRequest by remember { mutableStateOf(false) }
+    var hadCameraRationaleBeforeRequest by remember { mutableStateOf(false) }
     var galleryRefreshTick by remember { mutableIntStateOf(0) }
+
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    var inlineWarningMsg by remember { mutableStateOf<String?>(null) }
+    var inlineWarningOpensSettings by remember { mutableStateOf(false) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -289,6 +294,10 @@ fun StatusComposerScreen(
                 videoAccessGranted = hasVideoGalleryAccess(context)
                 partialPhotoAccess = hasPartialMediaAccess(context, isVideo = false)
                 partialVideoAccess = hasPartialMediaAccess(context, isVideo = true)
+                if (inlineWarningOpensSettings && isPermissionGranted(context, Manifest.permission.CAMERA)) {
+                    inlineWarningMsg = null
+                    inlineWarningOpensSettings = false
+                }
                 galleryRefreshTick++
             }
         }
@@ -341,13 +350,11 @@ fun StatusComposerScreen(
         galleryPermissionLauncher.launch(requiredGalleryPermissions())
     }
 
-    var showDiscardDialog by remember { mutableStateOf(false) }
-    var inlineWarningMsg by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(inlineWarningMsg) {
+    LaunchedEffect(inlineWarningMsg, inlineWarningOpensSettings) {
         if (inlineWarningMsg != null) {
-            delay(2800L)
+            delay(if (inlineWarningOpensSettings) 5500L else 2800L)
             inlineWarningMsg = null
+            inlineWarningOpensSettings = false
         }
     }
 
@@ -498,6 +505,8 @@ fun StatusComposerScreen(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { granted ->
             if (granted) {
+                inlineWarningMsg = null
+                inlineWarningOpensSettings = false
                 if (pendingCameraType == 2) {
                     val uri = CameraCaptureHelper.createTempVideoUri(context)
                     if (uri != null) {
@@ -517,7 +526,17 @@ fun StatusComposerScreen(
                 }
             } else {
                 appendMediaOnReturn = false
-                inlineWarningMsg = "Permiso de cámara requerido para capturar."
+                val activity = context as? Activity
+                val showRationaleNow = activity != null &&
+                    ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
+                val permanentlyDenied = activity != null && !hadCameraRationaleBeforeRequest && !showRationaleNow
+                if (permanentlyDenied) {
+                    inlineWarningOpensSettings = true
+                    inlineWarningMsg = "Permiso de cámara desactivado en Ajustes."
+                } else {
+                    inlineWarningOpensSettings = false
+                    inlineWarningMsg = "Permiso de cámara requerido para capturar."
+                }
             }
         }
     )
@@ -527,6 +546,8 @@ fun StatusComposerScreen(
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
         if (granted) {
+            inlineWarningMsg = null
+            inlineWarningOpensSettings = false
             val uri = CameraCaptureHelper.createTempPhotoUri(context)
             if (uri != null) {
                 pendingCameraPhotoUri = uri
@@ -535,6 +556,9 @@ fun StatusComposerScreen(
                 appendMediaOnReturn = false
             }
         } else {
+            val activity = context as? Activity
+            hadCameraRationaleBeforeRequest = activity != null &&
+                ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
@@ -544,6 +568,8 @@ fun StatusComposerScreen(
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
         if (granted) {
+            inlineWarningMsg = null
+            inlineWarningOpensSettings = false
             val uri = CameraCaptureHelper.createTempVideoUri(context)
             if (uri != null) {
                 pendingCameraVideoUri = uri
@@ -552,6 +578,9 @@ fun StatusComposerScreen(
                 appendMediaOnReturn = false
             }
         } else {
+            val activity = context as? Activity
+            hadCameraRationaleBeforeRequest = activity != null &&
+                ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
@@ -579,7 +608,8 @@ fun StatusComposerScreen(
                 backgroundHex = textStudioDraft.backgroundHex,
                 musicTrack = textStudioDraft.musicTrack,
                 overlayBundle = textStudioDraft.overlays,
-                visibleToMemberIds = textStudioDraft.overlays.audienceMemberIds
+                visibleToMemberIds = textStudioDraft.overlays.audienceMemberIds,
+                draftId = textStudioDraft.id
             )
         )
     }
@@ -596,7 +626,8 @@ fun StatusComposerScreen(
                     videoCaption = draft.caption,
                     musicTrack = draft.musicTrack,
                     overlayBundle = draft.overlays,
-                    visibleToMemberIds = draft.overlays.audienceMemberIds
+                    visibleToMemberIds = draft.overlays.audienceMemberIds,
+                    draftId = draft.id
                 )
             } else {
                 StatusPublishRequest(
@@ -605,7 +636,10 @@ fun StatusComposerScreen(
                     photoCaption = draft.caption,
                     musicTrack = draft.musicTrack,
                     overlayBundle = draft.overlays,
-                    visibleToMemberIds = draft.overlays.audienceMemberIds
+                    visibleToMemberIds = draft.overlays.audienceMemberIds,
+                    draftId = draft.id,
+                    viewportAspectRatio = draft.viewportAspectRatio,
+                    useContainWithBlur = draft.useContainWithBlur
                 )
             }
         }
@@ -803,7 +837,7 @@ fun StatusComposerScreen(
             }
         }
 
-        // Brief floating notice for size limit or camera permission
+        // Brief floating notice for size limit or camera permission (with Settings button when permanently denied)
         val warning = inlineWarningMsg
         if (!warning.isNullOrBlank()) {
             Surface(
@@ -816,14 +850,53 @@ fun StatusComposerScreen(
                     .padding(horizontal = 24.dp, vertical = 92.dp)
                     .testTag("status_composer_warning_pill")
             ) {
-                Text(
-                    text = warning,
-                    color = Color.White,
-                    fontFamily = InterFontFamily,
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(
+                        horizontal = 16.dp,
+                        vertical = if (inlineWarningOpensSettings) 6.dp else 10.dp
+                    )
+                ) {
+                    Text(
+                        text = warning,
+                        color = Color.White,
+                        fontFamily = InterFontFamily,
+                        fontSize = 13.sp,
+                        textAlign = if (inlineWarningOpensSettings) TextAlign.Start else TextAlign.Center,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (inlineWarningOpensSettings) {
+                        TextButton(
+                            onClick = {
+                                inlineWarningMsg = null
+                                inlineWarningOpensSettings = false
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(
+                                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            Uri.fromParts("package", context.packageName, null)
+                                        ).apply {
+                                            if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                    )
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 40.dp)
+                                .testTag("status_camera_open_settings_button")
+                        ) {
+                            Text(
+                                text = "Abrir Ajustes",
+                                fontFamily = InterFontFamily,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF8AB4F8)
+                            )
+                        }
+                    }
+                }
             }
         }
 

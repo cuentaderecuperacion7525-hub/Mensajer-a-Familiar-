@@ -189,6 +189,7 @@ fun MainHomeScreen(
     onPublishStatusBatch: ((List<StatusPublishRequest>, () -> Unit) -> Unit)? = null,
     onCancelStatusPublish: () -> Unit = {},
     onDismissStatusPublishError: () -> Unit = {},
+    onResetStatusPublishSession: () -> Unit = {},
     onPrepareStatusVideo: (status: FamilyStatusEntity, onReady: (java.io.File) -> Unit, onError: (String) -> Unit) -> Unit = { _, _, _ -> },
     onSaveStatusMediaToGallery: (status: FamilyStatusEntity) -> Unit = {},
     mediaTransferProgress: Map<String, Float> = emptyMap(),
@@ -756,6 +757,7 @@ fun MainHomeScreen(
                 onCancelPublish = onCancelStatusPublish,
                 onDismissPublishError = onDismissStatusPublishError,
                 onClose = {
+                    onResetStatusPublishSession()
                     onDismissStatusPublishError()
                     showCreateStatusDialog = false
                 },

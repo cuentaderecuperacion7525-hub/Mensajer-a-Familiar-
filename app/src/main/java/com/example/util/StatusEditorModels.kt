@@ -86,7 +86,9 @@ data class StatusStudioDraftItem(
     val caption: String = "",
     val overlays: StatusOverlayBundle = StatusOverlayBundle(),
     val musicTrack: StatusMusicTrack? = null,
-    val videoPreviewInfo: VideoPreviewInfo? = null
+    val videoPreviewInfo: VideoPreviewInfo? = null,
+    val viewportAspectRatio: Float = 0f,
+    val useContainWithBlur: Boolean = false
 ) {
     fun hasEdits(): Boolean =
         caption.isNotBlank() || !overlays.isEmptyEdits() || musicTrack != null

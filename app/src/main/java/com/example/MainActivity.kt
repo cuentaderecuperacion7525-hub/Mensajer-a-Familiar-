@@ -739,6 +739,7 @@ fun FamiChatApp(
                         onPublishStatusBatch = vm::publishStatusBatch,
                         onCancelStatusPublish = vm::cancelStatusPublish,
                         onDismissStatusPublishError = vm::dismissStatusPublishError,
+                        onResetStatusPublishSession = vm::resetStatusPublishSession,
                         onPrepareStatusVideo = vm::prepareStatusVideo,
                         onSaveStatusMediaToGallery = vm::saveStatusMediaToGallery,
                         mediaTransferProgress = mediaTransferProgress,
