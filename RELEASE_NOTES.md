@@ -1,5 +1,9 @@
 # Novedades de FamiChat
 
+## 2.8.67
+- Corrección al buscar actualizaciones con la aplicación minimizada:
+  - Al presionar manualmente «Buscar actualizaciones», ahora siempre se realiza una consulta en tiempo real sin reutilizar resultados recientes en memoria, permitiendo detectar nuevas versiones al instante sin necesidad de cerrar y volver a abrir la aplicación.
+
 ## 2.8.66
 - Unificación completa para crear estados de Texto, Foto y Video con el mismo estudio creativo:
   - Los estados de Texto ahora comparten el mismo botón circular de cierre, herramientas laterales (Texto, Sticker, Música con recortador de 30 s y Dibujo), selección de color de fondo, barra inferior compacta de una línea con menciones `@`, selector de audiencia («Toda la familia» o «Personas concretas») y botón azul de envío.

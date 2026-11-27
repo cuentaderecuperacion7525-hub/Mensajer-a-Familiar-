@@ -749,7 +749,7 @@ fun FamiChatApp(
                                 navigateToChatSingleTop(chatId)
                             }
                         },
-                        onCheckForUpdate = { vm.checkForAppUpdate() },
+                        onCheckForUpdate = { vm.checkForAppUpdate(isAutoCheck = false, forceRefresh = true) },
                         onSaveUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = true) },
                         onDownloadUpdate = vm::downloadAndInstallUpdate,
                         onResetUpdateState = vm::resetUpdateState,
@@ -817,7 +817,7 @@ fun FamiChatApp(
                         onBack = { safePopBack(Routes.SETTINGS) },
                         onOpenNotifications = { navigateSingleTop(Routes.NOTIFICATIONS) },
                         onToggleTheme = vm::toggleTheme,
-                        onCheckForUpdate = { vm.checkForAppUpdate() },
+                        onCheckForUpdate = { vm.checkForAppUpdate(isAutoCheck = false, forceRefresh = true) },
                         onSaveUpdateRepoSlug = { vm.saveUpdateRepoSlug(it, triggerCheck = true) },
                         onDownloadUpdate = vm::downloadAndInstallUpdate,
                         onResetUpdateState = vm::resetUpdateState,
@@ -905,7 +905,7 @@ fun FamiChatApp(
                         updateState = updateState,
                         lastCheckedAtMs = lastUpdateCheckAt,
                         versionHistoryState = versionHistoryState,
-                        onCheckForUpdate = { vm.checkForAppUpdate(isAutoCheck = false, forceRefresh = false) },
+                        onCheckForUpdate = { vm.checkForAppUpdate(isAutoCheck = false, forceRefresh = true) },
                         onRetryCheckForUpdate = { vm.checkForAppUpdate(isAutoCheck = false, forceRefresh = true) },
                         onDownloadUpdate = vm::downloadAndInstallUpdate,
                         onCancelDownload = vm::cancelUpdateDownload,

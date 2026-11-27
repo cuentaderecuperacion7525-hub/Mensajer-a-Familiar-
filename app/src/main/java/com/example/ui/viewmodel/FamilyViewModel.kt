@@ -2255,7 +2255,7 @@ class FamilyViewModel(
                 if (normalized.isEmpty()) "Repositorio de actualizaciones borrado"
                 else "Repositorio de actualizaciones guardado"
             )
-            if (triggerCheck) checkForAppUpdate()
+            if (triggerCheck) checkForAppUpdate(isAutoCheck = false, forceRefresh = true)
         }
     }
 
