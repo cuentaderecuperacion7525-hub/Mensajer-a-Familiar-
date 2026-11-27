@@ -1,5 +1,12 @@
 # Novedades de FamiChat
 
+## 2.8.62
+- Nuevo estudio creativo a pantalla completa para estados con foto o video:
+  - Barra lateral derecha con acceso rápido a Texto (4 estilos, alineación, 8 colores y fondo), Stickers (Emojis por categorías con buscador + hora, fecha y etiqueta "Familia"), Música en línea con recortador de hasta 30 segundos y Dibujo libre (8 colores, 3 grosores, deshacer, rehacer, borrador y limpiar).
+  - Gestos táctiles directos para mover, girar y escalar elementos con dos dedos, traer al frente al tocar y eliminar al arrastrar hacia la papelera inferior.
+  - Nueva barra inferior de dos filas para añadir más fotos o videos al mismo estado, mencionar familiares con "@", elegir audiencia ("Toda la familia" o "Personas concretas") y publicar con el botón azul de envío.
+  - Las fotos combinan tus textos, stickers y trazos en alta resolución y los videos conservan sus capas interactivas sin perder calidad.
+
 ## 2.8.61
 - Corrección en la búsqueda de música para estados:
   - Al tocar la lupa superior, presionar buscar en el teclado o empezar a deslizar la lista, se ejecuta la búsqueda de inmediato, se libera el foco y se oculta el teclado automáticamente.

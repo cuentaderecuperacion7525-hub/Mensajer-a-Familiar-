@@ -3807,6 +3807,261 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("status_composer_screen").assertIsDisplayed()
     assertEquals(0, closedComposerCount)
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `status media studio supports text stickers 30s music trimmer draw mentions audience picker and send error`() {
+    val members = listOf(
+      com.example.data.model.FamilyMemberEntity(
+        id = "m_mama",
+        name = "Mamá",
+        roleLabel = "Mamá",
+        isAdmin = true,
+        avatarColorHex = "#1A73E8",
+        avatarEmoji = "👩"
+      ),
+      com.example.data.model.FamilyMemberEntity(
+        id = "m_papa",
+        name = "Papá",
+        roleLabel = "Papá",
+        isAdmin = false,
+        avatarColorHex = "#0E7C66",
+        avatarEmoji = "👨"
+      ),
+      com.example.data.model.FamilyMemberEntity(
+        id = "m_luna",
+        name = "Luna",
+        roleLabel = "Hija",
+        isAdmin = false,
+        avatarColorHex = "#6B4FD8",
+        avatarEmoji = "👧"
+      )
+    )
+    val sampleTracks = listOf(
+      com.example.util.StatusMusicTrack(
+        trackId = "t_trim",
+        title = "Cielito Lindo",
+        artist = "Mariachi",
+        previewUrl = "https://example.com/cielito.m4a",
+        durationSec = 45
+      )
+    )
+    val initialDraft = com.example.util.StatusStudioDraftItem(
+      id = "draft_photo_1",
+      uri = android.net.Uri.parse("content://media/external/images/media/42"),
+      isVideo = false
+    )
+    val activeDraftState = androidx.compose.runtime.mutableStateOf(initialDraft)
+    val publishState = androidx.compose.runtime.mutableStateOf<com.example.ui.viewmodel.StatusPublishUiState>(
+      com.example.ui.viewmodel.StatusPublishUiState.Idle
+    )
+    var publishClicked = 0
+    var errorDismissed = 0
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = true) {
+        com.example.ui.components.StatusMediaStudioScreen(
+          drafts = listOf(activeDraftState.value),
+          activeIndex = 0,
+          activeDraft = activeDraftState.value,
+          publishState = publishState.value,
+          allMembers = members,
+          activeMemberId = "m_mama",
+          favoriteMusicTracks = emptyList(),
+          onToggleFavoriteMusicTrack = {},
+          musicSearchCatalog = { Result.success(sampleTracks) },
+          onSelectDraftIndex = {},
+          onRemoveDraftAt = {},
+          onUpdateActiveDraft = { transform ->
+            activeDraftState.value = transform(activeDraftState.value)
+          },
+          onRequestAddMedia = { _, _ -> },
+          onRequestClose = {},
+          onDismissPublishError = { errorDismissed++ },
+          onPublishDrafts = { publishClicked++ }
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Structure: Close button, 4 right tool buttons (Texto, Sticker, Música, Dibujo), bottom two rows, NO top "Publicar" button
+    composeTestRule.onNodeWithTag("status_close_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("studio_tool_text").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("studio_tool_sticker").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("status_music_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("studio_tool_draw").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("studio_audience_pill").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Estados (Familia)").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Publicar").assertDoesNotExist() // Only icon Send button has contentDescription "Publicar"
+
+    // 1. Texto tool: opens toolbar + Listo, hides bottom bar, saves text on Listo
+    composeTestRule.onNodeWithTag("studio_tool_text").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("studio_text_tool_overlay").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("studio_audience_pill").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("tool_text_input").performTextInput("Fiesta")
+    composeTestRule.onNodeWithTag("tool_text_bg_btn").performClick()
+    composeTestRule.onNodeWithTag("tool_text_done").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(1, activeDraftState.value.overlays.texts.size)
+    assertEquals("Fiesta", activeDraftState.value.overlays.texts.first().text)
+
+    // 2. Sticker tool: Emojis search + Útiles tab -> Familia badge
+    composeTestRule.onNodeWithTag("studio_tool_sticker").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_sticker_picker_sheet").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("sticker_tab_useful").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("sticker_useful_family").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(1, activeDraftState.value.overlays.stickers.size)
+    assertEquals("Familia", activeDraftState.value.overlays.stickers.first().value)
+
+    // 3. Música tool -> Catalog -> 30s Trimmer -> top tag with X to remove
+    composeTestRule.onNodeWithTag("status_music_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("music_select_t_trim").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_music_trimmer_sheet").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("music_trimmer_confirm").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_selected_music_pill").assertIsDisplayed()
+
+    // 4. Dibujo tool opens & closes on Listo
+    composeTestRule.onNodeWithTag("studio_tool_draw").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("tool_draw_eraser").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("tool_draw_clear").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("tool_draw_done").performClick()
+    composeTestRule.waitForIdle()
+
+    // 5. Row 1 comment & @ mention popup
+    composeTestRule.onNodeWithTag("studio_mention_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("studio_mention_popup").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("studio_mention_member_m_papa").performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(activeDraftState.value.caption.contains("@Papá"))
+
+    // 6. Row 2 Audience picker ("Personas concretas")
+    composeTestRule.onNodeWithTag("studio_audience_pill").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("status_audience_picker_sheet").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("audience_option_specific").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("audience_member_row_m_luna").performClick() // Uncheck Luna, leaving only Papá
+    composeTestRule.onNodeWithTag("audience_apply_button").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(listOf("m_papa"), activeDraftState.value.overlays.audienceMemberIds)
+    composeTestRule.onNodeWithText("Estados (1 pers.)").assertIsDisplayed()
+
+    // 7. Send button -> Publishing disables button -> Error shows exact retry message and re-enables button
+    composeTestRule.onNodeWithTag("publish_status_button").assertIsEnabled()
+    composeTestRule.onNodeWithTag("publish_status_button").performClick()
+    assertEquals(1, publishClicked)
+
+    publishState.value = com.example.ui.viewmodel.StatusPublishUiState.Publishing(
+      mode = com.example.ui.viewmodel.StatusComposerMode.PHOTO,
+      progress = 0.5f
+    )
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("publish_status_button").assertIsNotEnabled()
+
+    publishState.value = com.example.ui.viewmodel.StatusPublishUiState.Error("network")
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("No se pudo publicar. Inténtalo de nuevo").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("publish_status_button").assertIsEnabled()
+  }
+
+  @Test
+  fun `status editor codec packs and unpacks overlays trim info and enforces member visibility`() {
+    val bundle = com.example.util.StatusOverlayBundle(
+      texts = listOf(
+        com.example.util.StatusTextOverlay(
+          id = "t1",
+          text = "Hola familia",
+          xNorm = 0.45f,
+          yNorm = 0.55f,
+          scale = 1.3f,
+          rotationDeg = 12f,
+          colorArgb = 0xFFEF4444L,
+          style = com.example.util.StatusTextStyle.MONOSPACE,
+          align = com.example.util.StatusTextAlign.LEFT,
+          hasBackground = true,
+          zOrder = 3
+        )
+      ),
+      stickers = listOf(
+        com.example.util.StatusStickerOverlay(
+          id = "s1",
+          kind = com.example.util.StatusStickerKind.FAMILY_BADGE,
+          value = "Familia",
+          xNorm = 0.5f,
+          yNorm = 0.3f,
+          scale = 1.1f,
+          rotationDeg = -5f,
+          zOrder = 4
+        )
+      ),
+      strokes = listOf(
+        com.example.util.StatusDrawingStroke(
+          id = "d1",
+          points = listOf(
+            com.example.util.StatusDrawingPoint(0.1f, 0.2f),
+            com.example.util.StatusDrawingPoint(0.5f, 0.6f)
+          ),
+          colorArgb = 0xFF3B82F6L,
+          strokeWidthNorm = 0.02f,
+          isEraser = false
+        )
+      ),
+      audienceMemberIds = listOf("m_papa", "m_hija")
+    )
+
+    val track = com.example.util.StatusMusicTrack(
+      trackId = "trk_1",
+      title = "Amor",
+      artist = "Artista",
+      previewUrl = "https://example.com/audio.m4a",
+      durationSec = 45,
+      trimStartSec = 8,
+      trimDurationSec = 24,
+      muteOriginalVideo = true
+    )
+
+    val (packedMedia, packedThumb) = com.example.util.StatusMusicCodec.packFullStatusFields(
+      mediaType = "VIDEO",
+      rawMediaData = "chunked:vid_123",
+      rawVideoThumbnailData = "thumb_b64",
+      musicTrack = track,
+      overlayBundle = bundle
+    )
+
+    val unpacked = com.example.util.StatusMusicCodec.unpackFullStatusFields(packedMedia, packedThumb)
+    assertEquals("chunked:vid_123", unpacked.mediaData)
+    assertEquals("thumb_b64", unpacked.videoThumbnailData)
+    assertEquals("trk_1", unpacked.musicTrack?.trackId)
+    assertEquals(8, unpacked.musicTrack?.trimStartSec)
+    assertEquals(24, unpacked.musicTrack?.trimDurationSec)
+    assertEquals(true, unpacked.musicTrack?.muteOriginalVideo)
+    assertEquals("Hola familia", unpacked.overlayBundle?.texts?.firstOrNull()?.text)
+    assertEquals(com.example.util.StatusStickerKind.FAMILY_BADGE, unpacked.overlayBundle?.stickers?.firstOrNull()?.kind)
+    assertEquals(2, unpacked.overlayBundle?.strokes?.firstOrNull()?.points?.size)
+    assertEquals(listOf("m_papa", "m_hija"), unpacked.overlayBundle?.audienceMemberIds)
+
+    val restrictedStatus = com.example.data.model.FamilyStatusEntity(
+      id = "st_priv",
+      memberId = "m_mama",
+      text = "Solo para algunos",
+      mediaType = "VIDEO",
+      createdAt = 1000L,
+      expiresAt = 999999999L,
+      visibleToMemberIds = listOf("m_papa")
+    )
+    assertTrue(com.example.util.StatusEditorCodec.isStatusVisibleToMember(restrictedStatus, "m_mama"))
+    assertTrue(com.example.util.StatusEditorCodec.isStatusVisibleToMember(restrictedStatus, "m_papa"))
+    assertFalse(com.example.util.StatusEditorCodec.isStatusVisibleToMember(restrictedStatus, "m_hijo"))
+  }
 }
 
 

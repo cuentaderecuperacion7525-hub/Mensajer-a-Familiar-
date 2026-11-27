@@ -134,14 +134,18 @@ fun UpdatesTabScreen(
 ) {
     val membersMap = remember(allMembers) { allMembers.associateBy { it.id } }
 
-    val myStatuses = remember(statuses, activeMember.id) {
-        statuses
+    val visibleStatuses = remember(statuses, activeMember.id) {
+        statuses.filter { com.example.util.StatusEditorCodec.isStatusVisibleToMember(it, activeMember.id) }
+    }
+
+    val myStatuses = remember(visibleStatuses, activeMember.id) {
+        visibleStatuses
             .filter { it.memberId == activeMember.id }
             .sortedBy { it.createdAt }
     }
 
-    val otherGroups = remember(statuses, membersMap, activeMember.id) {
-        statuses
+    val otherGroups = remember(visibleStatuses, membersMap, activeMember.id) {
+        visibleStatuses
             .filter { it.memberId != activeMember.id }
             .groupBy { it.memberId }
             .mapNotNull { (memberId, list) ->

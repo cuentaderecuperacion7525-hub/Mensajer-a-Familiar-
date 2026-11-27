@@ -153,7 +153,9 @@ data class FamilyStatusEntity(
     val expiresAt: Long = System.currentTimeMillis() + STATUS_TTL_MS,
     val viewedByMemberIdsJson: String = "[]",
     val authorUid: String = "",
-    val musicTrack: com.example.util.StatusMusicTrack? = null
+    val musicTrack: com.example.util.StatusMusicTrack? = null,
+    val overlayBundle: com.example.util.StatusOverlayBundle? = null,
+    val visibleToMemberIds: List<String>? = null
 ) {
     val isVideo: Boolean
         get() = mediaType == "VIDEO" ||

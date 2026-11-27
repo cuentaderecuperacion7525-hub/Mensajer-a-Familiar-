@@ -419,8 +419,11 @@ internal object FirestoreMappers {
         val viewed = (doc.get("viewedByMemberIds") as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
         val rawMediaData = doc.getString("mediaData")
         val rawThumbData = doc.getString("videoThumbnailData")
-        val (mediaData, cleanThumbData, musicTrack) =
-            com.example.util.StatusMusicCodec.unpackStatusFields(rawMediaData, rawThumbData)
+        val unpacked = com.example.util.StatusMusicCodec.unpackFullStatusFields(rawMediaData, rawThumbData)
+        val mediaData = unpacked.mediaData
+        val cleanThumbData = unpacked.videoThumbnailData
+        val musicTrack = unpacked.musicTrack
+        val overlayBundle = unpacked.overlayBundle
         val rawType = doc.getString("mediaType")
         val resolvedType = when {
             !rawType.isNullOrBlank() -> rawType
@@ -442,7 +445,9 @@ internal object FirestoreMappers {
             expiresAt = doc.getLong("expiresAt") ?: 0L,
             viewedByMemberIdsJson = JsonHelpers.encodeStringList(viewed),
             authorUid = doc.getString("authorUid") ?: "",
-            musicTrack = musicTrack
+            musicTrack = musicTrack,
+            overlayBundle = overlayBundle,
+            visibleToMemberIds = overlayBundle?.audienceMemberIds
         )
     }
 
@@ -453,11 +458,21 @@ internal object FirestoreMappers {
         isCreate: Boolean
     ): Map<String, Any> {
         val viewed = JsonHelpers.decodeStringList(status.viewedByMemberIdsJson).take(25)
-        val (packedMediaData, packedThumbData) = com.example.util.StatusMusicCodec.packStatusFields(
+        val effectiveBundle = when {
+            status.overlayBundle != null -> status.overlayBundle.copy(
+                audienceMemberIds = status.visibleToMemberIds ?: status.overlayBundle.audienceMemberIds
+            )
+            status.visibleToMemberIds != null -> com.example.util.StatusOverlayBundle(
+                audienceMemberIds = status.visibleToMemberIds
+            )
+            else -> null
+        }
+        val (packedMediaData, packedThumbData) = com.example.util.StatusMusicCodec.packFullStatusFields(
             mediaType = status.mediaType,
             rawMediaData = status.mediaUri,
             rawVideoThumbnailData = status.videoThumbnailData,
-            musicTrack = status.musicTrack
+            musicTrack = status.musicTrack,
+            overlayBundle = effectiveBundle
         )
         val map = mutableMapOf<String, Any?>(
             "memberUids" to memberUids,

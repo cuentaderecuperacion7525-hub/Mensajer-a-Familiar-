@@ -736,6 +736,7 @@ fun FamiChatApp(
                         onPublishVideoStatus = vm::publishVideoStatus,
                         statusPublishState = statusPublishState,
                         onPublishStatus = vm::publishStatus,
+                        onPublishStatusBatch = vm::publishStatusBatch,
                         onCancelStatusPublish = vm::cancelStatusPublish,
                         onDismissStatusPublishError = vm::dismissStatusPublishError,
                         onPrepareStatusVideo = vm::prepareStatusVideo,

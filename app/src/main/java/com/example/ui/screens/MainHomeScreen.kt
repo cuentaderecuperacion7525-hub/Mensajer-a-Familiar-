@@ -186,6 +186,7 @@ fun MainHomeScreen(
     onPublishVideoStatus: (uri: Uri, caption: String) -> Unit = { _, _ -> },
     statusPublishState: StatusPublishUiState = StatusPublishUiState.Idle,
     onPublishStatus: ((StatusPublishRequest, () -> Unit) -> Unit)? = null,
+    onPublishStatusBatch: ((List<StatusPublishRequest>, () -> Unit) -> Unit)? = null,
     onCancelStatusPublish: () -> Unit = {},
     onDismissStatusPublishError: () -> Unit = {},
     onPrepareStatusVideo: (status: FamilyStatusEntity, onReady: (java.io.File) -> Unit, onError: (String) -> Unit) -> Unit = { _, _, _ -> },
@@ -732,6 +733,26 @@ fun MainHomeScreen(
                         showCreateStatusDialog = false
                     }
                 },
+                onPublishBatch = { batch ->
+                    if (onPublishStatusBatch != null) {
+                        onPublishStatusBatch(batch) {
+                            showCreateStatusDialog = false
+                        }
+                    } else if (onPublishStatus != null && batch.isNotEmpty()) {
+                        onPublishStatus(batch.first()) {
+                            showCreateStatusDialog = false
+                        }
+                    } else {
+                        batch.firstOrNull()?.let { first ->
+                            when (first.mode) {
+                                StatusComposerMode.TEXT -> onPublishTextStatus(first.text, first.backgroundHex)
+                                StatusComposerMode.PHOTO -> first.photoUri?.let { onPublishPhotoStatus(it, first.photoCaption) }
+                                StatusComposerMode.VIDEO -> first.videoUri?.let { onPublishVideoStatus(it, first.videoCaption) }
+                            }
+                        }
+                        showCreateStatusDialog = false
+                    }
+                },
                 onCancelPublish = onCancelStatusPublish,
                 onDismissPublishError = onDismissStatusPublishError,
                 onClose = {
@@ -739,7 +760,9 @@ fun MainHomeScreen(
                     showCreateStatusDialog = false
                 },
                 favoriteMusicTracks = favoriteMusicTracks,
-                onToggleFavoriteMusicTrack = onToggleFavoriteMusicTrack
+                onToggleFavoriteMusicTrack = onToggleFavoriteMusicTrack,
+                allMembers = allMembers,
+                activeMemberId = activeMember.id
             )
         }
     }

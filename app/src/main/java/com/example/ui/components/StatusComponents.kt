@@ -530,14 +530,18 @@ fun StatusViewerDialog(
                         .build()
                 )
                 mp.setDataSource(musicUrl)
-                mp.isLooping = true
+                mp.isLooping = false
                 val vol = if (isStatusAudioMuted) 0f else 1f
                 mp.setVolume(vol, vol)
                 mp.setOnPreparedListener { readyMp ->
                     if (statusMusicPlayer === readyMp) {
                         isStatusMusicPrepared = true
                         val currentVol = if (isStatusAudioMuted) 0f else 1f
-                        runCatching { readyMp.setVolume(currentVol, currentVol) }
+                        runCatching {
+                            readyMp.setVolume(currentVol, currentVol)
+                            val startMs = (attachedMusic?.trimStartSec ?: 0).coerceAtLeast(0) * 1000
+                            if (startMs > 0) readyMp.seekTo(startMs)
+                        }
                         if (!isOverlayPaused) {
                             runCatching { readyMp.start() }
                         }
@@ -572,25 +576,41 @@ fun StatusViewerDialog(
         }
     }
 
-    // Sync online music play/pause and mute volume with viewer state
+    // Sync online music play/pause, mute volume, and trimmed loop window with viewer state
     LaunchedEffect(
         currentStatus.id,
         statusMusicPlayer,
         isStatusMusicPrepared,
         isOverlayPaused,
-        isStatusAudioMuted
+        isStatusAudioMuted,
+        attachedMusic?.trimStartSec,
+        attachedMusic?.trimDurationSec
     ) {
         val mp = statusMusicPlayer ?: return@LaunchedEffect
         if (!isStatusMusicPrepared) return@LaunchedEffect
+        val startMs = (attachedMusic?.trimStartSec ?: 0).coerceAtLeast(0) * 1000
+        val endMs = ((attachedMusic?.trimStartSec ?: 0) + (attachedMusic?.trimDurationSec ?: 30))
+            .coerceAtLeast(5) * 1000
+        val vol = if (isStatusAudioMuted) 0f else 1f
+        runCatching { mp.setVolume(vol, vol) }
+        val videoShouldPlay = !currentStatus.isVideo || (readyVideoFile != null && isVideoPlaying)
+        if (isOverlayPaused || !videoShouldPlay) {
+            runCatching { if (mp.isPlaying) mp.pause() }
+            return@LaunchedEffect
+        }
         runCatching {
-            val vol = if (isStatusAudioMuted) 0f else 1f
-            mp.setVolume(vol, vol)
-            val videoShouldPlay = !currentStatus.isVideo || (readyVideoFile != null && isVideoPlaying)
-            if (!isOverlayPaused && videoShouldPlay) {
-                if (!mp.isPlaying) mp.start()
-            } else {
-                if (mp.isPlaying) mp.pause()
+            if (mp.currentPosition < startMs || mp.currentPosition >= endMs) {
+                mp.seekTo(startMs)
             }
+            if (!mp.isPlaying) mp.start()
+        }
+        while (!isOverlayPaused) {
+            runCatching {
+                if (mp.currentPosition >= endMs) {
+                    mp.seekTo(startMs)
+                }
+            }
+            delay(150L)
         }
     }
 
@@ -1077,6 +1097,17 @@ fun StatusViewerDialog(
                                     },
                                     modifier = Modifier.fillMaxSize()
                                 )
+                            }
+                            currentStatus.overlayBundle?.let { layers ->
+                                if (!layers.isEmptyEdits()) {
+                                    StatusOverlayRenderBox(
+                                        bundle = layers,
+                                        interactive = false,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .testTag("status_viewer_video_overlays")
+                                    )
+                                }
                             }
                         }
                     } else {

@@ -9,14 +9,11 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.media.AudioAttributes
 import android.media.MediaMetadataRetriever
-import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Size
-import android.widget.FrameLayout
-import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -135,6 +132,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.data.model.FamilyMemberEntity
 import com.example.ui.theme.InterFontFamily
 import com.example.ui.theme.LocalDarkTheme
 import com.example.ui.viewmodel.StatusComposerMode
@@ -143,15 +141,17 @@ import com.example.ui.viewmodel.StatusPublishUiState
 import com.example.util.CameraCaptureHelper
 import com.example.util.StatusMusicCatalog
 import com.example.util.StatusMusicTrack
+import com.example.util.StatusOverlayBundle
+import com.example.util.StatusStudioDraftItem
 import com.example.util.TimeFormatters
 import com.example.util.VideoMediaHelper
-import com.example.util.VideoPreviewInfo
 import com.example.util.parseHexColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 
 private const val MAX_TEXT_STATUS_CHARS = 280
 private const val MAX_MEDIA_CAPTION_CHARS = 200
@@ -251,7 +251,10 @@ fun StatusComposerScreen(
     onClose: () -> Unit,
     favoriteMusicTracks: List<StatusMusicTrack> = emptyList(),
     onToggleFavoriteMusicTrack: (StatusMusicTrack) -> Unit = {},
-    musicSearchCatalog: suspend (String) -> Result<List<StatusMusicTrack>> = StatusMusicCatalog::searchTracks
+    musicSearchCatalog: suspend (String) -> Result<List<StatusMusicTrack>> = StatusMusicCatalog::searchTracks,
+    allMembers: List<FamilyMemberEntity> = emptyList(),
+    activeMemberId: String = "",
+    onPublishBatch: ((List<StatusPublishRequest>) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -279,12 +282,9 @@ fun StatusComposerScreen(
     var statusText by rememberSaveable { mutableStateOf("") }
     var selectedHex by rememberSaveable { mutableStateOf(StatusComposerTextColors.first()) }
 
-    var pickedPhotoUri by remember { mutableStateOf<Uri?>(null) }
-    var photoCaption by rememberSaveable { mutableStateOf("") }
-
-    var pickedVideoUri by remember { mutableStateOf<Uri?>(null) }
-    var videoCaption by rememberSaveable { mutableStateOf("") }
-    var videoPreviewInfo by remember { mutableStateOf<VideoPreviewInfo?>(null) }
+    var mediaDrafts by remember { mutableStateOf<List<StatusStudioDraftItem>>(emptyList()) }
+    var activeDraftIndex by remember { mutableIntStateOf(0) }
+    var appendMediaOnReturn by remember { mutableStateOf(false) }
 
     var selectedMusicTrack by remember { mutableStateOf<StatusMusicTrack?>(null) }
     var showMusicPickerSheet by remember { mutableStateOf(false) }
@@ -411,16 +411,25 @@ fun StatusComposerScreen(
         }
     }
 
-    LaunchedEffect(pickedVideoUri) {
-        val uri = pickedVideoUri
-        videoPreviewInfo = if (uri == null) {
-            null
+    fun addOrOpenPhotoDraft(uri: Uri, append: Boolean) {
+        val sharedAudience = mediaDrafts.firstOrNull()?.overlays?.audienceMemberIds
+        val entry = StatusStudioDraftItem(
+            id = "draft_${UUID.randomUUID().toString().take(8)}",
+            uri = uri,
+            isVideo = false,
+            overlays = StatusOverlayBundle(audienceMemberIds = sharedAudience)
+        )
+        if (append && mediaDrafts.isNotEmpty()) {
+            val nextList = mediaDrafts + entry
+            mediaDrafts = nextList
+            activeDraftIndex = nextList.lastIndex
         } else {
-            VideoMediaHelper.extractVideoPreview(context, uri)
+            mediaDrafts = listOf(entry)
+            activeDraftIndex = 0
         }
     }
 
-    fun selectVideoUriWithCheck(uri: Uri, knownSizeBytes: Long = -1L) {
+    fun selectVideoUriWithCheck(uri: Uri, knownSizeBytes: Long = -1L, append: Boolean = false) {
         coroutineScope.launch {
             val info = VideoMediaHelper.extractVideoPreview(context, uri)
             val effectiveSize = if (info.sizeBytes > 0L) info.sizeBytes else knownSizeBytes
@@ -436,18 +445,34 @@ fun StatusComposerScreen(
                 isOverLimit = false
             )
             sessionVideoItems = (listOf(entry) + sessionVideoItems.filterNot { it.uri == uri })
-            pickedVideoUri = uri
-            videoPreviewInfo = info
+            val sharedAudience = mediaDrafts.firstOrNull()?.overlays?.audienceMemberIds
+            val draft = StatusStudioDraftItem(
+                id = "draft_${UUID.randomUUID().toString().take(8)}",
+                uri = uri,
+                isVideo = true,
+                videoPreviewInfo = info,
+                overlays = StatusOverlayBundle(audienceMemberIds = sharedAudience)
+            )
+            if (append && mediaDrafts.isNotEmpty()) {
+                val nextList = mediaDrafts + draft
+                mediaDrafts = nextList
+                activeDraftIndex = nextList.lastIndex
+            } else {
+                mediaDrafts = listOf(draft)
+                activeDraftIndex = 0
+            }
         }
     }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
         onResult = { uri ->
+            val shouldAppend = appendMediaOnReturn
+            appendMediaOnReturn = false
             if (uri != null) {
                 val entry = LocalGalleryMediaItem(uri, System.currentTimeMillis() / 1000L)
                 sessionPhotoItems = (listOf(entry) + sessionPhotoItems.filterNot { it.uri == uri })
-                pickedPhotoUri = uri
+                addOrOpenPhotoDraft(uri, append = shouldAppend)
             }
         }
     )
@@ -455,8 +480,10 @@ fun StatusComposerScreen(
     val videoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
         onResult = { uri ->
+            val shouldAppend = appendMediaOnReturn
+            appendMediaOnReturn = false
             if (uri != null) {
-                selectVideoUriWithCheck(uri)
+                selectVideoUriWithCheck(uri, append = shouldAppend)
             }
         }
     )
@@ -464,11 +491,13 @@ fun StatusComposerScreen(
     val takePictureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture(),
         onResult = { success ->
+            val shouldAppend = appendMediaOnReturn
+            appendMediaOnReturn = false
             val captured = pendingCameraPhotoUri
             if (success && captured != null) {
                 val entry = LocalGalleryMediaItem(captured, System.currentTimeMillis() / 1000L)
                 sessionPhotoItems = (listOf(entry) + sessionPhotoItems.filterNot { it.uri == captured })
-                pickedPhotoUri = captured
+                addOrOpenPhotoDraft(captured, append = shouldAppend)
             }
         }
     )
@@ -476,9 +505,11 @@ fun StatusComposerScreen(
     val captureVideoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CaptureVideo(),
         onResult = { success ->
+            val shouldAppend = appendMediaOnReturn
+            appendMediaOnReturn = false
             val captured = pendingCameraVideoUri
             if (success && captured != null) {
-                selectVideoUriWithCheck(captured)
+                selectVideoUriWithCheck(captured, append = shouldAppend)
             }
         }
     )
@@ -492,15 +523,20 @@ fun StatusComposerScreen(
                     if (uri != null) {
                         pendingCameraVideoUri = uri
                         captureVideoLauncher.launch(uri)
+                    } else {
+                        appendMediaOnReturn = false
                     }
                 } else {
                     val uri = CameraCaptureHelper.createTempPhotoUri(context)
                     if (uri != null) {
                         pendingCameraPhotoUri = uri
                         takePictureLauncher.launch(uri)
+                    } else {
+                        appendMediaOnReturn = false
                     }
                 }
             } else {
+                appendMediaOnReturn = false
                 inlineWarningMsg = "Permiso de cámara requerido para capturar."
             }
         }
@@ -515,6 +551,8 @@ fun StatusComposerScreen(
             if (uri != null) {
                 pendingCameraPhotoUri = uri
                 takePictureLauncher.launch(uri)
+            } else {
+                appendMediaOnReturn = false
             }
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
@@ -530,22 +568,24 @@ fun StatusComposerScreen(
             if (uri != null) {
                 pendingCameraVideoUri = uri
                 captureVideoLauncher.launch(uri)
+            } else {
+                appendMediaOnReturn = false
             }
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
-    val isInPhotoPreview = currentMode == StatusComposerMode.PHOTO && pickedPhotoUri != null
-    val isInVideoPreview = currentMode == StatusComposerMode.VIDEO && pickedVideoUri != null
+    val isInMediaStudio = mediaDrafts.isNotEmpty()
     val isPublishing = publishState is StatusPublishUiState.Publishing
     val isErrorDialog = publishState is StatusPublishUiState.Error
 
-    // Preview attached music automatically for Text and Photo previews
-    var nonVideoMusicPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    // Preview attached music automatically for Text composer (Media Studio manages its own trimmed player)
+    var nonVideoMusicPlayer by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
     var nonVideoPreparedUrl by remember { mutableStateOf<String?>(null) }
     val activeNonVideoMusicUrl = if (
-        (currentMode == StatusComposerMode.TEXT || isInPhotoPreview) &&
+        !isInMediaStudio &&
+        currentMode == StatusComposerMode.TEXT &&
         !showMusicPickerSheet &&
         !isPublishing
     ) {
@@ -575,13 +615,13 @@ fun StatusComposerScreen(
             runCatching { prev.release() }
         }
         nonVideoPreparedUrl = activeNonVideoMusicUrl
-        val mp = MediaPlayer()
+        val mp = android.media.MediaPlayer()
         nonVideoMusicPlayer = mp
         runCatching {
             mp.setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                android.media.AudioAttributes.Builder()
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
                     .build()
             )
             mp.setDataSource(activeNonVideoMusicUrl)
@@ -624,52 +664,70 @@ fun StatusComposerScreen(
     }
 
     fun hasUnsavedContent(): Boolean =
-        statusText.isNotBlank() || pickedPhotoUri != null || pickedVideoUri != null ||
-            photoCaption.isNotBlank() || videoCaption.isNotBlank() || selectedMusicTrack != null
+        statusText.isNotBlank() ||
+            mediaDrafts.any { it.hasEdits() } ||
+            mediaDrafts.size > 1 ||
+            selectedMusicTrack != null
 
-    fun triggerPublishCurrent() {
+    fun triggerPublishTextCurrent() {
         if (isPublishing) return
         keyboardController?.hide()
         focusManager.clearFocus()
         isNonVideoMusicPlaying = false
-        when {
-            isInPhotoPreview -> {
-                val uri = pickedPhotoUri ?: return
-                onPublish(
-                    StatusPublishRequest(
-                        mode = StatusComposerMode.PHOTO,
-                        photoUri = uri,
-                        photoCaption = photoCaption,
-                        musicTrack = selectedMusicTrack
-                    )
+        if (currentMode == StatusComposerMode.TEXT && statusText.isNotBlank()) {
+            onPublish(
+                StatusPublishRequest(
+                    mode = StatusComposerMode.TEXT,
+                    text = statusText,
+                    backgroundHex = selectedHex,
+                    musicTrack = selectedMusicTrack
+                )
+            )
+        }
+    }
+
+    fun triggerPublishMediaDrafts() {
+        if (isPublishing || mediaDrafts.isEmpty()) return
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        isNonVideoMusicPlaying = false
+        val requests = mediaDrafts.map { draft ->
+            if (draft.isVideo) {
+                StatusPublishRequest(
+                    mode = StatusComposerMode.VIDEO,
+                    videoUri = draft.uri,
+                    videoCaption = draft.caption,
+                    musicTrack = draft.musicTrack,
+                    overlayBundle = draft.overlays,
+                    visibleToMemberIds = draft.overlays.audienceMemberIds
+                )
+            } else {
+                StatusPublishRequest(
+                    mode = StatusComposerMode.PHOTO,
+                    photoUri = draft.uri,
+                    photoCaption = draft.caption,
+                    musicTrack = draft.musicTrack,
+                    overlayBundle = draft.overlays,
+                    visibleToMemberIds = draft.overlays.audienceMemberIds
                 )
             }
-            isInVideoPreview -> {
-                val uri = pickedVideoUri ?: return
-                onPublish(
-                    StatusPublishRequest(
-                        mode = StatusComposerMode.VIDEO,
-                        videoUri = uri,
-                        videoCaption = videoCaption,
-                        musicTrack = selectedMusicTrack
-                    )
-                )
-            }
-            currentMode == StatusComposerMode.TEXT && statusText.isNotBlank() -> {
-                onPublish(
-                    StatusPublishRequest(
-                        mode = StatusComposerMode.TEXT,
-                        text = statusText,
-                        backgroundHex = selectedHex,
-                        musicTrack = selectedMusicTrack
-                    )
-                )
-            }
+        }
+        if (onPublishBatch != null) {
+            onPublishBatch(requests)
+        } else if (requests.isNotEmpty()) {
+            onPublish(requests.first())
         }
     }
 
     fun handleBackOrClose(fromCloseButton: Boolean) {
-        if (isPublishing || isErrorDialog) return
+        if (isPublishing) return
+        if (isErrorDialog) {
+            if (isInMediaStudio) {
+                onDismissPublishError()
+            } else {
+                return
+            }
+        }
         if (isImeVisible && !fromCloseButton) {
             keyboardController?.hide()
             focusManager.clearFocus()
@@ -678,18 +736,12 @@ fun StatusComposerScreen(
         keyboardController?.hide()
         focusManager.clearFocus()
         when {
-            isInPhotoPreview -> {
-                if (photoCaption.isBlank()) {
-                    pickedPhotoUri = null
-                } else {
+            isInMediaStudio -> {
+                if (mediaDrafts.any { it.hasEdits() } || mediaDrafts.size > 1) {
                     showDiscardDialog = true
-                }
-            }
-            isInVideoPreview -> {
-                if (videoCaption.isBlank()) {
-                    pickedVideoUri = null
                 } else {
-                    showDiscardDialog = true
+                    mediaDrafts = emptyList()
+                    activeDraftIndex = 0
                 }
             }
             hasUnsavedContent() -> showDiscardDialog = true
@@ -697,7 +749,7 @@ fun StatusComposerScreen(
         }
     }
 
-    BackHandler(enabled = !showMusicPickerSheet) {
+    BackHandler(enabled = !showMusicPickerSheet && !isInMediaStudio) {
         when {
             showDiscardDialog -> showDiscardDialog = false
             isPublishing -> Unit
@@ -725,48 +777,56 @@ fun StatusComposerScreen(
             .testTag("status_composer_screen")
     ) {
         when {
-            isInPhotoPreview -> {
-                PhotoStatusPreviewPage(
-                    photoUri = pickedPhotoUri!!,
-                    caption = photoCaption,
-                    isPublishing = isPublishing,
-                    selectedMusic = selectedMusicTrack,
-                    isMusicPlaying = isNonVideoMusicPlaying,
-                    onToggleMusicPlayback = { isNonVideoMusicPlaying = !isNonVideoMusicPlaying },
-                    onOpenMusicPicker = {
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                        showMusicPickerSheet = true
+            isInMediaStudio -> {
+                val safeIdx = activeDraftIndex.coerceIn(0, mediaDrafts.lastIndex)
+                StatusMediaStudioScreen(
+                    drafts = mediaDrafts,
+                    activeIndex = safeIdx,
+                    activeDraft = mediaDrafts[safeIdx],
+                    publishState = publishState,
+                    allMembers = allMembers,
+                    activeMemberId = activeMemberId,
+                    favoriteMusicTracks = favoriteMusicTracks,
+                    onToggleFavoriteMusicTrack = onToggleFavoriteMusicTrack,
+                    musicSearchCatalog = musicSearchCatalog,
+                    onSelectDraftIndex = { idx ->
+                        if (idx in mediaDrafts.indices) activeDraftIndex = idx
                     },
-                    onRemoveMusic = { selectedMusicTrack = null },
-                    onCaptionChange = { if (it.length <= MAX_MEDIA_CAPTION_CHARS) photoCaption = it },
-                    onCloseToGallery = { handleBackOrClose(fromCloseButton = true) },
-                    onPublishClick = ::triggerPublishCurrent
-                )
-            }
-
-            isInVideoPreview -> {
-                VideoStatusPreviewPage(
-                    videoUri = pickedVideoUri!!,
-                    previewInfo = videoPreviewInfo,
-                    caption = videoCaption,
-                    isPublishing = isPublishing,
-                    selectedMusic = selectedMusicTrack,
-                    pauseMusicPreview = showMusicPickerSheet || isPublishing,
-                    onOpenMusicPicker = {
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                        showMusicPickerSheet = true
+                    onRemoveDraftAt = { idx ->
+                        val nextList = mediaDrafts.filterIndexed { i, _ -> i != idx }
+                        mediaDrafts = nextList
+                        activeDraftIndex = if (nextList.isEmpty()) 0 else safeIdx.coerceIn(0, nextList.lastIndex)
                     },
-                    onRemoveMusic = { selectedMusicTrack = null },
-                    onToggleMuteOriginalVideo = {
-                        selectedMusicTrack?.let { current ->
-                            selectedMusicTrack = current.copy(muteOriginalVideo = !current.muteOriginalVideo)
+                    onUpdateActiveDraft = { transform ->
+                        val targetIdx = activeDraftIndex.coerceIn(0, mediaDrafts.lastIndex)
+                        val prevAudience = mediaDrafts[targetIdx].overlays.audienceMemberIds
+                        val updatedItem = transform(mediaDrafts[targetIdx])
+                        val nextAudience = updatedItem.overlays.audienceMemberIds
+                        mediaDrafts = mediaDrafts.mapIndexed { i, item ->
+                            val base = if (i == targetIdx) updatedItem else item
+                            if (prevAudience != nextAudience) {
+                                base.copy(overlays = base.overlays.copy(audienceMemberIds = nextAudience))
+                            } else {
+                                base
+                            }
                         }
                     },
-                    onCaptionChange = { if (it.length <= MAX_MEDIA_CAPTION_CHARS) videoCaption = it },
-                    onCloseToGallery = { handleBackOrClose(fromCloseButton = true) },
-                    onPublishClick = ::triggerPublishCurrent
+                    onRequestAddMedia = { isVideo, fromCamera ->
+                        appendMediaOnReturn = true
+                        when {
+                            isVideo && fromCamera -> launchSystemVideoCamera()
+                            isVideo && !fromCamera -> videoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                            )
+                            !isVideo && fromCamera -> launchSystemPhotoCamera()
+                            else -> photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        }
+                    },
+                    onRequestClose = { handleBackOrClose(fromCloseButton = true) },
+                    onDismissPublishError = onDismissPublishError,
+                    onPublishDrafts = ::triggerPublishMediaDrafts
                 )
             }
 
@@ -793,7 +853,7 @@ fun StatusComposerScreen(
                         currentMode = next
                     },
                     onCloseClick = { handleBackOrClose(fromCloseButton = true) },
-                    onPublishClick = ::triggerPublishCurrent
+                    onPublishClick = ::triggerPublishTextCurrent
                 )
             }
 
@@ -807,6 +867,7 @@ fun StatusComposerScreen(
                     onCloseClick = { handleBackOrClose(fromCloseButton = true) },
                     onRequestPermission = { requestGalleryAccess(isVideo = isVideoGallery, userInitiated = true) },
                     onOpenPicker = {
+                        appendMediaOnReturn = false
                         if (isVideoGallery) {
                             videoPickerLauncher.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
@@ -818,6 +879,7 @@ fun StatusComposerScreen(
                         }
                     },
                     onOpenCamera = {
+                        appendMediaOnReturn = false
                         if (isVideoGallery) launchSystemVideoCamera() else launchSystemPhotoCamera()
                     },
                     onItemClick = { item ->
@@ -825,10 +887,10 @@ fun StatusComposerScreen(
                             if (item.isOverLimit) {
                                 inlineWarningMsg = "El video supera el límite de 5 MB y no se puede elegir."
                             } else {
-                                selectVideoUriWithCheck(item.uri, item.sizeBytes)
+                                selectVideoUriWithCheck(item.uri, item.sizeBytes, append = false)
                             }
                         } else {
-                            pickedPhotoUri = item.uri
+                            addOrOpenPhotoDraft(item.uri, append = false)
                         }
                     },
                     onSelectTab = { next -> currentMode = next }
@@ -860,49 +922,46 @@ fun StatusComposerScreen(
             }
         }
 
-        // Centered Dialogs (Imagen 7): Discard / Uploading / Publish Error
+        // Centered Dialogs: Discard (both modes) / Uploading & Error (Text mode only; Studio handles its own Send spinner & inline banner)
         if (showDiscardDialog) {
+            BackHandler(enabled = true) { showDiscardDialog = false }
+            val dialogTitle = if (isInMediaStudio) "¿Descartar el estado?" else "¿Descartar este estado?"
             val subtitle = when {
-                isInPhotoPreview -> "Se perderá la foto elegida."
-                isInVideoPreview -> "Se perderá el video elegido."
-                pickedPhotoUri != null && currentMode == StatusComposerMode.PHOTO -> "Se perderá la foto elegida."
-                pickedVideoUri != null && currentMode == StatusComposerMode.VIDEO -> "Se perderá el video elegido."
+                isInMediaStudio -> "Se perderán los cambios sin publicar."
                 else -> "Se perderá lo que escribiste."
             }
             StatusDiscardDialog(
+                title = dialogTitle,
                 subtitle = subtitle,
                 onKeepEditing = { showDiscardDialog = false },
                 onDiscard = {
                     showDiscardDialog = false
+                    mediaDrafts = emptyList()
+                    activeDraftIndex = 0
                     onClose()
                 }
             )
-        } else if (publishState is StatusPublishUiState.Publishing) {
+        } else if (!isInMediaStudio && publishState is StatusPublishUiState.Publishing) {
             StatusUploadingDialog(
                 mode = publishState.mode,
                 progress = publishState.progress,
                 onCancel = onCancelPublish
             )
-        } else if (publishState is StatusPublishUiState.Error) {
+        } else if (!isInMediaStudio && publishState is StatusPublishUiState.Error) {
             StatusPublishErrorDialog(
                 message = publishState.message,
-                onRetry = ::triggerPublishCurrent,
+                onRetry = ::triggerPublishTextCurrent,
                 onDismiss = onDismissPublishError
             )
         }
 
-        if (showMusicPickerSheet) {
+        if (showMusicPickerSheet && !isInMediaStudio) {
             StatusMusicPickerSheet(
                 selectedTrack = selectedMusicTrack,
                 favoriteTracks = favoriteMusicTracks,
                 onToggleFavorite = onToggleFavoriteMusicTrack,
                 onSelectTrack = { chosen ->
-                    val defaultMuteVideo = if (isInVideoPreview) {
-                        selectedMusicTrack?.muteOriginalVideo ?: true
-                    } else {
-                        false
-                    }
-                    selectedMusicTrack = chosen.copy(muteOriginalVideo = defaultMuteVideo)
+                    selectedMusicTrack = chosen.copy(muteOriginalVideo = false)
                     isNonVideoMusicPlaying = true
                     showMusicPickerSheet = false
                 },
@@ -1695,513 +1754,6 @@ private fun GalleryRealMediaTile(
     }
 }
 
-@Composable
-private fun PhotoStatusPreviewPage(
-    photoUri: Uri,
-    caption: String,
-    isPublishing: Boolean,
-    selectedMusic: StatusMusicTrack?,
-    isMusicPlaying: Boolean,
-    onToggleMusicPlayback: () -> Unit,
-    onOpenMusicPicker: () -> Unit,
-    onRemoveMusic: () -> Unit,
-    onCaptionChange: (String) -> Unit,
-    onCloseToGallery: () -> Unit,
-    onPublishClick: () -> Unit
-) {
-    val context = LocalContext.current
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(GalleryDarkBg)
-    ) {
-        val req = remember(photoUri) {
-            ImageRequest.Builder(context)
-                .data(photoUri)
-                .crossfade(false)
-                .build()
-        }
-        AsyncImage(
-            model = req,
-            contentDescription = "Vista previa de foto",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // Soft top & bottom gradient scrims for readability
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(170.dp)
-                .align(Alignment.TopCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Black.copy(alpha = 0.62f), Color.Transparent)
-                    )
-                )
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(180.dp)
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.70f))
-                    )
-                )
-        )
-
-        // Top controls + optional music pill
-        PreviewTopBar(
-            isPublishing = isPublishing,
-            selectedMusic = selectedMusic,
-            isVideoMode = false,
-            isMusicPlaying = isMusicPlaying,
-            onToggleMusicPlayback = onToggleMusicPlayback,
-            onOpenMusicPicker = onOpenMusicPicker,
-            onToggleMuteOriginalVideo = {},
-            onRemoveMusic = onRemoveMusic,
-            onCloseClick = onCloseToGallery,
-            onPublishClick = onPublishClick,
-            modifier = Modifier.align(Alignment.TopCenter)
-        )
-
-        // Bottom caption pill field
-        PreviewCaptionBar(
-            caption = caption,
-            onCaptionChange = onCaptionChange,
-            inputTestTag = "status_photo_caption_input",
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .imePadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 14.dp)
-        )
-    }
-}
-
-@Composable
-private fun VideoStatusPreviewPage(
-    videoUri: Uri,
-    previewInfo: VideoPreviewInfo?,
-    caption: String,
-    isPublishing: Boolean,
-    selectedMusic: StatusMusicTrack?,
-    pauseMusicPreview: Boolean,
-    onOpenMusicPicker: () -> Unit,
-    onRemoveMusic: () -> Unit,
-    onToggleMuteOriginalVideo: () -> Unit,
-    onCaptionChange: (String) -> Unit,
-    onCloseToGallery: () -> Unit,
-    onPublishClick: () -> Unit
-) {
-    var videoViewRef by remember(videoUri) { mutableStateOf<VideoView?>(null) }
-    var mediaPlayerRef by remember(videoUri) { mutableStateOf<MediaPlayer?>(null) }
-    var userAudioPlaying by remember(videoUri) { mutableStateOf(false) }
-    var hasStartedOnce by remember(videoUri) { mutableStateOf(false) }
-    var pendingStartWithSound by remember(videoUri) { mutableStateOf(false) }
-    var isPrepared by remember(videoUri) { mutableStateOf(false) }
-    var durationMs by remember(videoUri) { mutableIntStateOf(0) }
-    var positionMs by remember(videoUri) { mutableIntStateOf(0) }
-
-    var attachedMusicPlayer by remember(videoUri) { mutableStateOf<MediaPlayer?>(null) }
-    var attachedMusicPreparedUrl by remember(videoUri) { mutableStateOf<String?>(null) }
-
-    val effectiveMuteOriginalVideo = selectedMusic?.muteOriginalVideo == true
-    val shouldPlayAttachedMusic = selectedMusic != null && userAudioPlaying && !pauseMusicPreview
-
-    // Sync VideoView original audio volume with selectedMusic.muteOriginalVideo
-    LaunchedEffect(mediaPlayerRef, isPrepared, effectiveMuteOriginalVideo) {
-        val mp = mediaPlayerRef ?: return@LaunchedEffect
-        val vol = if (effectiveMuteOriginalVideo) 0f else 1f
-        runCatching { mp.setVolume(vol, vol) }
-    }
-
-    // Prepare attached music player when selectedMusic changes in Video preview
-    LaunchedEffect(selectedMusic?.previewUrl) {
-        val url = selectedMusic?.previewUrl
-        val prev = attachedMusicPlayer
-        if (url.isNullOrBlank()) {
-            attachedMusicPlayer = null
-            attachedMusicPreparedUrl = null
-            if (prev != null) {
-                runCatching { if (prev.isPlaying) prev.stop() }
-                runCatching { prev.reset() }
-                runCatching { prev.release() }
-            }
-            return@LaunchedEffect
-        }
-        if (attachedMusicPreparedUrl == url && prev != null) return@LaunchedEffect
-        if (prev != null) {
-            runCatching { if (prev.isPlaying) prev.stop() }
-            runCatching { prev.reset() }
-            runCatching { prev.release() }
-        }
-        attachedMusicPreparedUrl = url
-        val mp = MediaPlayer()
-        attachedMusicPlayer = mp
-        runCatching {
-            mp.setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .build()
-            )
-            mp.setDataSource(url)
-            mp.isLooping = true
-            mp.setOnPreparedListener { readyMp ->
-                if (attachedMusicPlayer === readyMp && shouldPlayAttachedMusic) {
-                    runCatching { readyMp.start() }
-                }
-            }
-            mp.setOnErrorListener { _, _, _ -> true }
-            mp.prepareAsync()
-        }.onFailure {
-            runCatching { mp.release() }
-            if (attachedMusicPlayer === mp) attachedMusicPlayer = null
-        }
-    }
-
-    LaunchedEffect(shouldPlayAttachedMusic, attachedMusicPlayer) {
-        val mp = attachedMusicPlayer ?: return@LaunchedEffect
-        runCatching {
-            if (shouldPlayAttachedMusic) {
-                if (!mp.isPlaying) mp.start()
-            } else {
-                if (mp.isPlaying) mp.pause()
-            }
-        }
-    }
-
-    LaunchedEffect(videoUri, isPrepared, userAudioPlaying) {
-        while (isPrepared) {
-            val vv = videoViewRef
-            if (vv != null && hasStartedOnce) {
-                try {
-                    val dur = vv.duration.coerceAtLeast(1)
-                    val pos = vv.currentPosition.coerceIn(0, dur)
-                    durationMs = dur
-                    positionMs = pos
-                } catch (_: Exception) {
-                }
-            }
-            delay(100L)
-        }
-    }
-
-    DisposableEffect(videoUri) {
-        onDispose {
-            try {
-                videoViewRef?.stopPlayback()
-            } catch (_: Exception) {
-            }
-            mediaPlayerRef = null
-            val amp = attachedMusicPlayer
-            attachedMusicPlayer = null
-            if (amp != null) {
-                runCatching { if (amp.isPlaying) amp.stop() }
-                runCatching { amp.reset() }
-                runCatching { amp.release() }
-            }
-        }
-    }
-
-    fun toggleVideoPlaybackWithSound() {
-        val vv = videoViewRef
-        val mp = mediaPlayerRef
-        val vol = if (effectiveMuteOriginalVideo) 0f else 1f
-        if (!userAudioPlaying) {
-            userAudioPlaying = true
-            if (isPrepared && vv != null) {
-                hasStartedOnce = true
-                pendingStartWithSound = false
-                try {
-                    mp?.isLooping = true
-                    mp?.setVolume(vol, vol)
-                    if (!vv.isPlaying) {
-                        vv.start()
-                    }
-                } catch (_: Exception) {
-                }
-            } else {
-                pendingStartWithSound = true
-            }
-        } else {
-            userAudioPlaying = false
-            pendingStartWithSound = false
-            try {
-                if (vv != null && vv.isPlaying) {
-                    vv.pause()
-                }
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(GalleryDarkBg)
-    ) {
-        key(videoUri) {
-            AndroidView(
-                factory = { ctx ->
-                    FrameLayout(ctx).apply {
-                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        val vv = VideoView(ctx).apply {
-                            layoutParams = FrameLayout.LayoutParams(
-                                FrameLayout.LayoutParams.MATCH_PARENT,
-                                FrameLayout.LayoutParams.MATCH_PARENT,
-                                android.view.Gravity.CENTER
-                            )
-                            setVideoURI(videoUri)
-                            setOnPreparedListener { mp ->
-                                mediaPlayerRef = mp
-                                isPrepared = true
-                                durationMs = mp.duration.coerceAtLeast(1)
-                                mp.isLooping = true
-                                val vol = if (effectiveMuteOriginalVideo) 0f else 1f
-                                mp.setVolume(vol, vol)
-                                if (pendingStartWithSound || userAudioPlaying) {
-                                    hasStartedOnce = true
-                                    pendingStartWithSound = false
-                                    start()
-                                }
-                            }
-                            setOnErrorListener { _, _, _ -> true }
-                        }
-                        videoViewRef = vv
-                        addView(vv)
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        // Crisp initial frame while paused before user presses Play (avoids unstarted SurfaceView black frame)
-        val thumbBmp = previewInfo?.thumbnailBitmap
-        if (!hasStartedOnce && thumbBmp != null && !thumbBmp.isRecycled) {
-            val imgBmp = remember(thumbBmp) { thumbBmp.asImageBitmap() }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(GalleryDarkBg),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    bitmap = imgBmp,
-                    contentDescription = "Miniatura de video",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-        }
-
-        // Top & bottom gradient overlays
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(170.dp)
-                .align(Alignment.TopCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Black.copy(alpha = 0.62f), Color.Transparent)
-                    )
-                )
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(220.dp)
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))
-                    )
-                )
-        )
-
-        // Top controls + optional music pill
-        PreviewTopBar(
-            isPublishing = isPublishing,
-            selectedMusic = selectedMusic,
-            isVideoMode = true,
-            isMusicPlaying = userAudioPlaying,
-            onToggleMusicPlayback = ::toggleVideoPlaybackWithSound,
-            onOpenMusicPicker = onOpenMusicPicker,
-            onToggleMuteOriginalVideo = onToggleMuteOriginalVideo,
-            onRemoveMusic = onRemoveMusic,
-            onCloseClick = onCloseToGallery,
-            onPublishClick = onPublishClick,
-            modifier = Modifier.align(Alignment.TopCenter)
-        )
-
-        // Center Play / Pause circle (64dp, 38% black fill, white border)
-        Box(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .size(64.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.38f))
-                .border(1.5.dp, Color.White.copy(alpha = 0.90f), CircleShape)
-                .clickable { toggleVideoPlaybackWithSound() }
-                .testTag("status_video_preview_play_button"),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = if (userAudioPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = if (userAudioPlaying) "Pausar video" else "Reproducir con sonido",
-                tint = Color.White,
-                modifier = Modifier.size(34.dp)
-            )
-        }
-
-        // Bottom video progress bar + time labels + caption field
-        val totalSec = if (durationMs > 0) (durationMs / 1000).coerceAtLeast(1)
-        else (previewInfo?.durationSec ?: 0).coerceAtLeast(0)
-        val elapsedSec = if (durationMs > 0) (positionMs / 1000).coerceIn(0, totalSec) else 0
-        val progressFraction = if (durationMs > 0) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
-
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .imePadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 14.dp)
-        ) {
-            LinearProgressIndicator(
-                progress = { progressFraction },
-                color = Color.White,
-                trackColor = Color.White.copy(alpha = 0.28f),
-                strokeCap = StrokeCap.Round,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .testTag("status_video_preview_progress")
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = TimeFormatters.formatDuration(elapsedSec),
-                    fontFamily = InterFontFamily,
-                    fontSize = 11.sp,
-                    color = Color.White.copy(alpha = 0.90f)
-                )
-                Text(
-                    text = TimeFormatters.formatDuration(totalSec),
-                    fontFamily = InterFontFamily,
-                    fontSize = 11.sp,
-                    color = Color.White.copy(alpha = 0.90f)
-                )
-            }
-            Spacer(modifier = Modifier.height(14.dp))
-            PreviewCaptionBar(
-                caption = caption,
-                onCaptionChange = onCaptionChange,
-                inputTestTag = "status_video_caption_input",
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-    }
-}
-
-@Composable
-private fun PreviewTopBar(
-    isPublishing: Boolean,
-    selectedMusic: StatusMusicTrack?,
-    isVideoMode: Boolean,
-    isMusicPlaying: Boolean,
-    onToggleMusicPlayback: () -> Unit,
-    onOpenMusicPicker: () -> Unit,
-    onToggleMuteOriginalVideo: () -> Unit,
-    onRemoveMusic: () -> Unit,
-    onCloseClick: () -> Unit,
-    onPublishClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            IconButton(
-                onClick = onCloseClick,
-                modifier = Modifier
-                    .size(48.dp)
-                    .testTag("status_close_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = "Volver a la galería",
-                    tint = Color.White,
-                    modifier = Modifier.size(26.dp)
-                )
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                StatusMusicToolbarButton(
-                    hasSelectedMusic = selectedMusic != null,
-                    enabled = !isPublishing,
-                    onClick = onOpenMusicPicker
-                )
-
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = if (!isPublishing) Color.White else Color.White.copy(alpha = 0.35f),
-                    modifier = Modifier
-                        .defaultMinSize(minHeight = 44.dp)
-                        .clip(RoundedCornerShape(50))
-                        .clickable(enabled = !isPublishing) { onPublishClick() }
-                        .testTag("publish_status_button")
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-                    ) {
-                        Text(
-                            text = "Publicar",
-                            fontFamily = InterFontFamily,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (!isPublishing) GalleryDarkBg else Color.White.copy(alpha = 0.7f),
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-        }
-
-        if (selectedMusic != null) {
-            SelectedStatusMusicPill(
-                track = selectedMusic,
-                isVideoMode = isVideoMode,
-                isMusicPlaying = isMusicPlaying,
-                onTogglePlayback = onToggleMusicPlayback,
-                onChangeMusic = onOpenMusicPicker,
-                onToggleMuteOriginalVideo = onToggleMuteOriginalVideo,
-                onRemoveMusic = onRemoveMusic,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
-            )
-        }
-    }
-}
 
 @Composable
 private fun StatusMusicToolbarButton(
@@ -2366,54 +1918,6 @@ private fun SelectedStatusMusicPill(
     }
 }
 
-@Composable
-private fun PreviewCaptionBar(
-    caption: String,
-    onCaptionChange: (String) -> Unit,
-    inputTestTag: String,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        shape = RoundedCornerShape(22.dp),
-        color = Color.Black.copy(alpha = 0.45f),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 44.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 11.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            if (caption.isEmpty()) {
-                Text(
-                    text = "Añade un texto…",
-                    fontFamily = InterFontFamily,
-                    fontSize = 15.sp,
-                    color = Color.White.copy(alpha = 0.68f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            BasicTextField(
-                value = caption,
-                onValueChange = { if (it.length <= MAX_MEDIA_CAPTION_CHARS) onCaptionChange(it) },
-                maxLines = 3,
-                textStyle = TextStyle(
-                    fontFamily = InterFontFamily,
-                    fontSize = 15.sp,
-                    color = Color.White
-                ),
-                cursorBrush = SolidColor(Color.White),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(inputTestTag)
-            )
-        }
-    }
-}
 
 @Composable
 private fun StatusComposerModePill(
@@ -2477,6 +1981,7 @@ private fun StatusComposerModePill(
 
 @Composable
 private fun StatusDiscardDialog(
+    title: String = "¿Descartar este estado?",
     subtitle: String,
     onKeepEditing: () -> Unit,
     onDiscard: () -> Unit
@@ -2510,7 +2015,7 @@ private fun StatusDiscardDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "¿Descartar este estado?",
+                    text = title,
                     fontFamily = InterFontFamily,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold,
