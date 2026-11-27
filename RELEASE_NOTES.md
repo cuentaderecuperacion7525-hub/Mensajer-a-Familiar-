@@ -1,5 +1,8 @@
 # Novedades de FamiChat
 
+## 2.8.65
+- Ajuste visual en la barra inferior de publicar estado: el campo «Añade un comentario…» ahora es una píldora compacta de una sola línea (`46 dp`) con márgenes más estilizados.
+
 ## 2.8.64
 - Mejora de contraste y visibilidad en la pantalla de editar estado: los botones circulares flotantes (cerrar, Texto, Sticker, Música y Dibujo) ahora cuentan con fondo oscuro translúcido, borde definido y etiquetas en píldora oscura con sombra para distinguirse claramente incluso sobre fotos o fondos muy claros.
 

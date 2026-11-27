@@ -1170,20 +1170,21 @@ fun StatusMediaStudioScreen(
                         }
                     }
 
-                    // ROW 1 (sobre fondo negro): Pill 56.dp, #151B21, sin borde
+                    // ROW 1 (sobre fondo negro): Pill compacta de 46.dp en una sola línea, #151B21, sin borde
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(Color.Black)
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .padding(horizontal = 14.dp, vertical = 5.dp)
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 56.dp)
-                                .clip(RoundedCornerShape(28.dp))
+                                .height(46.dp)
+                                .clip(RoundedCornerShape(23.dp))
                                 .background(StudioRow1PillBg)
-                                .padding(horizontal = 6.dp, vertical = 6.dp)
+                                .padding(horizontal = 4.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1201,22 +1202,22 @@ fun StatusMediaStudioScreen(
                                         imageVector = Icons.Outlined.AddPhotoAlternate,
                                         contentDescription = "Agregar foto o video",
                                         tint = Color.White.copy(alpha = 0.88f),
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier.size(21.dp)
                                     )
                                 }
 
-                                // Center: Editable comment up to 3 lines ("Añade un comentario…")
+                                // Center: Compact single-line comment input ("Añade un comentario…")
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                                        .padding(horizontal = 6.dp),
                                     contentAlignment = Alignment.CenterStart
                                 ) {
                                     if (activeDraft.caption.isEmpty()) {
                                         Text(
                                             text = "Añade un comentario…",
                                             fontFamily = InterFontFamily,
-                                            fontSize = 15.sp,
+                                            fontSize = 14.5.sp,
                                             color = Color.White.copy(alpha = 0.56f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -1225,13 +1226,15 @@ fun StatusMediaStudioScreen(
                                     BasicTextField(
                                         value = activeDraft.caption,
                                         onValueChange = { next ->
-                                            val clipped = next.take(MAX_STUDIO_COMMENT_CHARS)
+                                            val singleLineText = next.replace('\n', ' ')
+                                            val clipped = singleLineText.take(MAX_STUDIO_COMMENT_CHARS)
                                             onUpdateActiveDraft { it.copy(caption = clipped) }
                                         },
-                                        maxLines = 3,
+                                        singleLine = true,
+                                        maxLines = 1,
                                         textStyle = TextStyle(
                                             fontFamily = InterFontFamily,
-                                            fontSize = 15.sp,
+                                            fontSize = 14.5.sp,
                                             color = Color.White
                                         ),
                                         cursorBrush = SolidColor(StudioSendBlue),
@@ -1258,7 +1261,7 @@ fun StatusMediaStudioScreen(
                                         imageVector = Icons.Filled.AlternateEmail,
                                         contentDescription = "Mencionar familiar",
                                         tint = if (showMentionList) StudioSendBlue else Color.White.copy(alpha = 0.88f),
-                                        modifier = Modifier.size(21.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }
@@ -1271,7 +1274,7 @@ fun StatusMediaStudioScreen(
                             .fillMaxWidth()
                             .background(StudioRow2Bg)
                             .navigationBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
