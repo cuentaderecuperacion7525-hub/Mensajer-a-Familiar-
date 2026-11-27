@@ -1,5 +1,9 @@
 # Novedades de FamiChat
 
+## 2.8.63
+- Ajuste visual en la pantalla de publicar estado: el botón azul de envío ahora tiene un tamaño más equilibrado (`48 dp`) alineado con el selector de audiencia inferior.
+- Corrección en el buscador de música para estados: al buscar una canción o cambiar de categoría después de bajar en la lista, los resultados regresan automáticamente al inicio de la lista.
+
 ## 2.8.62
 - Nuevo estudio creativo a pantalla completa para estados con foto o video:
   - Barra lateral derecha con acceso rápido a Texto (4 estilos, alineación, 8 colores y fondo), Stickers (Emojis por categorías con buscador + hora, fecha y etiqueta "Familia"), Música en línea con recortador de hasta 30 segundos y Dibujo libre (8 colores, 3 grosores, deshacer, rehacer, borrador y limpiar).

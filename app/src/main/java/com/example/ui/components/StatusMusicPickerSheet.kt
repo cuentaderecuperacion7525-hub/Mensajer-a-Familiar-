@@ -246,14 +246,25 @@ fun StatusMusicPickerSheet(
         }
     }
 
+    var lastScrollResetKey by remember { mutableStateOf("") }
+
+    LaunchedEffect(favoriteTracks, activeCategory, searchQuery) {
+        if (activeCategory == MusicBrowseCategory.FAVORITES && searchQuery.trim().isEmpty()) {
+            tracks = favoriteTracks
+            isLoading = false
+            loadError = null
+        }
+    }
+
     // Load online catalog or local favorites
-    LaunchedEffect(searchQuery, activeCategory, retryNonce, favoriteTracks) {
+    LaunchedEffect(searchQuery, activeCategory, retryNonce) {
         val trimmed = searchQuery.trim()
         if (activeCategory == MusicBrowseCategory.FAVORITES && trimmed.isEmpty()) {
             skipNextDebounce = false
             tracks = favoriteTracks
             isLoading = false
             loadError = null
+            lastScrollResetKey = "fav|$retryNonce"
             return@LaunchedEffect
         }
 
@@ -269,11 +280,18 @@ fun StatusMusicPickerSheet(
             tracks = list
             isLoading = false
             loadError = if (list.isEmpty()) "No encontramos canciones para \"$queryToRun\"." else null
+            lastScrollResetKey = "$queryToRun|${activeCategory.name}|$retryNonce"
         }.onFailure { err ->
             isLoading = false
             tracks = emptyList()
             loadError = err.localizedMessage?.takeIf { it.isNotBlank() }
                 ?: "No se pudo cargar música de internet. Revisa tu conexión."
+        }
+    }
+
+    LaunchedEffect(lastScrollResetKey, isLoading) {
+        if (lastScrollResetKey.isNotEmpty() && !isLoading) {
+            runCatching { resultsListState.scrollToItem(0) }
         }
     }
 

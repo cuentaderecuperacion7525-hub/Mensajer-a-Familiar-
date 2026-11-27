@@ -4062,6 +4062,57 @@ class ExampleRobolectricTest {
     assertTrue(com.example.util.StatusEditorCodec.isStatusVisibleToMember(restrictedStatus, "m_papa"))
     assertFalse(com.example.util.StatusEditorCodec.isStatusVisibleToMember(restrictedStatus, "m_hijo"))
   }
+
+  @Test
+  @Config(qualifiers = "w411dp-h891dp")
+  fun `status music picker resets scroll to top after scrolling down and performing a search`() {
+    val initialTracks = (1..20).map { idx ->
+      com.example.util.StatusMusicTrack(
+        trackId = "init_$idx",
+        title = "Cancion Inicial $idx",
+        artist = "Artista $idx",
+        previewUrl = "https://example.com/init_$idx.m4a"
+      )
+    }
+    val searchedTracks = (1..20).map { idx ->
+      com.example.util.StatusMusicTrack(
+        trackId = "found_$idx",
+        title = "Resultado Buscado $idx",
+        artist = "Band $idx",
+        previewUrl = "https://example.com/found_$idx.m4a"
+      )
+    }
+
+    composeTestRule.setContent {
+      com.example.ui.theme.FamiChatTheme(darkTheme = true) {
+        com.example.ui.components.StatusMusicPickerSheet(
+          selectedTrack = null,
+          favoriteTracks = emptyList(),
+          onToggleFavorite = {},
+          onSelectTrack = {},
+          onDismiss = {},
+          searchCatalog = { q ->
+            if (q.equals("amor", ignoreCase = true)) Result.success(searchedTracks)
+            else Result.success(initialTracks)
+          }
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Scroll down to bottom item
+    composeTestRule.onNodeWithTag("status_music_results_list").performScrollToIndex(16)
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("Cancion Inicial 20").assertIsDisplayed()
+
+    // Now search for "amor" and submit search -> scroll must return to item 1 (Resultado Buscado 1)
+    composeTestRule.onNodeWithTag("status_music_search_input").performClick()
+    composeTestRule.onNodeWithTag("status_music_search_input").performTextInput("amor")
+    composeTestRule.onNodeWithTag("status_music_search_button").performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithText("Resultado Buscado 1").assertIsDisplayed()
+  }
 }
 
 

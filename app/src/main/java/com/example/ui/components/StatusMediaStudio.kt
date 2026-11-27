@@ -1311,10 +1311,10 @@ fun StatusMediaStudioScreen(
                             }
                         }
 
-                        // Right: 58.dp blue circle (#2F7FE0) with white paper plane ("Publicar")
+                        // Right: 48.dp blue circle (#2F7FE0) with white paper plane ("Publicar")
                         Box(
                             modifier = Modifier
-                                .size(58.dp)
+                                .size(48.dp)
                                 .clip(CircleShape)
                                 .background(
                                     if (isPublishing) StudioSendBlue.copy(alpha = 0.65f) else StudioSendBlue
@@ -1331,15 +1331,15 @@ fun StatusMediaStudioScreen(
                             if (isPublishing) {
                                 CircularProgressIndicator(
                                     color = Color.White,
-                                    strokeWidth = 2.6.dp,
-                                    modifier = Modifier.size(24.dp)
+                                    strokeWidth = 2.4.dp,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             } else {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.Send,
                                     contentDescription = "Publicar",
                                     tint = Color.White,
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(21.dp)
                                 )
                             }
                         }
