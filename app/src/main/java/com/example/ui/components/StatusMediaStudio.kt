@@ -106,6 +106,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
@@ -165,8 +166,9 @@ private enum class ActiveStudioTool {
 private val StudioRow1PillBg = Color(0xFF151B21)
 private val StudioRow2Bg = Color(0xFF0F151B)
 private val StudioSendBlue = Color(0xFF2F7FE0)
-private val StudioCircleBg = Color.White.copy(alpha = 0.14f)
-private val StudioCircleBorder = Color.White.copy(alpha = 0.20f)
+private val StudioCircleBg = Color.Black.copy(alpha = 0.56f)
+private val StudioCircleBorder = Color.White.copy(alpha = 0.28f)
+private val StudioToolbarPillBg = Color.White.copy(alpha = 0.14f)
 private const val MAX_STUDIO_COMMENT_CHARS = 200
 
 @Composable
@@ -1522,6 +1524,7 @@ private fun StudioRightToolButton(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
+            .widthIn(min = 48.dp)
             .clickable { onClick() }
             .semantics { contentDescription = label }
             .testTag(testTag)
@@ -1545,14 +1548,29 @@ private fun StudioRightToolButton(
                 modifier = Modifier.size(21.dp)
             )
         }
-        Text(
-            text = label,
-            fontFamily = InterFontFamily,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium,
-            color = Color.White,
-            maxLines = 1
-        )
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(Color.Black.copy(alpha = 0.56f))
+                .padding(horizontal = 6.dp, vertical = 1.5.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label,
+                fontFamily = InterFontFamily,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                style = TextStyle(
+                    shadow = Shadow(
+                        color = Color.Black.copy(alpha = 0.85f),
+                        offset = Offset(0f, 1f),
+                        blurRadius = 4f
+                    )
+                ),
+                maxLines = 1
+            )
+        }
     }
 }
 
@@ -1973,7 +1991,7 @@ private fun DrawToolControlsOverlay(
                         val active = thicknessIdx == idx && !isEraser
                         Surface(
                             shape = RoundedCornerShape(50),
-                            color = if (active) StudioSendBlue else StudioCircleBg,
+                            color = if (active) StudioSendBlue else StudioToolbarPillBg,
                             modifier = Modifier
                                 .defaultMinSize(minHeight = 44.dp)
                                 .clip(RoundedCornerShape(50))
@@ -2064,7 +2082,7 @@ private fun ToolPillAction(
 ) {
     Surface(
         shape = RoundedCornerShape(50),
-        color = if (isActive) StudioSendBlue else StudioCircleBg,
+        color = if (isActive) StudioSendBlue else StudioToolbarPillBg,
         modifier = Modifier
             .defaultMinSize(minHeight = 44.dp)
             .alpha(if (enabled) 1f else 0.45f)

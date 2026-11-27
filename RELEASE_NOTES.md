@@ -1,5 +1,8 @@
 # Novedades de FamiChat
 
+## 2.8.64
+- Mejora de contraste y visibilidad en la pantalla de editar estado: los botones circulares flotantes (cerrar, Texto, Sticker, Música y Dibujo) ahora cuentan con fondo oscuro translúcido, borde definido y etiquetas en píldora oscura con sombra para distinguirse claramente incluso sobre fotos o fondos muy claros.
+
 ## 2.8.63
 - Ajuste visual en la pantalla de publicar estado: el botón azul de envío ahora tiene un tamaño más equilibrado (`48 dp`) alineado con el selector de audiencia inferior.
 - Corrección en el buscador de música para estados: al buscar una canción o cambiar de categoría después de bajar en la lista, los resultados regresan automáticamente al inicio de la lista.
