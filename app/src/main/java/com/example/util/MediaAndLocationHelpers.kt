@@ -676,6 +676,10 @@ data class VideoPreviewInfo(
 
 object VideoMediaHelper {
     const val MAX_VIDEO_BYTES = 5 * 1024 * 1024 // Up to 5 MB for short chat/status videos
+    const val MAX_STATUS_VIDEO_DURATION_SEC = 30
+
+    fun isStatusVideoDurationAllowed(durationSec: Int): Boolean =
+        durationSec in 0..MAX_STATUS_VIDEO_DURATION_SEC
 
     fun getCachedVideoFile(context: Context, messageId: String, fileName: String?): File {
         val cleanName = (fileName ?: "video_$messageId.mp4")
@@ -763,7 +767,11 @@ object VideoMediaHelper {
         VideoPreviewInfo(thumbnailBitmap = thumb, durationSec = durationSec, sizeBytes = sizeBytes)
     }
 
-    suspend fun readAndEncodeVideo(context: Context, uri: Uri): Result<EncodedVideoPayload> =
+    suspend fun readAndEncodeVideo(
+        context: Context,
+        uri: Uri,
+        maxDurationSec: Int? = null
+    ): Result<EncodedVideoPayload> =
         withContext(Dispatchers.IO) {
             try {
                 val resolver = context.contentResolver
@@ -846,6 +854,12 @@ object VideoMediaHelper {
                         retriever.release()
                     } catch (_: Exception) {
                     }
+                }
+
+                if (maxDurationSec != null && durationSec > maxDurationSec) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("El video supera el límite de $maxDurationSec segundos. Elige uno más corto.")
+                    )
                 }
 
                 val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)

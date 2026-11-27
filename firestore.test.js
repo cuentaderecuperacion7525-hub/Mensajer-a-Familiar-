@@ -651,6 +651,48 @@ test("Messages support VIDEO type, chunkCount, playedByMemberIds, and media_chun
       updatedAt: serverTs(),
     })
   );
+
+  // Exactly 30 seconds is allowed for a new video status
+  await assertSucceeds(
+    aliceDb.collection("families").doc("fam_1").collection("statuses").doc("st_vid_30s").set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      memberId: "member_papa",
+      text: "Límite exacto",
+      mediaData: "chunked:video/mp4",
+      mediaType: "VIDEO",
+      videoThumbnailData: "data:image/jpeg;base64,/9j/4AAQ=",
+      videoDurationSec: 30,
+      chunkCount: 2,
+      backgroundHex: "#0B141A",
+      timestamp: now,
+      expiresAt: now + 86400000,
+      viewedByMemberIds: ["member_papa"],
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
+
+  // Over 30 seconds (31s) must be rejected on create
+  await assertFails(
+    aliceDb.collection("families").doc("fam_1").collection("statuses").doc("st_vid_31s").set({
+      memberUids: [ALICE_UID],
+      authorUid: ALICE_UID,
+      memberId: "member_papa",
+      text: "Demasiado largo",
+      mediaData: "chunked:video/mp4",
+      mediaType: "VIDEO",
+      videoThumbnailData: "data:image/jpeg;base64,/9j/4AAQ=",
+      videoDurationSec: 31,
+      chunkCount: 2,
+      backgroundHex: "#0B141A",
+      timestamp: now,
+      expiresAt: now + 86400000,
+      viewedByMemberIds: ["member_papa"],
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    })
+  );
 });
 
 test("Member presence supports showLastSeen privacy toggle and server-stamped lastActiveAt while rejecting invalid values", async () => {

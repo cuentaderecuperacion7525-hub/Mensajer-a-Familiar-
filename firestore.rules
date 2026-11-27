@@ -555,6 +555,7 @@ service cloud.firestore {
                          request.auth.uid in incoming().memberUids &&
                          incoming().keys().hasAll(['memberUids', 'authorUid', 'memberId', 'text', 'backgroundHex', 'timestamp', 'expiresAt', 'createdAt', 'updatedAt']) &&
                          incoming().keys().hasOnly(['memberUids', 'authorUid', 'memberId', 'text', 'mediaData', 'mediaType', 'videoThumbnailData', 'videoDurationSec', 'chunkCount', 'backgroundHex', 'timestamp', 'expiresAt', 'viewedByMemberIds', 'createdAt', 'updatedAt']) &&
+                         (!('videoDurationSec' in incoming()) || incoming().videoDurationSec == null || incoming().videoDurationSec <= 30) &&
                          isValidFamilyStatus(incoming()) &&
                          isFamilyMemberByDoc(familyId);
         allow update: if isSignedIn() &&

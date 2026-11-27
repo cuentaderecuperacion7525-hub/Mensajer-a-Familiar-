@@ -148,8 +148,19 @@ private data class LocalGalleryMediaItem(
     val durationSec: Int = 0,
     val sizeBytes: Long = 0L,
     val isOverLimit: Boolean = false,
+    val isOverDurationLimit: Boolean = false,
     val bucketName: String = "Recientes"
 )
+
+private class CaptureStatusVideoContract(
+    private val maxDurationSec: Int = VideoMediaHelper.MAX_STATUS_VIDEO_DURATION_SEC
+) : ActivityResultContracts.CaptureVideo() {
+    override fun createIntent(context: Context, input: Uri): Intent {
+        return super.createIntent(context, input).apply {
+            putExtra(MediaStore.EXTRA_DURATION_LIMIT, maxDurationSec)
+        }
+    }
+}
 
 private fun isPermissionGranted(context: Context, permission: String): Boolean =
     ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
@@ -416,6 +427,10 @@ fun StatusComposerScreen(
         coroutineScope.launch {
             val info = VideoMediaHelper.extractVideoPreview(context, uri)
             val effectiveSize = if (info.sizeBytes > 0L) info.sizeBytes else knownSizeBytes
+            if (!VideoMediaHelper.isStatusVideoDurationAllowed(info.durationSec)) {
+                inlineWarningMsg = "El video supera el límite de 30 segundos. Elige uno más corto."
+                return@launch
+            }
             if (effectiveSize > VideoMediaHelper.MAX_VIDEO_BYTES) {
                 inlineWarningMsg = "El video supera el límite de 5 MB. Elige uno más corto."
                 return@launch
@@ -425,7 +440,8 @@ fun StatusComposerScreen(
                 dateAddedSec = System.currentTimeMillis() / 1000L,
                 durationSec = info.durationSec,
                 sizeBytes = effectiveSize,
-                isOverLimit = false
+                isOverLimit = false,
+                isOverDurationLimit = false
             )
             sessionVideoItems = (listOf(entry) + sessionVideoItems.filterNot { it.uri == uri })
             val fromTextStudio = mediaDrafts.isEmpty() && append
@@ -490,7 +506,7 @@ fun StatusComposerScreen(
     )
 
     val captureVideoLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CaptureVideo(),
+        contract = CaptureStatusVideoContract(),
         onResult = { success ->
             val shouldAppend = appendMediaOnReturn
             appendMediaOnReturn = false
@@ -823,10 +839,16 @@ fun StatusComposerScreen(
                     },
                     onItemClick = { item ->
                         if (isVideoGallery) {
-                            if (item.isOverLimit) {
-                                inlineWarningMsg = "El video supera el límite de 5 MB y no se puede elegir."
-                            } else {
-                                selectVideoUriWithCheck(item.uri, item.sizeBytes, append = false)
+                            when {
+                                item.isOverDurationLimit -> {
+                                    inlineWarningMsg = "El video supera el límite de 30 segundos. Elige uno más corto."
+                                }
+                                item.isOverLimit -> {
+                                    inlineWarningMsg = "El video supera el límite de 5 MB y no se puede elegir."
+                                }
+                                else -> {
+                                    selectVideoUriWithCheck(item.uri, item.sizeBytes, append = false)
+                                }
                             }
                         } else {
                             addOrOpenPhotoDraft(item.uri, append = false)
@@ -1402,7 +1424,7 @@ private fun GalleryRealMediaTile(
             if (item.durationSec > 0) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = Color.Black.copy(alpha = 0.72f),
+                    color = if (item.isOverDurationLimit) Color(0xFFB71C1C).copy(alpha = 0.88f) else Color.Black.copy(alpha = 0.72f),
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(6.dp)
@@ -1710,13 +1732,16 @@ private suspend fun loadAppAccessibleVideos(context: Context): List<LocalGallery
                     val size = if (sizeCol >= 0) cursor.getLong(sizeCol) else 0L
                     val durSec = if (durMs > 0L) (durMs / 1000L).toInt().coerceAtLeast(1) else 0
                     if (seen.add(uri.toString())) {
+                        val overSize = size > VideoMediaHelper.MAX_VIDEO_BYTES
+                        val overDuration = !VideoMediaHelper.isStatusVideoDurationAllowed(durSec)
                         result.add(
                             LocalGalleryMediaItem(
                                 uri = uri,
                                 dateAddedSec = effectiveDate,
                                 durationSec = durSec,
                                 sizeBytes = size,
-                                isOverLimit = size > VideoMediaHelper.MAX_VIDEO_BYTES
+                                isOverLimit = overSize || overDuration,
+                                isOverDurationLimit = overDuration
                             )
                         )
                     }
@@ -1736,13 +1761,16 @@ private suspend fun loadAppAccessibleVideos(context: Context): List<LocalGallery
                         val uri = Uri.fromFile(file)
                         if (seen.add(uri.toString())) {
                             val durSec = extractVideoDurationSec(context, uri)
+                            val overSize = file.length() > VideoMediaHelper.MAX_VIDEO_BYTES
+                            val overDuration = !VideoMediaHelper.isStatusVideoDurationAllowed(durSec)
                             result.add(
                                 LocalGalleryMediaItem(
                                     uri = uri,
                                     dateAddedSec = file.lastModified() / 1000L,
                                     durationSec = durSec,
                                     sizeBytes = file.length(),
-                                    isOverLimit = file.length() > VideoMediaHelper.MAX_VIDEO_BYTES
+                                    isOverLimit = overSize || overDuration,
+                                    isOverDurationLimit = overDuration
                                 )
                             )
                         }

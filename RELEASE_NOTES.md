@@ -1,5 +1,10 @@
 # Novedades de FamiChat
 
+## 2.8.69
+- Límite máximo estricto de 30 segundos en todos los estados (Texto, Foto y Video):
+  - Los estados de video ahora tienen un límite máximo de 30 segundos tanto al elegir de la galería o grabar desde la cámara como al publicar y reproducir.
+  - Los estados de texto y foto mantienen un máximo de 30 segundos incluso con música seleccionada (y 6 segundos sin música).
+
 ## 2.8.68
 - Mejoras de estabilidad y precisión al publicar y ver estados:
   - Los estados de Texto creados solo con capas de texto, stickers o dibujo libre (sin comentario inferior) ahora se publican correctamente sin errores de permiso.

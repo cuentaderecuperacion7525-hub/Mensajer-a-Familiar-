@@ -359,12 +359,21 @@ fun FamilyStatusStrip(
     }
 }
 
+internal const val MAX_STATUS_DISPLAY_DURATION_MS = 30_000L
+
 internal fun resolveStatusDisplayDurationMs(
     isVideo: Boolean,
     attachedMusic: com.example.util.StatusMusicTrack?
 ): Long {
     if (isVideo || attachedMusic == null) return 6000L
     return attachedMusic.trimDurationSec.coerceIn(6, 30) * 1000L
+}
+
+internal fun resolveVideoPlaybackProgress(positionMs: Int, durationMs: Int): Float {
+    val effectiveDurationMs = durationMs
+        .coerceAtLeast(1)
+        .coerceAtMost(MAX_STATUS_DISPLAY_DURATION_MS.toInt())
+    return (positionMs.coerceAtLeast(0).toFloat() / effectiveDurationMs.toFloat()).coerceIn(0f, 1f)
 }
 
 @Composable
@@ -382,7 +391,7 @@ private fun StatusSegmentedProgressRow(
 
     LaunchedEffect(currentStatusId, isVideo, isPaused, displayDurationMs) {
         if (isVideo || isPaused) return@LaunchedEffect
-        val totalMs = displayDurationMs.coerceIn(3000L, 35000L)
+        val totalMs = displayDurationMs.coerceIn(3000L, MAX_STATUS_DISPLAY_DURATION_MS)
         val stepMs = 50L
         val steps = (totalMs / stepMs).toInt()
         val startStep = (timerProgress * steps).toInt()
@@ -623,7 +632,21 @@ fun StatusViewerDialog(
         }
     }
 
-    // Track video progress smoothly without recomposing photo statuses
+    fun advanceNextOrDismiss() {
+        if (safeIdx < items.lastIndex) {
+            currentIndex = safeIdx + 1
+        } else {
+            onDismiss()
+        }
+    }
+
+    fun goPrevious() {
+        if (safeIdx > 0) {
+            currentIndex = safeIdx - 1
+        }
+    }
+
+    // Track video progress smoothly (strictly capped at 30 seconds) without recomposing photo statuses
     LaunchedEffect(currentStatus.id, readyVideoFile, isVideoPlaying, isOverlayPaused) {
         if (!currentStatus.isVideo || readyVideoFile == null) return@LaunchedEffect
         val vv = videoViewRef
@@ -645,27 +668,17 @@ fun StatusViewerDialog(
                 try {
                     val dur = activeVv.duration.coerceAtLeast(1)
                     val pos = activeVv.currentPosition.coerceAtLeast(0)
-                    if (dur > 0) {
-                        videoProgress = (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+                    if (pos >= MAX_STATUS_DISPLAY_DURATION_MS) {
+                        videoProgress = 1f
+                        runCatching { if (activeVv.isPlaying) activeVv.pause() }
+                        advanceNextOrDismiss()
+                        break
                     }
+                    videoProgress = resolveVideoPlaybackProgress(pos, dur)
                 } catch (_: Exception) {
                 }
             }
             delay(80L)
-        }
-    }
-
-    fun advanceNextOrDismiss() {
-        if (safeIdx < items.lastIndex) {
-            currentIndex = safeIdx + 1
-        } else {
-            onDismiss()
-        }
-    }
-
-    fun goPrevious() {
-        if (safeIdx > 0) {
-            currentIndex = safeIdx - 1
         }
     }
 

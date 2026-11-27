@@ -673,6 +673,17 @@ class ExampleUnitTest {
     assertEquals(6_000L, com.example.ui.components.resolveStatusDisplayDurationMs(isVideo = false, attachedMusic = trackShort))
     assertEquals(6_000L, com.example.ui.components.resolveStatusDisplayDurationMs(isVideo = false, attachedMusic = null))
     assertEquals(6_000L, com.example.ui.components.resolveStatusDisplayDurationMs(isVideo = true, attachedMusic = track22s))
+    val overTrimTrack = track22s.copy(trimDurationSec = 45)
+    assertEquals(30_000L, com.example.ui.components.resolveStatusDisplayDurationMs(isVideo = false, attachedMusic = overTrimTrack))
+  }
+
+  @Test
+  fun `status video duration and viewer playback strictly enforce 30 second cap`() {
+    assertTrue(com.example.util.VideoMediaHelper.isStatusVideoDurationAllowed(1))
+    assertTrue(com.example.util.VideoMediaHelper.isStatusVideoDurationAllowed(30))
+    assertFalse(com.example.util.VideoMediaHelper.isStatusVideoDurationAllowed(31))
+    assertEquals(1.0f, com.example.ui.components.resolveVideoPlaybackProgress(positionMs = 30_000, durationMs = 45_000), 0.001f)
+    assertEquals(0.5f, com.example.ui.components.resolveVideoPlaybackProgress(positionMs = 15_000, durationMs = 45_000), 0.001f)
   }
 }
 

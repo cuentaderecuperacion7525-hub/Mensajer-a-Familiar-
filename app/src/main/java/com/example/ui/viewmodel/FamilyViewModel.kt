@@ -4196,7 +4196,11 @@ class FamilyViewModel(
                     }
                     _statusPublishState.value = StatusPublishUiState.Publishing(StatusComposerMode.VIDEO, 0.06f)
                     _mediaTransferProgress.value = _mediaTransferProgress.value + (statusId to 0.06f)
-                    val encodedRes = VideoMediaHelper.readAndEncodeVideo(appContext, pickedUri)
+                    val encodedRes = VideoMediaHelper.readAndEncodeVideo(
+                        context = appContext,
+                        uri = pickedUri,
+                        maxDurationSec = VideoMediaHelper.MAX_STATUS_VIDEO_DURATION_SEC
+                    )
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     val payload = encodedRes.getOrElse { err ->
                         _mediaTransferProgress.value = _mediaTransferProgress.value - statusId
